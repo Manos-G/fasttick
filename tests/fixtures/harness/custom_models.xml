@@ -1,0 +1,37 @@
+<root BTCPP_format="4">
+    <TreeNodesModel>
+        <Action ID="AnnotatedAction">
+            <input_port name="weight" type="double" default="1.500000">A double port with a default value</input_port>
+            <MetadataFields>
+                <Metadata description="Action that carries metadata for the model tests"/>
+                <Metadata category="fasttick-test"/>
+            </MetadataFields>
+        </Action>
+        <Condition ID="CheckFlag">
+            <input_port name="flag" type="bool">Blackboard entry to check, for example {door_open}</input_port>
+        </Condition>
+        <Action ID="IncrementCounter">
+            <input_port name="step" type="int" default="1">Amount to add on each tick</input_port>
+            <inout_port name="counter" type="int">Value to increment. The node writes the new value back</inout_port>
+        </Action>
+        <Action ID="ReadPose">
+            <output_port name="distance" type="double">Distance of the pose from the origin</output_port>
+            <input_port name="pose" type="Pose2D">Pose to read. Text form: "x;y;theta"</input_port>
+        </Action>
+        <Action ID="SayMessage">
+            <input_port name="message" type="std::string" default="hello">Text that the node reads on each tick</input_port>
+        </Action>
+        <Action ID="WaitTicks">
+            <input_port name="ticks" type="int" default="3">Number of ticks in RUNNING before the node returns SUCCESS</input_port>
+        </Action>
+        <Action ID="WriteValues">
+            <output_port name="pose" type="Pose2D">A Pose2D struct (JSON object)</output_port>
+            <output_port name="vector_value" type="std::vector&lt;int, std::allocator&lt;int&gt; &gt;">A vector of integers</output_port>
+            <output_port name="string_value" type="std::string">A text</output_port>
+            <output_port name="poses" type="std::vector&lt;Pose2D, std::allocator&lt;Pose2D&gt; &gt;">A vector of Pose2D (JSON array)</output_port>
+            <output_port name="double_value" type="double">A floating-point number</output_port>
+            <output_port name="int_value" type="int">An integer (42 plus the tick count)</output_port>
+        </Action>
+    </TreeNodesModel>
+</root>
+

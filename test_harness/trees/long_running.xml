@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  FastTick test tree (MIT) for live tests. The root stays RUNNING until the
+  executor stops (use duration-ms or a signal). Each cycle runs a sync
+  action, a condition, an async action that stays RUNNING for some ticks,
+  a SubTree and blackboard writes, so that breakpoints have nodes to stop at.
+-->
+<root BTCPP_format="4" main_tree_to_execute="LongRunning">
+
+  <BehaviorTree ID="LongRunning">
+    <Sequence name="long_sequence">
+      <Script name="setup" code="keep_going:=true; cycles:=0"/>
+      <KeepRunningUntilFailure name="forever">
+        <Sequence name="cycle">
+          <CheckFlag name="check_keep_going" flag="{keep_going}"/>
+          <SayMessage name="say_cycle" message="cycle"/>
+          <WriteValues name="write_cycle_values"
+                       int_value="{an_int}"
+                       double_value="{a_double}"
+                       string_value="{a_string}"
+                       vector_value="{a_vector}"
+                       pose="{a_pose}"
+                       poses="{pose_list}"/>
+          <WaitTicks name="slow_action" ticks="5"/>
+          <IncrementCounter name="count_cycle" counter="{cycles}"/>
+          <SubTree ID="Worker" name="worker" pose="{a_pose}" _autoremap="false"/>
+        </Sequence>
+      </KeepRunningUntilFailure>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="Worker">
+    <Sequence name="worker_sequence">
+      <ReadPose name="read_worker_pose" pose="{pose}" distance="{distance}"/>
+      <WaitTicks name="worker_wait" ticks="2"/>
+    </Sequence>
+  </BehaviorTree>
+
+  <TreeNodesModel>
+    <SubTree ID="Worker">
+      <input_port name="pose" type="Pose2D">Pose for the worker</input_port>
+    </SubTree>
+  </TreeNodesModel>
+
+</root>

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- FastTick test tree (MIT). include_main.xml includes this file. -->
+<root BTCPP_format="4">
+
+  <BehaviorTree ID="IncludedTree">
+    <Sequence name="included_sequence">
+      <Fallback name="say_something">
+        <SayMessage name="say_included" message="{text}"/>
+        <SayMessage name="say_no_text" message="no text given"/>
+      </Fallback>
+      <Repeat num_cycles="2">
+        <IncrementCounter name="count_included" counter="{count}"/>
+      </Repeat>
+      <WaitTicks name="wait_included" ticks="1"/>
+    </Sequence>
+  </BehaviorTree>
+
+  <TreeNodesModel>
+    <SubTree ID="IncludedTree">
+      <input_port name="text" default="no text">Text for SayMessage</input_port>
+      <inout_port name="count">Counter that the tree increments two times</inout_port>
+    </SubTree>
+  </TreeNodesModel>
+
+</root>

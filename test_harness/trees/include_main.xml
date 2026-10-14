@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  FastTick test tree (MIT). The main tree uses a tree from another file.
+  BT.CPP resolves the relative include path from the directory of this file.
+-->
+<root BTCPP_format="4" main_tree_to_execute="IncludeMain">
+
+  <include path="included/sub.xml"/>
+
+  <BehaviorTree ID="IncludeMain">
+    <Sequence name="include_sequence">
+      <Script code="greeting:='from include_main'; repeat_count:=0"/>
+      <SubTree ID="IncludedTree" name="included" text="{greeting}" count="{repeat_count}"/>
+      <ScriptCondition code="repeat_count == 2"/>
+      <SubTree ID="IncludedTree" name="included_again" text="constant text" count="{repeat_count}"/>
+      <ScriptCondition code="repeat_count == 4"/>
+    </Sequence>
+  </BehaviorTree>
+
+</root>

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  FastTick test tree (MIT). It uses the custom nodes of the FastTick test
+  executor and covers: control nodes, decorators, a SubTree with explicit
+  port remapping, a SubTree with _autoremap, all pre- and post-conditions,
+  several <BehaviorTree> elements, a <TreeNodesModel> for the SubTree ports
+  and blackboard values of several types.
+-->
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+
+  <BehaviorTree ID="MainTree">
+    <Sequence name="main_sequence">
+      <Script name="init" code="flag:=true; blocked:=false; counter:=0; label:='start'"/>
+
+      <!-- Blackboard values: int, double, string, vector<int>, Pose2D, vector<Pose2D> -->
+      <WriteValues name="write_values"
+                   int_value="{an_int}"
+                   double_value="{a_double}"
+                   string_value="{a_string}"
+                   vector_value="{a_vector}"
+                   pose="{a_pose}"
+                   poses="{pose_list}"/>
+
+      <SayMessage name="say_default"/>
+      <SayMessage name="say_text" message="Hello &amp; welcome"/>
+
+      <Fallback name="fallback">
+        <CheckFlag name="check_blocked" flag="{blocked}"/>
+        <CheckFlag name="check_flag" flag="{flag}"/>
+      </Fallback>
+
+      <ReactiveSequence name="reactive">
+        <CheckFlag flag="{flag}"/>
+        <WaitTicks name="wait_three" ticks="3"/>
+      </ReactiveSequence>
+
+      <Inverter>
+        <AlwaysFailure/>
+      </Inverter>
+      <ForceSuccess>
+        <AlwaysFailure/>
+      </ForceSuccess>
+      <RetryUntilSuccessful num_attempts="3">
+        <IncrementCounter name="count_once" counter="{counter}"/>
+      </RetryUntilSuccessful>
+      <Repeat num_cycles="2">
+        <IncrementCounter name="count_twice" counter="{counter}" step="2"/>
+      </Repeat>
+      <Timeout msec="10000">
+        <WaitTicks ticks="1"/>
+      </Timeout>
+
+      <!-- SubTree with explicit port remapping -->
+      <SubTree ID="Navigate" name="navigate" goal="{a_pose}" steps="2" result="{nav_result}"/>
+      <!-- SubTree with automatic remapping: it uses {counter} of this tree -->
+      <SubTree ID="Counting" name="counting" _autoremap="true"/>
+
+      <!-- Pre-conditions -->
+      <SayMessage name="skipped_node" message="never" _skipIf="flag == true"/>
+      <AlwaysFailure name="success_if" _successIf="flag == true"/>
+      <AlwaysSuccess name="failure_if" _failureIf="flag == false"/>
+      <WaitTicks name="while_node" ticks="2" _while="flag == true"/>
+
+      <!-- Post-conditions -->
+      <AlwaysSuccess name="on_success" _onSuccess="label:='success'" _post="post_count:=1"/>
+      <ForceSuccess>
+        <AlwaysFailure name="on_failure" _onFailure="failure_seen:=true"/>
+      </ForceSuccess>
+      <Parallel name="parallel" success_count="1" failure_count="1">
+        <WaitTicks name="short_wait" ticks="1"/>
+        <WaitTicks name="long_wait" ticks="100" _onHalted="halted_seen:=true"/>
+      </Parallel>
+
+      <ReadPose name="read_text_pose" pose="3.0;4.0;0.0" distance="{distance}"/>
+      <AnnotatedAction name="annotated"/>
+      <ScriptCondition code="label == 'success' &amp;&amp; failure_seen == true &amp;&amp; halted_seen == true &amp;&amp; counter == 6"/>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="Navigate">
+    <Sequence name="navigate_sequence">
+      <ReadPose name="read_goal" pose="{goal}" distance="{goal_distance}"/>
+      <WaitTicks name="drive" ticks="{steps}"/>
+      <Script code="result:='arrived'"/>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="Counting">
+    <Sequence name="counting_sequence">
+      <IncrementCounter name="count_in_subtree" counter="{counter}"/>
+      <SayMessage message="counted"/>
+    </Sequence>
+  </BehaviorTree>
+
+  <!-- Not used by MainTree. To run it, give the executor the tree ID "SecondTree". -->
+  <BehaviorTree ID="SecondTree">
+    <Fallback>
+      <CheckFlag flag="{missing_flag}"/>
+      <SayMessage message="fallback"/>
+    </Fallback>
+  </BehaviorTree>
+
+  <TreeNodesModel>
+    <SubTree ID="Navigate">
+      <input_port name="goal" type="Pose2D">Pose to drive to</input_port>
+      <input_port name="steps" default="1">Number of ticks for the drive</input_port>
+      <output_port name="result">Text result of the drive</output_port>
+    </SubTree>
+    <SubTree ID="Counting">
+      <inout_port name="counter">Counter of the parent tree</inout_port>
+    </SubTree>
+  </TreeNodesModel>
+
+</root>
