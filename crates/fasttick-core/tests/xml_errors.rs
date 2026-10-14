@@ -127,6 +127,28 @@ fn columns_count_characters_and_skip_the_bom() {
 }
 
 #[test]
+fn a_second_byte_order_mark_is_text() {
+    for text in [
+        "\u{feff}\u{feff}",
+        "\u{feff}\u{feff}\u{feff}<a/>",
+        "\u{feff}\u{feff}text<a/>",
+    ] {
+        let doc = Document::parse(text).unwrap();
+        assert!(doc.has_bom());
+        assert_eq!(doc.to_string(), text);
+        let first = doc.children(doc.root())[0];
+        assert!(matches!(doc.node(first), Some(Node::Text(_))));
+    }
+    // The extra mark is content, so a declaration cannot follow it.
+    assert_error(
+        "\u{feff}\u{feff}<?xml version='1.0'?><a/>",
+        1,
+        2,
+        "XML declaration",
+    );
+}
+
+#[test]
 fn utf8_errors() {
     let e = Document::parse_bytes(b"<a>\n  x\xff</a>").unwrap_err();
     assert_eq!((e.line, e.column, e.offset), (2, 4, 7));

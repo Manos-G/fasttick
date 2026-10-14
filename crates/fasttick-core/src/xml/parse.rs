@@ -1,6 +1,8 @@
 //! The parser. It uses the quick-xml event reader to find the markup and
 //! checks each tag with the rules of tinyxml2.
 
+use std::collections::HashSet;
+
 use quick_xml::Reader;
 use quick_xml::errors::SyntaxError;
 use quick_xml::events::Event;
@@ -179,6 +181,9 @@ struct Builder<'d, 't> {
     stack: Vec<NodeId>,
     /// The text node that the previous event wrote to, if any.
     open_text: Option<NodeId>,
+    /// True after top-level content other than declarations and white
+    /// space.
+    top_level_content: bool,
 }
 
 impl<'d, 't> Builder<'d, 't> {
@@ -191,6 +196,7 @@ impl<'d, 't> Builder<'d, 't> {
             mode,
             stack: vec![root],
             open_text: None,
+            top_level_content: false,
         }
     }
 
@@ -201,6 +207,9 @@ impl<'d, 't> Builder<'d, 't> {
     /// Adds a node as the last child of the current parent.
     fn push(&mut self, node: Node, offset: usize) -> Result<NodeId, Fail> {
         let parent = self.parent();
+        if self.stack.len() == 1 && !matches!(node, Node::Declaration(_) | Node::Text(_)) {
+            self.top_level_content = true;
+        }
         let index = self.doc.slots.len();
         let id = u32::try_from(index)
             .map(NodeId)
@@ -215,6 +224,16 @@ impl<'d, 't> Builder<'d, 't> {
     }
 
     fn run(mut self) -> Result<(), Fail> {
+        // quick-xml removes a byte order mark at the start of its input.
+        // The first one is gone already; more of them are text (as for
+        // tinyxml2, which reads one byte order mark only).
+        let extra = self.body.len() - self.body.trim_start_matches('\u{feff}').len();
+        if extra > 0 {
+            let body = self.body;
+            self.text(&body[..extra], self.base)?;
+            self.body = &body[extra..];
+            self.base += extra;
+        }
         let mut reader = Reader::from_str(self.body);
         {
             let config = reader.config_mut();
@@ -293,6 +312,9 @@ impl<'d, 't> Builder<'d, 't> {
     }
 
     fn text(&mut self, raw: &str, offset: usize) -> Result<(), Fail> {
+        if self.stack.len() == 1 && !is_all_whitespace(raw) {
+            self.top_level_content = true;
+        }
         if let Some(id) = self.open_text {
             if let Some(Node::Text(t)) = self.doc.slots.get_mut(id.index()).map(|s| &mut s.node) {
                 t.raw.push_str(raw);
@@ -377,16 +399,7 @@ impl<'d, 't> Builder<'d, 't> {
         // tinyxml2 allows declarations only at the document level, before
         // all other nodes (XMLNode::ParseDeep, "wellLocated"). It skips the
         // white space at the document level, so white space can come first.
-        let well_located = self.stack.len() == 1
-            && self
-                .doc
-                .children(self.doc.root())
-                .iter()
-                .all(|&c| match self.doc.node(c) {
-                    Some(Node::Declaration(_)) => true,
-                    Some(Node::Text(t)) => t.is_whitespace(),
-                    _ => false,
-                });
+        let well_located = self.stack.len() == 1 && !self.top_level_content;
         if !well_located {
             return Err((
                 offset,
@@ -502,6 +515,10 @@ pub(crate) fn parse_start_tag(raw: &str) -> Result<StartTag<'_>, (usize, String)
     }
     let name = &raw[1..1 + name_l];
     let mut attributes: Vec<Attribute> = Vec::new();
+    // The names, for the duplicate check. A set replaces the list for tags
+    // with many attributes, so that the check stays fast.
+    let mut names: Vec<&str> = Vec::new();
+    let mut name_set: Option<HashSet<&str>> = None;
     let mut i = 1 + name_l;
     loop {
         let ws_start = i;
@@ -560,7 +577,18 @@ pub(crate) fn parse_start_tag(raw: &str) -> Result<StartTag<'_>, (usize, String)
             ));
         };
         let value_end = value_start + close;
-        if attributes.iter().any(|a| a.name == attr_name) {
+        let duplicate = match &mut name_set {
+            Some(set) => !set.insert(attr_name),
+            None => {
+                let found = names.contains(&attr_name);
+                names.push(attr_name);
+                if names.len() > 16 {
+                    name_set = Some(names.iter().copied().collect());
+                }
+                found
+            }
+        };
+        if duplicate {
             return Err((i, format!("duplicate attribute {attr_name:?}")));
         }
         attributes.push(Attribute::from_source(
@@ -668,30 +696,60 @@ pub(crate) fn parse_end_tag(raw: &str) -> Result<(&str, &str), (usize, String)> 
 /// between the indentation of an element and the indentation of its parent.
 /// The default is four spaces.
 fn infer_indent_unit(doc: &Document) -> String {
-    let mut counts: Vec<(String, usize)> = Vec::new();
-    for id in doc.descendants(doc.root()) {
+    // The indentation of each node, from one pass over all child lists (a
+    // lookup of each previous sibling would be slow for wide trees).
+    let mut indent: Vec<Option<&str>> = vec![None; doc.slots.len()];
+    let root = doc.root();
+    for parent in doc.descendants(root) {
+        let kids = doc.children(parent);
+        for (i, &k) in kids.iter().enumerate() {
+            let value = match i.checked_sub(1).map(|p| kids[p]) {
+                None => (parent == root).then_some(""),
+                Some(prev) => whitespace_indent(doc, prev),
+            };
+            if let Some(slot) = indent.get_mut(k.index()) {
+                *slot = value;
+            }
+        }
+    }
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    for id in doc.descendants(root) {
         let Some(parent) = doc.parent(id) else {
             continue;
         };
         if !doc.is_element(id) || !doc.is_element(parent) {
             continue;
         }
-        let (Some(child), Some(outer)) = (doc.indentation(id), doc.indentation(parent)) else {
+        let child = indent.get(id.index()).copied().flatten();
+        let outer = indent.get(parent.index()).copied().flatten();
+        let (Some(child), Some(outer)) = (child, outer) else {
             continue;
         };
         if child.len() > outer.len() && child.starts_with(outer) {
             let unit = &child[outer.len()..];
-            match counts.iter_mut().find(|(u, _)| u == unit) {
+            match counts.iter_mut().find(|(u, _)| *u == unit) {
                 Some((_, n)) => *n += 1,
-                None => counts.push((unit.to_owned(), 1)),
+                None => counts.push((unit, 1)),
             }
         }
     }
     counts
         .into_iter()
-        .max_by_key(|(_, n)| *n)
-        .map(|(u, _)| u)
+        .max_by_key(|&(_, n)| n)
+        .map(|(u, _)| u.to_owned())
         .unwrap_or_else(|| DEFAULT_INDENT.to_owned())
+}
+
+/// Returns the white space after the last line end of a white-space text
+/// node, or `None` for other nodes.
+fn whitespace_indent(doc: &Document, id: NodeId) -> Option<&str> {
+    match doc.node(id) {
+        Some(Node::Text(t)) if t.is_whitespace() => {
+            let nl = t.raw.rfind('\n')?;
+            Some(&t.raw[nl + 1..])
+        }
+        _ => None,
+    }
 }
 
 impl Document {
@@ -703,13 +761,7 @@ impl Document {
             // The first node of the document starts at column 1.
             return (self.parent(id) == Some(self.root())).then_some("");
         };
-        match self.node(prev) {
-            Some(Node::Text(t)) if t.is_whitespace() => {
-                let nl = t.raw.rfind('\n')?;
-                Some(&t.raw[nl + 1..])
-            }
-            _ => None,
-        }
+        whitespace_indent(self, prev)
     }
 }
 

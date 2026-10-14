@@ -78,3 +78,53 @@ fn edits_on_a_large_document_stay_fast() {
     #[cfg(not(debug_assertions))]
     assert!(elapsed < Duration::from_millis(500), "{elapsed:?}");
 }
+
+/// Parses `text` and returns the time. In optimized builds the time must be
+/// below `limit`.
+fn timed_parse(text: &str, limit: Duration) -> Result<Document, fasttick_core::xml::XmlError> {
+    let start = Instant::now();
+    let result = Document::parse(text);
+    let elapsed = start.elapsed();
+    eprintln!("{} bytes: {elapsed:?}", text.len());
+    #[cfg(not(debug_assertions))]
+    assert!(elapsed < limit, "{elapsed:?}");
+    #[cfg(debug_assertions)]
+    let _ = limit;
+    result
+}
+
+#[test]
+fn wide_and_unusual_inputs_parse_in_linear_time() {
+    let limit = Duration::from_millis(500);
+    // 50,000 siblings, indented.
+    let mut wide = String::from("<root>\n");
+    for i in 0..50_000 {
+        wide.push_str(&format!("  <a i=\"{i}\"/>\n"));
+    }
+    wide.push_str("</root>\n");
+    let doc = timed_parse(&wide, limit).unwrap();
+    assert_eq!(doc.indent_unit(), "  ");
+    assert_eq!(doc.to_string(), wide);
+
+    // One tag with 20,000 attributes.
+    let mut attrs = String::from("<a");
+    for i in 0..20_000 {
+        attrs.push_str(&format!(" k{i}=\"{i}\""));
+    }
+    attrs.push_str("/>");
+    assert_eq!(timed_parse(&attrs, limit).unwrap().to_string(), attrs);
+    let duplicate = attrs.replace("/>", " k19999=\"x\"/>");
+    let err = timed_parse(&duplicate, limit).unwrap_err();
+    assert!(err.message.contains("duplicate"), "{err}");
+
+    // 50,000 declarations (tinyxml2 accepts more than one).
+    let decls = "<?xml version=\"1.0\"?>".repeat(50_000) + "<a/>";
+    assert_eq!(timed_parse(&decls, limit).unwrap().to_string(), decls);
+
+    // Long text with many references.
+    let text = format!("<a>{}</a>", "x &amp; y &#65; & ".repeat(50_000));
+    let doc = timed_parse(&text, limit).unwrap();
+    assert_eq!(doc.to_string(), text);
+    let a = doc.document_element().unwrap();
+    assert!(doc.text_content(a).starts_with("x & y A & x"));
+}
