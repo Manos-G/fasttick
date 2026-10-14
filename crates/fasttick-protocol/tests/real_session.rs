@@ -47,7 +47,10 @@ impl Events {
             match self.receiver.recv_timeout(remaining) {
                 Ok(event) => {
                     if let SessionEvent::Error(message) = &event {
-                        panic!("error event while waiting for {what}: {message}; events: {:#?}", self.seen);
+                        panic!(
+                            "error event while waiting for {what}: {message}; events: {:#?}",
+                            self.seen
+                        );
                     }
                     let found = check(&event);
                     self.seen.push(event);
@@ -59,7 +62,10 @@ impl Events {
                     panic!("timeout waiting for {what}; events: {:#?}", self.seen)
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    panic!("the session stopped while waiting for {what}; events: {:#?}", self.seen)
+                    panic!(
+                        "the session stopped while waiting for {what}; events: {:#?}",
+                        self.seen
+                    )
                 }
             }
         }
@@ -117,8 +123,7 @@ fn fast_config() -> SessionConfig {
 }
 
 /// Starts a session, connects it to the executor of `live` and waits for
-/// the tree and two status events. Two status polls also give the
-/// notification socket time to connect.
+/// the tree and two status events.
 fn connect(live: &Live, config: SessionConfig) -> (SessionHandle, Events) {
     let (handle, receiver) = LiveSession::spawn(config, None);
     let mut events = Events::new(receiver);
@@ -237,20 +242,26 @@ fn session_end_to_end() {
         _ => None,
     });
     assert!(start_time_us > 0);
-    send(&handle, SessionCommand::Unlock(UnlockRequest::resume(probe)));
+    send(
+        &handle,
+        SessionCommand::Unlock(UnlockRequest::resume(probe)),
+    );
     let mut recorded: Vec<RecordedTransition> = Vec::new();
-    events.wait_for("BreakpointReached after the recorded run", |event| match event {
-        SessionEvent::Transitions {
-            batch,
-            possible_loss,
-        } => {
-            assert!(!possible_loss);
-            recorded.extend(batch);
-            None
-        }
-        SessionEvent::BreakpointReached { uid } if *uid == Uid(probe) => Some(()),
-        _ => None,
-    });
+    events.wait_for(
+        "BreakpointReached after the recorded run",
+        |event| match event {
+            SessionEvent::Transitions {
+                batch,
+                possible_loss,
+            } => {
+                assert!(!possible_loss);
+                recorded.extend(batch);
+                None
+            }
+            SessionEvent::BreakpointReached { uid } if *uid == Uid(probe) => Some(()),
+            _ => None,
+        },
+    );
     send(&handle, SessionCommand::StopRecording);
     events.wait_for("RecordingStopped", |event| match event {
         SessionEvent::Transitions { batch, .. } => {
@@ -268,7 +279,11 @@ fn session_end_to_end() {
         .filter(|transition| transition.uid == Uid(probe))
         .map(|transition| transition.status)
         .collect();
-    assert_eq!(probe_changes, [NodeStatus::Success, NodeStatus::Idle], "{recorded:?}");
+    assert_eq!(
+        probe_changes,
+        [NodeStatus::Success, NodeStatus::Idle],
+        "{recorded:?}"
+    );
     for transition in &recorded {
         assert!(tree.node_by_uid(transition.uid).is_some());
     }
@@ -276,8 +291,11 @@ fn session_end_to_end() {
         assert!(pair[0].timestamp_us <= pair[1].timestamp_us);
     }
     let wait = Uid(live.uid("probe_wait"));
-    assert!(recorded.iter().any(|transition| transition.uid == wait
-        && transition.status == NodeStatus::Running));
+    assert!(
+        recorded
+            .iter()
+            .any(|transition| transition.uid == wait && transition.status == NodeStatus::Running)
+    );
 
     // Remove the hook: the waiting node continues.
     let stopped = live.probe_counters();
@@ -339,7 +357,10 @@ fn disconnect_removes_the_hooks_and_the_executor_keeps_running() {
     assert!(live.hooks().is_empty());
     assert_eq!(live.wait_result(before.runs), "SUCCESS");
     let runs = live.wait_more_runs(3);
-    assert!(runs.iter().all(|(_, result)| result == "SUCCESS"), "{runs:?}");
+    assert!(
+        runs.iter().all(|(_, result)| result == "SUCCESS"),
+        "{runs:?}"
+    );
     let after = live.probe_counters();
     assert!(after.probe_ticks >= before.probe_ticks + 4, "{after:?}");
     assert!(after.done >= before.done + 3, "{after:?}");
@@ -378,7 +399,10 @@ fn disabling_a_hit_breakpoint_through_the_session_releases_the_node() {
     send(&handle, SessionCommand::InsertHook(disabled));
     assert_eq!(live.wait_result(before.runs), "SUCCESS");
     let runs = live.wait_more_runs(2);
-    assert!(runs.iter().all(|(_, result)| result == "SUCCESS"), "{runs:?}");
+    assert!(
+        runs.iter().all(|(_, result)| result == "SUCCESS"),
+        "{runs:?}"
+    );
     assert_eq!(live.hooks(), [disabled]);
 
     // Enable it again, then DISABLE_ALL_HOOKS through the session.
@@ -423,9 +447,8 @@ fn session_heartbeat_keeps_a_breakpoint_active() {
     let mut events = Events::new(receiver);
     assert!(handle.connect("127.0.0.1", live.port));
     events.tree();
-    // Let the notification socket connect (no STATUS events come often).
-    std::thread::sleep(Duration::from_millis(100));
-
+    // No wait here: the session sends its first request only after the
+    // notification socket is connected, so the hit is reported.
     send(&handle, SessionCommand::InsertHook(Hook::breakpoint(probe)));
     events.breakpoint(probe);
     let stopped = live.probe_counters();
@@ -470,7 +493,11 @@ fn executor_restart_is_detected_and_the_hooks_come_back() {
     let status = live.executor.stop().unwrap();
     assert!(status.success(), "{status}");
     events.wait_for("Reconnecting", |event| {
-        matches!(event, SessionEvent::State(ConnectionState::Reconnecting { .. })).then_some(())
+        matches!(
+            event,
+            SessionEvent::State(ConnectionState::Reconnecting { .. })
+        )
+        .then_some(())
     });
     let executor_b = Executor::spawn(options_a).expect("the second executor starts");
     let mut client_b = client(port);
@@ -510,7 +537,10 @@ fn executor_restart_is_detected_and_the_hooks_come_back() {
         tree: (*tree).clone(),
     };
     let before = live_b.assert_blocked();
-    send(&handle, SessionCommand::Unlock(UnlockRequest::resume(probe)));
+    send(
+        &handle,
+        SessionCommand::Unlock(UnlockRequest::resume(probe)),
+    );
     assert_eq!(live_b.wait_result(before.runs), "SUCCESS");
     events.breakpoint(probe);
     assert!(handle.join());

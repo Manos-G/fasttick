@@ -96,9 +96,7 @@ fn full_tree_matches_the_executed_xml() {
             .tree
             .nodes
             .iter()
-            .filter(|node| {
-                live.tree.instances[node.instance.0].tree_id == runtime_instance.tree_id
-            })
+            .filter(|node| live.tree.instances[node.instance.0].tree_id == runtime_instance.tree_id)
             .collect();
         assert_eq!(source_nodes.len(), runtime_nodes.len());
         for (source_node, runtime_node) in source_nodes.iter().zip(&runtime_nodes) {
@@ -241,7 +239,10 @@ fn blackboards_of_the_root_tree_and_of_a_subtree_instance() {
     assert_eq!(worker.keys().collect::<Vec<_>>(), ["distance"]);
     let distance = worker["distance"].as_f64().unwrap();
     let expected = (1.0 + n as f64).hypot(2.0);
-    assert!((distance - expected).abs() < 1e-9, "{distance} != {expected}");
+    assert!(
+        (distance - expected).abs() < 1e-9,
+        "{distance} != {expected}"
+    );
 
     // Unknown names are left out. They are not an error.
     assert_eq!(
@@ -325,8 +326,7 @@ fn hook_requests_insert_dump_remove_and_report_errors() {
     for result in [
         live.client.remove_hook(write, HookPosition::Pre),
         live.client.remove_hook(unknown, HookPosition::Pre),
-        live.client
-            .unlock_breakpoint(&UnlockRequest::resume(write)),
+        live.client.unlock_breakpoint(&UnlockRequest::resume(write)),
         live.client
             .unlock_breakpoint(&UnlockRequest::resume(unknown)),
     ] {

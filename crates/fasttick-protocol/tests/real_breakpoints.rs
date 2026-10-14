@@ -150,7 +150,9 @@ fn once_breakpoint_is_removed_after_the_first_hit() {
         })
         .unwrap();
     assert_eq!(live.wait_result(before.runs), "SUCCESS");
-    wait_until("the hook to go away", || live.hooks().is_empty().then_some(()));
+    wait_until("the hook to go away", || {
+        live.hooks().is_empty().then_some(())
+    });
     let runs = live.wait_more_runs(2);
     assert_all(&runs, "SUCCESS");
     let after = live.probe_counters();
@@ -472,7 +474,11 @@ fn heartbeat_loss_disables_the_hooks_and_requests_enable_them_again() {
     let end = Instant::now() + QUIET;
     while let Some(remaining) = end.checked_duration_since(Instant::now()) {
         if let Some(notification) = live.client.poll_notification(remaining).unwrap() {
-            assert_ne!(notification.uid, Uid(probe), "a disabled hook sent a notification");
+            assert_ne!(
+                notification.uid,
+                Uid(probe),
+                "a disabled hook sent a notification"
+            );
         }
     }
     assert!(silent_since.elapsed() < WAIT);

@@ -246,7 +246,10 @@ pub fn uid_of(tree: &RuntimeTree, name: &str) -> u16 {
 
 /// The status of each node by name (the names of `probe.xml` and
 /// `long_running.xml` are unique for the named nodes).
-pub fn statuses_by_name(tree: &RuntimeTree, snapshot: &StatusSnapshot) -> BTreeMap<String, NodeStatus> {
+pub fn statuses_by_name(
+    tree: &RuntimeTree,
+    snapshot: &StatusSnapshot,
+) -> BTreeMap<String, NodeStatus> {
     snapshot
         .entries
         .iter()

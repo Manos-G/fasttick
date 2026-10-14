@@ -114,7 +114,10 @@ fn recording_start_stop_and_transitions() {
         "read_worker_pose",
         "worker_wait",
     ] {
-        assert!(changed.contains(name), "no transition of {name}: {changed:?}");
+        assert!(
+            changed.contains(name),
+            "no transition of {name}: {changed:?}"
+        );
     }
     for name in ["long_sequence", "setup", "forever"] {
         assert!(!changed.contains(name), "a transition of {name}");
@@ -175,7 +178,9 @@ fn the_buffer_keeps_only_the_last_1000_transitions() {
     let first = cycles(&mut live);
     // A cycle has more than 20 transitions, so 60 cycles have more than
     // 1000.
-    wait_until("60 cycles", || (cycles(&mut live) >= first + 60).then_some(()));
+    wait_until("60 cycles", || {
+        (cycles(&mut live) >= first + 60).then_some(())
+    });
     let batch = live.client.transitions().unwrap();
     assert_eq!(batch.len(), RECORDING_BUFFER_CAPACITY);
     check_transitions(&live.tree, &batch);
@@ -231,7 +236,10 @@ fn recording_round_trip_through_a_btlog_file() {
     let started = Instant::now();
     let mut transitions = Vec::new();
     read_batch(&mut live, &mut transitions);
-    assert!(transitions.is_empty(), "the tree is stopped: {transitions:?}");
+    assert!(
+        transitions.is_empty(),
+        "the tree is stopped: {transitions:?}"
+    );
     // Stay stopped for a moment: a clear gap in the executor log.
     live.assert_frozen();
 
@@ -277,7 +285,10 @@ fn recording_round_trip_through_a_btlog_file() {
     // The first state plus the transitions gives the last state.
     let mut replayed = first_state.clone();
     for transition in &transitions {
-        replayed.get_mut(&transition.uid).unwrap().apply(transition.status);
+        replayed
+            .get_mut(&transition.uid)
+            .unwrap()
+            .apply(transition.status);
     }
     assert_eq!(replayed, last_state);
 
@@ -285,7 +296,9 @@ fn recording_round_trip_through_a_btlog_file() {
     // GUI does: the XML from FULLTREE and the start time from the reply.
     let records: Vec<Transition> = transitions
         .iter()
-        .map(|transition| Transition::new(transition.timestamp_us, transition.uid, transition.status))
+        .map(|transition| {
+            Transition::new(transition.timestamp_us, transition.uid, transition.status)
+        })
         .collect();
     let start_time = i64::try_from(start_us).unwrap();
     let mut writer = BtLogWriter::create(&live_log, &live.xml, start_time).unwrap();
@@ -331,7 +344,13 @@ fn recording_round_trip_through_a_btlog_file() {
     let absolute = |start: i64, offset: u64| start + i64::try_from(offset).unwrap();
     let ours: Vec<(i64, Uid, NodeStatus)> = records
         .iter()
-        .map(|record| (absolute(start_time, record.offset_us), record.uid, record.status))
+        .map(|record| {
+            (
+                absolute(start_time, record.offset_us),
+                record.uid,
+                record.status,
+            )
+        })
         .collect();
     // The tree was stopped for some time before and after the recording, so
     // a margin of 50 ms finds exactly the same changes.
@@ -349,7 +368,11 @@ fn recording_round_trip_through_a_btlog_file() {
         })
         .filter(|(time, _, _)| window.contains(time))
         .collect();
-    assert_eq!(ours.len(), theirs.len(), "ours: {ours:?}\ntheirs: {theirs:?}");
+    assert_eq!(
+        ours.len(),
+        theirs.len(),
+        "ours: {ours:?}\ntheirs: {theirs:?}"
+    );
     for (mine, logged) in ours.iter().zip(&theirs) {
         assert_eq!((mine.1, mine.2), (logged.1, logged.2));
         // The publisher reads the clock twice at the start (once for the

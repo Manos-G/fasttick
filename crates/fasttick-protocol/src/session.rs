@@ -975,7 +975,11 @@ impl LiveSession {
                 self.rehook_pending |= self.config.reinsert_hooks && !self.hooks.is_empty();
                 self.rehook_at = Instant::now();
                 self.next_status_at = Instant::now();
-                if !self.client.as_mut().is_some_and(Client::notifications_connected) {
+                if !self
+                    .client
+                    .as_mut()
+                    .is_some_and(Client::notifications_connected)
+                {
                     let port = self
                         .client
                         .as_ref()
@@ -1224,7 +1228,6 @@ impl LiveSession {
     /// new socket connects at once. The wait ends after
     /// [`SessionConfig::connect_timeout`].
     fn notifications_ready(&mut self) -> bool {
-        if std::env::var_os("FASTTICK_NO_GATE").is_some() { return true; }
         let Some(client) = self.client.as_mut() else {
             return true;
         };
