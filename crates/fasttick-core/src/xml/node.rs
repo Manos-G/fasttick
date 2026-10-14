@@ -129,7 +129,8 @@ impl Attribute {
         &self.name
     }
 
-    /// Returns the decoded value, as BT.CPP (tinyxml2) sees it.
+    /// Returns the decoded value, as BT.CPP (tinyxml2) sees it. See the
+    /// [module documentation](super#decoded-values) for the rules.
     pub fn value(&self) -> &str {
         &self.value
     }
@@ -311,12 +312,17 @@ impl Text {
         &self.raw
     }
 
-    /// Returns the decoded text, as BT.CPP (tinyxml2) sees it.
+    /// Returns the decoded text, as BT.CPP (tinyxml2) sees it. See the
+    /// [module documentation](super#decoded-values) for the rules.
     pub fn decoded(&self) -> Cow<'_, str> {
         decode(&self.raw, true)
     }
 
     /// Returns true if the text has only white space (or is empty).
+    ///
+    /// White space is space, tab, LF, CR, vertical tab and form feed, as in
+    /// tinyxml2 (`XMLUtil::IsWhiteSpace`). tinyxml2 does not keep such text
+    /// between two tags, so BT.CPP does not see it.
     pub fn is_whitespace(&self) -> bool {
         is_all_whitespace(&self.raw)
     }
