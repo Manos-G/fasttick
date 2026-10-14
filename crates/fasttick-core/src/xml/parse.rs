@@ -83,6 +83,10 @@ impl Document {
     ///   tinyxml2 gives a document without nodes; BT.CPP then fails because
     ///   there is no root element.
     ///
+    /// Text before the first markup keeps its white space here. Without a
+    /// byte order mark at the start, tinyxml2 drops that white space, so
+    /// the decoded value of this (top-level) text can differ.
+    ///
     /// A DOCTYPE with an internal subset is one node here. tinyxml2 ends its
     /// "unknown" node at the first `>` and reads the rest as text
     /// (`XMLDocument::Identify`, `XMLUnknown::ParseDeep`).

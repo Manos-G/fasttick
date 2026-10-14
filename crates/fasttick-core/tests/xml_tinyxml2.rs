@@ -187,13 +187,13 @@ fn dump(doc: &Document, parent: NodeId, depth: usize, out: &mut String) {
         match node {
             // tinyxml2 does not keep text with only white space.
             Node::Text(t) if t.is_whitespace() => continue,
-            Node::Text(t) if parent == doc.root() && index == 0 => {
-                // `XMLDocument::Parse` skips the white space at the start,
-                // and a byte order mark after it.
-                let mut raw = t.raw().trim_start_matches(is_c_space);
-                if !doc.has_bom() {
-                    raw = raw.strip_prefix('\u{feff}').unwrap_or(raw);
-                }
+            Node::Text(t) if parent == doc.root() && index == 0 && !doc.has_bom() => {
+                // `XMLDocument::Parse` skips the white space at the start and
+                // then a byte order mark. With a byte order mark at the very
+                // start, nothing is skipped: `XMLDocument::Identify` keeps the
+                // white space before text.
+                let raw = t.raw().trim_start_matches(is_c_space);
+                let raw = raw.strip_prefix('\u{feff}').unwrap_or(raw);
                 if raw.chars().all(is_c_space) {
                     continue;
                 }
