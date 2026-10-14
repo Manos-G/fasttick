@@ -63,6 +63,9 @@ impl Document {
     ///   `XMLUnknown::ParseDeep`).
     /// - Only space, tab, CR and LF are white space in tags. tinyxml2 also
     ///   accepts vertical tab and form feed.
+    /// - White space between `<` (or `</`) and the name is an error, and so
+    ///   are attributes in an end tag. tinyxml2 skips the white space and
+    ///   ignores the attributes (`XMLElement::ParseDeep`).
     pub fn parse(text: &str) -> Result<Document, XmlError> {
         parse_document(text, Mode::Document)
     }

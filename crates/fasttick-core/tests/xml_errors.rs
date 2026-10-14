@@ -241,6 +241,35 @@ fn values_are_decoded_like_tinyxml2() {
 }
 
 #[test]
+fn get_text_matches_tinyxml2() {
+    let doc = Document::parse(
+        "<r>\
+         <a>\n  hello &amp; bye\n</a>\
+         <b>\n  <!-- c -->\n  text<x/></b>\
+         <c>  <![CDATA[<raw>]]></c>\
+         <d>\n  <x/>after</d>\
+         <e/>\
+         <f>   </f>\
+         </r>",
+    )
+    .unwrap();
+    let r = doc.document_element().unwrap();
+    let texts: Vec<Option<String>> = doc.element_children(r).map(|e| doc.get_text(e)).collect();
+    assert_eq!(
+        texts,
+        [
+            Some("\n  hello & bye\n".to_owned()),
+            Some("\n  text".to_owned()),
+            Some("<raw>".to_owned()),
+            None,
+            None,
+            None,
+        ]
+    );
+    assert_eq!(doc.get_text(doc.root()), None);
+}
+
+#[test]
 fn doctype_with_internal_subset_and_misc_survive() {
     let text = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<!DOCTYPE root [\r\n  <!ELEMENT root ANY>\r\n  <!ENTITY e \"<x>\">\r\n]>\r\n<?pi data?>\r\n<!-- c -->\r\n<root/>\r\n<!-- after -->\r\n";
     let doc = Document::parse(text).unwrap();

@@ -272,6 +272,27 @@ impl Document {
         out
     }
 
+    /// Returns the text of an element as BT.CPP sees it: the result of
+    /// `XMLElement::GetText` in tinyxml2.
+    ///
+    /// This is the decoded first child if that child is text or a CDATA
+    /// section; comments before it are skipped. Text with only white space
+    /// does not count, because tinyxml2 does not keep it
+    /// (`XMLDocument::Identify`). The result is `None` for other nodes.
+    pub fn get_text(&self, id: NodeId) -> Option<String> {
+        self.element(id)?;
+        for &child in self.children(id) {
+            match self.node(child)? {
+                Node::Comment(_) => {}
+                Node::Text(t) if t.is_whitespace() => {}
+                Node::Text(t) => return Some(t.decoded().into_owned()),
+                Node::CData(c) => return Some(c.decoded().into_owned()),
+                _ => return None,
+            }
+        }
+        None
+    }
+
     /// Returns the byte offset of the node in the source, or `None` for a
     /// node that a program made (also a copy or an imported node).
     pub fn source_offset(&self, id: NodeId) -> Option<usize> {
