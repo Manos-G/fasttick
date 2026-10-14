@@ -577,3 +577,16 @@ fn queries() {
     assert_eq!(decl.pseudo_attribute("version"), Some("1.0"));
     assert_eq!(doc.ancestors(elements[1]).count(), 2);
 }
+
+#[test]
+fn documents_and_changes_can_move_between_threads() {
+    fn check<T: Send + Sync + Clone + 'static>() {}
+    check::<Document>();
+    check::<Change>();
+    check::<EditError>();
+    check::<fasttick_core::xml::XmlError>();
+    // A worker thread can parse a file for the GUI thread.
+    let doc = std::thread::spawn(|| parse("<a x='1'/>")).join().unwrap();
+    let a = doc.document_element().unwrap();
+    assert_eq!(doc.attribute(a, "x"), Some("1"));
+}

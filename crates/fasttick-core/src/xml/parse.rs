@@ -87,7 +87,12 @@ impl Document {
     /// Parses a document from bytes. The bytes must be UTF-8 (with or
     /// without a byte order mark).
     pub fn parse_bytes(bytes: &[u8]) -> Result<Document, XmlError> {
-        if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
+        // UTF-16 with a byte order mark, or without one: then the first
+        // character (ASCII `<` or white space) has a zero byte next to it.
+        let utf16 = bytes.starts_with(&[0xFF, 0xFE])
+            || bytes.starts_with(&[0xFE, 0xFF])
+            || matches!(bytes, [0, b, ..] | [b, 0, ..] if *b != 0);
+        if utf16 {
             return Err(XmlError {
                 line: 1,
                 column: 1,

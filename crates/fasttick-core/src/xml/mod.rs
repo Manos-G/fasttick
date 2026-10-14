@@ -11,6 +11,23 @@
 //! BehaviorTree.CPP uses (`3rdparty/tinyxml2` in the BT.CPP source). The
 //! decoded values of attributes and text are the values that BT.CPP sees.
 //!
+//! # Decoded values
+//!
+//! [`Attribute::value`] and [`Text::decoded`] give the values that BT.CPP
+//! sees, with the unusual cases of tinyxml2:
+//!
+//! - Line ends become LF (also LF CR); tabs and line ends are kept.
+//! - Only the five predefined entities and `&#...;` references are
+//!   decoded. Only a lowercase `x` starts a hexadecimal reference. A
+//!   reference to U+0000 ends the value.
+//! - An `&` that does not start a reference stays, but only while nothing
+//!   before it in the value became shorter. tinyxml2 decodes in place and
+//!   does not copy such an `&`; after a shorter reference, the byte at the
+//!   write position is a stale source byte. For example, BT.CPP reads
+//!   `a &lt; b && c` as `a < b  b c`. Write `&amp;` to be safe.
+//!
+//! [`Attribute::raw_value`] and [`Text::raw`] give the source text.
+//!
 //! # Example
 //!
 //! ```

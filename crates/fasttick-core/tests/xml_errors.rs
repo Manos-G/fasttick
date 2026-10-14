@@ -215,6 +215,11 @@ fn utf8_errors() {
     assert!(e.message.contains("0xFF"), "{e}");
     let e = Document::parse_bytes(b"\xff\xfe<\x00a\x00/\x00>\x00").unwrap_err();
     assert!(e.message.contains("UTF-16"), "{e}");
+    // UTF-16 without a byte order mark, little and big endian.
+    let e = Document::parse_bytes(b"<\x00a\x00/\x00>\x00").unwrap_err();
+    assert!(e.message.contains("UTF-16"), "{e}");
+    let e = Document::parse_bytes(b"\x00<\x00a\x00/\x00>").unwrap_err();
+    assert!(e.message.contains("UTF-16"), "{e}");
     let e = Document::parse_bytes(b"<a>\xc3</a>").unwrap_err();
     assert_eq!((e.line, e.column), (1, 4));
     let doc = Document::parse_bytes("\u{feff}<a>é</a>".as_bytes()).unwrap();
