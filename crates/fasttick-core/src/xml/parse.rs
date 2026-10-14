@@ -37,18 +37,30 @@ type Fail = (usize, String);
 impl Document {
     /// Parses a document.
     ///
-    /// The parser accepts what tinyxml2 (the XML reader of BT.CPP) accepts,
-    /// with one difference: processing instructions are allowed everywhere.
-    /// tinyxml2 also accepts some text that is not well-formed XML: a `&`
-    /// that does not start a reference, `<` in attribute values, more than
-    /// one top-level element, text outside the document element, `--` in
-    /// comments and attributes without white space between them.
+    /// The parser accepts what tinyxml2 (the XML reader of BT.CPP) accepts.
+    /// Like tinyxml2, it also accepts some text that is not well-formed XML:
+    /// a `&` that does not start a reference, `<` in attribute values, more
+    /// than one top-level element, text outside the document element, `--`
+    /// in comments, `]]>` in text and attributes without white space between
+    /// them.
     ///
     /// These are errors: an empty input, a malformed tag, a missing or wrong
     /// end tag, a duplicate attribute, an XML declaration after other
     /// content, unclosed comments, CDATA sections, processing instructions
     /// or DOCTYPE declarations, and elements nested deeper than
     /// [`MAX_ELEMENT_DEPTH`].
+    ///
+    /// Differences from tinyxml2:
+    ///
+    /// - Processing instructions are allowed everywhere. tinyxml2 reads each
+    ///   `<?...?>` as a declaration and accepts it only at the start.
+    /// - Markup that starts with `<!` and is not a comment, a CDATA section
+    ///   or a DOCTYPE is an error. tinyxml2 keeps it as an "unknown" node.
+    /// - A DOCTYPE with an internal subset is one node. tinyxml2 ends the
+    ///   "unknown" node at the first `>` (`XMLDocument::Identify`,
+    ///   `XMLUnknown::ParseDeep`).
+    /// - Only space, tab, CR and LF are white space in tags. tinyxml2 also
+    ///   accepts vertical tab and form feed.
     pub fn parse(text: &str) -> Result<Document, XmlError> {
         parse_document(text, Mode::Document)
     }

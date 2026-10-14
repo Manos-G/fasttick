@@ -7,7 +7,8 @@ use fasttick_core::xml::{Change, Document};
 
 /// Builds a BT.CPP file with 10,001 elements (about 1 MB).
 fn ten_thousand_elements() -> String {
-    let mut text = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root BTCPP_format=\"4\">\n");
+    let mut text =
+        String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root BTCPP_format=\"4\">\n");
     for t in 0..100 {
         text.push_str(&format!(
             "    <BehaviorTree ID=\"Tree{t}\">\n        <!-- tree {t} -->\n        <Sequence name=\"s{t}\">\n"
@@ -39,9 +40,15 @@ fn parse_and_write_ten_thousand_elements() {
             .count();
         assert_eq!(elements, 10_001);
     }
-    eprintln!("parse + write of 10,001 elements ({} bytes): {best:?}", text.len());
+    eprintln!(
+        "parse + write of 10,001 elements ({} bytes): {best:?}",
+        text.len()
+    );
     #[cfg(not(debug_assertions))]
-    assert!(best < Duration::from_millis(50), "parse + write took {best:?}");
+    assert!(
+        best < Duration::from_millis(50),
+        "parse + write took {best:?}"
+    );
 }
 
 #[test]
@@ -57,7 +64,9 @@ fn edits_on_a_large_document_stay_fast() {
     // Each group holds the changes that undo one edit, in their order.
     let mut groups: Vec<Vec<Change>> = Vec::new();
     for &a in &actions {
-        groups.push(vec![doc.set_attribute(a, "name", "changed").unwrap().inverse()]);
+        groups.push(vec![
+            doc.set_attribute(a, "name", "changed").unwrap().inverse(),
+        ]);
         groups.push(doc.remove_element_pretty(a).unwrap());
     }
     for group in groups.into_iter().rev() {
