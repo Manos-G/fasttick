@@ -1,0 +1,21 @@
+
+  <root BTCPP_format="4">
+    <BehaviorTree ID="Subtree1">\n"
+      <Sequence>
+        <PrintToConsole message="{msg1}"/>
+        <PrintToConsole message="{msg2}"/>
+      </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="Subtree2">
+      <Sequence>
+        <SubTree ID="Subtree1" msg1="foo1" _autoremap="true"/>
+        <SubTree ID="Subtree1" msg1="foo2" _autoremap="true"/>
+      </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="MainTree">
+      <SubTree ID="Subtree2" msg2="bar"/>
+    </BehaviorTree>
+  </root>
+ 

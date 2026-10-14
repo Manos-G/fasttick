@@ -1,0 +1,9 @@
+
+      <root BTCPP_format="4">
+         <BehaviorTree>
+            <Sequence>
+              <AlwaysSuccess name="ActionA"/>
+              <AlwaysSuccess name="ActionB"/>
+            </Sequence>
+         </BehaviorTree>
+      </root>

@@ -1,0 +1,10 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <IfThenElse>
+            <AlwaysSuccess/>  <!-- condition -->
+            <AlwaysFailure/>  <!-- then -->
+            <TestA/>          <!-- else -->
+          </IfThenElse>
+       </BehaviorTree>
+    </root>

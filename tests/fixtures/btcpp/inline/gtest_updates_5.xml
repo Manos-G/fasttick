@@ -1,0 +1,11 @@
+
+    <root BTCPP_format="4" >
+      <BehaviorTree ID="Main">
+        <Repeat num_cycles="2" >
+          <Sequence>
+            <Script code="A:=1"/>
+            <SubTree ID="Check" _autoremap="true"/>
+          </Sequence>
+        </Repeat>
+      </BehaviorTree>
+    </root>

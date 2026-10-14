@@ -1,0 +1,9 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <Sequence>
+            <Sleep msec="10" name="Sleep1"/>
+            <AlwaysSuccess name="Action"/>
+          </Sequence>
+       </BehaviorTree>
+    </root>

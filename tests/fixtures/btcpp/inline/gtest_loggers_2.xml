@@ -1,0 +1,11 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <Sequence name="SeqNode">
+            <Inverter name="InvNode">
+              <AlwaysFailure name="FailNode"/>
+            </Inverter>
+            <AlwaysSuccess name="SuccessNode"/>
+          </Sequence>
+       </BehaviorTree>
+    </root>

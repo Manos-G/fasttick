@@ -1,0 +1,10 @@
+
+<root BTCPP_format="4" >
+  <BehaviorTree ID="Main">
+    <ReactiveSequence>
+      <TestA name="testA"/>
+      <AlwaysSuccess name="success"/>
+      <Sleep msec="100"/>
+    </ReactiveSequence>
+  </BehaviorTree>
+</root>

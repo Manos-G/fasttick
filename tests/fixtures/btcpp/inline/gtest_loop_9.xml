@@ -1,0 +1,8 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <LoopInt queue="{my_vector}" value="{val}">
+            <RecordIntValue value="{val}"/>
+          </LoopInt>
+       </BehaviorTree>
+    </root>

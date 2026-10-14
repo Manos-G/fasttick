@@ -1,0 +1,9 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <TryCatch>
+            <AlwaysRunning/>
+            <CountCatch/>  <!-- catch -->
+          </TryCatch>
+       </BehaviorTree>
+    </root>

@@ -1,0 +1,10 @@
+
+  <root BTCPP_format="4">
+      <BehaviorTree>
+         <Sequence>
+             <Script code=" A:=0 " />
+             <AlwaysSuccess _failureIf="A!=-1"/>
+         </Sequence>
+      </BehaviorTree>
+  </root>
+  

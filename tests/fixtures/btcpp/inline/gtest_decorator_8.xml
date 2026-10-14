@@ -1,0 +1,8 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <Inverter>
+            <AlwaysFailure/>
+          </Inverter>
+       </BehaviorTree>
+    </root>

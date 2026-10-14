@@ -1,0 +1,6 @@
+
+  <root BTCPP_format="4" >
+    <BehaviorTree ID="Main">
+      <Script code="A:=5;&#10;B:=6"/>
+    </BehaviorTree>
+  </root> 

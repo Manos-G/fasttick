@@ -1,0 +1,29 @@
+
+<root BTCPP_format="4">
+
+  <BehaviorTree ID="MainTree">
+    <Sequence>
+      <SaySomething name="talk" message="hello world"/>
+
+      <SubTree ID="MySub" name="mysub"/>
+
+      <Script name="set_message" code="msg:= 'the original message' "/>
+      <SaySomething message="{msg}"/>
+
+      <Sequence name="counting">
+        <SaySomething message="1"/>
+        <SaySomething message="2"/>
+        <SaySomething message="3"/>
+      </Sequence>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="MySub">
+    <Sequence>
+      <AlwaysSuccess name="action_subA"/>
+      <AlwaysSuccess name="action_subB"/>
+    </Sequence>
+  </BehaviorTree>
+
+</root>
+ 

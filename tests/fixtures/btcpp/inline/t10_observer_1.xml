@@ -1,0 +1,27 @@
+
+<root BTCPP_format="4">
+
+    <BehaviorTree ID="MainTree">
+        <Sequence>
+            <Fallback>
+                <AlwaysFailure name="failing_action"/>
+                <SubTree ID="SubTreeA" name="mysub"/>
+            </Fallback>
+            <AlwaysSuccess name="last_action"/>
+        </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="SubTreeA">
+        <Sequence>
+            <AlwaysSuccess name="action_subA"/>
+            <SubTree ID="SubTreeB" name="sub_nested"/>
+            <SubTree ID="SubTreeB" />
+        </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="SubTreeB">
+        <AlwaysSuccess name="action_subB"/>
+    </BehaviorTree>
+
+</root>
+ 

@@ -1,0 +1,24 @@
+
+    <?xml version="1.0"?>
+    <root BTCPP_format="4" main_tree_to_execute="MainTree">
+      <BehaviorTree ID="MainTree">
+          <Sequence>
+              <SetBlackboard output_key="pos" value="0.0;0.0" />
+              <Repeat num_cycles="3">
+                  <Sequence>
+                      <UpdatePosition pos_in="{pos}" x="0.1" y="0.2" pos_out="{pos}"/>
+                      <SubTree ID="UpdPosPlus" _autoremap="true" new_pos="2.2;2.4" />
+                      <Sleep msec="125"/>
+                      <SetBlackboard output_key="pos" value="22.0;22.0" />
+                  </Sequence>
+              </Repeat>
+          </Sequence>
+      </BehaviorTree>
+      <BehaviorTree ID="UpdPosPlus">
+          <Sequence>
+              <SetBlackboard output_key="pos" value="3.0;5.0" />
+              <SetBlackboard output_key="pos" value="{new_pos}" />
+          </Sequence>
+      </BehaviorTree>
+    </root>
+  

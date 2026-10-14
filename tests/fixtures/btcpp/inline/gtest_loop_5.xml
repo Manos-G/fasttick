@@ -1,0 +1,8 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <LoopInt queue="" if_empty="FAILURE" value="{val}">
+            <CountTicks/>
+          </LoopInt>
+       </BehaviorTree>
+    </root>

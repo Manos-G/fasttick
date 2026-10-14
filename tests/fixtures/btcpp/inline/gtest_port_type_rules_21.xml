@@ -1,0 +1,7 @@
+
+    <root BTCPP_format="4">
+      <BehaviorTree>
+        <NodeWithIntPorts input="42" output="{result}"/>
+      </BehaviorTree>
+    </root>
+  

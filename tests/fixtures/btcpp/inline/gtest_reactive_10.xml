@@ -1,0 +1,9 @@
+
+<root BTCPP_format="4">
+  <BehaviorTree>
+    <ReactiveFallback>
+      <AlwaysFailure/>
+      <TestA/>
+    </ReactiveFallback>
+  </BehaviorTree>
+</root>

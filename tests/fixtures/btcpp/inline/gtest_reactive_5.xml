@@ -1,0 +1,17 @@
+
+<root BTCPP_format="4" >
+  <BehaviorTree ID="MainTree">
+    <ReactiveSequence>
+      <AsyncSequence name="first">
+        <TestA/>
+        <TestB/>
+        <TestC/>
+      </AsyncSequence>
+      <AsyncSequence name="second">
+        <TestD/>
+        <TestE/>
+        <TestF/>
+      </AsyncSequence>
+    </ReactiveSequence>
+  </BehaviorTree>
+</root>

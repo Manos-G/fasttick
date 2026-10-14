@@ -1,0 +1,19 @@
+
+<root BTCPP_format="4">
+  <BehaviorTree ID="TestTree">
+    <Parallel>
+      <Sequence>
+        <Sleep msec="150"/>
+        <Script code="paused := false"/>
+        <Sleep msec="150"/>
+      </Sequence>
+
+      <Sequence>
+        <Script code="paused := true; done := false"/>
+        <RetryUntilSuccessful _while="paused" num_attempts="-1" _onHalted="done = true">
+          <AlwaysFailure/>
+        </RetryUntilSuccessful>
+      </Sequence>
+    </Parallel>
+  </BehaviorTree>
+</root>

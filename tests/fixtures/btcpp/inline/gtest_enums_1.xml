@@ -1,0 +1,11 @@
+
+    <root BTCPP_format="4" >
+      <BehaviorTree ID="Main">
+        <Sequence>
+          <Script code=" my_color := Red "/>
+          <ActionEnum name="maybe_blue" color="Blue"/>
+          <ActionEnum name="maybe_green" color="2"/>
+          <ActionEnum name="maybe_red" color="{my_color}"/>
+        </Sequence>
+      </BehaviorTree>
+    </root>

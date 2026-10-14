@@ -1,0 +1,17 @@
+
+
+// clang-format off
+ <root BTCPP_format="4" main_tree_to_execute="MainTree" >
+  <BehaviorTree ID="MainTree">
+    <Sequence>
+        <Script   code="vect:='1,2,3,4'"/>
+        <PrintVector value="{vect}"/>;
+        <SubTree ID="MySub" v4="{vect}"/>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="MySub">
+    <PrintVector value="{v4}"/>;
+  </BehaviorTree>
+ </root>
+ 

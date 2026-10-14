@@ -1,0 +1,24 @@
+
+
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+
+  <BehaviorTree ID="TalkToMe">
+    <Sequence>
+      <SaySomething message="{hello_msg}" />
+      <SaySomething message="{bye_msg}" />
+      <Script code=" output:='done!' " />
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="MainTree">
+    <Sequence>
+      <Script code = " talk_hello:='hello' " />
+      <Script code = " talk_bye:='bye bye' " />
+      <SubTree ID="TalkToMe" hello_msg="{talk_hello}"
+                             bye_msg="{talk_bye}"
+                             output="{talk_out}" />
+      <SaySomething message="{talk_out}" />
+    </Sequence>
+  </BehaviorTree>
+
+</root> 

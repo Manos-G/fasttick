@@ -1,0 +1,9 @@
+
+<root BTCPP_format="4">
+  <BehaviorTree>
+    <ReactiveSequence>
+      <DynamicCondition/>
+      <TrackingAction/>
+    </ReactiveSequence>
+  </BehaviorTree>
+</root>

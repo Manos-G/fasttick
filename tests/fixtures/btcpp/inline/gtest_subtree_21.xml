@@ -1,0 +1,11 @@
+
+  <root BTCPP_format="4" main_tree_to_execute="Tree">
+      <BehaviorTree ID="Tree">
+         <SubTree ID="TreeABC" />
+      </BehaviorTree>
+
+      <BehaviorTree ID="TreeABC">
+         <AlwaysSuccess/>
+      </BehaviorTree>
+  </root>
+ 

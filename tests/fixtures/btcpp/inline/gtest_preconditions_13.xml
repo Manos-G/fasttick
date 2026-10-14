@@ -1,0 +1,8 @@
+
+    <root BTCPP_format="4" >
+        <BehaviorTree ID="MainTree">
+            <Sequence>
+                <AlwaysSuccess _skipIf="skip"/>
+            </Sequence>
+        </BehaviorTree>
+    </root>

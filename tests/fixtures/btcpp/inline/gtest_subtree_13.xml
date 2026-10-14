@@ -1,0 +1,16 @@
+
+<root main_tree_to_execute="Test" BTCPP_format="4">
+
+  <BehaviorTree ID="Test">
+    <ReactiveSequence name="MainSequence">
+      <SubTree name="Visit2" ID="Visit2" tl1="1;2;3"/>
+    </ReactiveSequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="Visit2">
+    <Sequence name="Visit2MainSequence">
+      <Action name="MoveBase" ID="MoveBase" goal="{tl1}"/>
+    </Sequence>
+  </BehaviorTree>
+</root>
+ 

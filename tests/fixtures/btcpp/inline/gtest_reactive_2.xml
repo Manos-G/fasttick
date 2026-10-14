@@ -1,0 +1,16 @@
+
+<root BTCPP_format="4" >
+  <BehaviorTree ID="Example_A">
+    <Sequence>
+      <Script code="test := false"/>
+      <ReactiveSequence>
+        <RetryUntilSuccessful name="Retry 1" num_attempts="-1" _skipIf="test ">
+          <TestA name="Success 1" _onSuccess="test = true"/>
+        </RetryUntilSuccessful>
+        <RetryUntilSuccessful name="Retry 2" num_attempts="5">
+          <AlwaysFailure name="Failure 2"/>
+        </RetryUntilSuccessful>
+      </ReactiveSequence>
+    </Sequence>
+  </BehaviorTree>
+</root>

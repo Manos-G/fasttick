@@ -1,0 +1,14 @@
+
+
+<root BTCPP_format="4" >
+
+    <BehaviorTree ID="MainTree">
+        <Switch3 name="simple_switch" variable="{my_var}"  case_1="1" case_2="42 case_3="666" >
+            <AsyncActionTest name="action_1"/>
+            <AsyncActionTest name="action_42"/>
+            <AsyncActionTest name="action_666"/>
+            <AsyncActionTest name="action_default"/>
+        </Switch3>
+    </BehaviorTree>
+</root>
+        

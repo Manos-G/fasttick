@@ -1,0 +1,19 @@
+
+<root BTCPP_format="4" >
+
+  <BehaviorTree ID="Outer_Tree">
+    <Sequence>
+      <Script code="variable := 'test'"/>
+      <Script code="var := 'test'"/>
+      <SubTree ID="Inner_Tree" _autoremap="false" variable="{var}" />
+      <SubTree ID="Inner_Tree" _autoremap="true"/>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="Inner_Tree">
+    <Sequence>
+      <TestA _skipIf="variable != 'test'"/>
+    </Sequence>
+  </BehaviorTree>
+
+</root>

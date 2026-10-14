@@ -1,0 +1,9 @@
+
+  <root BTCPP_format="4" >
+    <BehaviorTree ID="PowerManagerT">
+      <Sequence>
+        <SampleNode595 find_enemy="{find_enemy}" />
+        <TestA _skipIf="find_enemy==0"/>
+      </Sequence>
+    </BehaviorTree>
+  </root> 

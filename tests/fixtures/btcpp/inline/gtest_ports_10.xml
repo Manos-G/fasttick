@@ -1,0 +1,6 @@
+
+    <root BTCPP_format="4" >
+      <BehaviorTree>
+        <NodeWithDefaultStrings input="from XML"/>
+      </BehaviorTree>
+    </root>

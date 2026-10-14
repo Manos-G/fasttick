@@ -1,0 +1,24 @@
+
+<root BTCPP_format="4" >
+
+    <BehaviorTree ID="Tree1">
+      <Sequence>
+        <SubTree ID="Tree2" ros_node="{ros_node}"/>
+      </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="Tree2">
+        <SubTree ID="Tree3" ros_node="{ros_node}"/>
+    </BehaviorTree>
+
+    <BehaviorTree ID="Tree3">
+        <SubTree ID="Talker" ros_node="{ros_node}"/>
+    </BehaviorTree>
+
+    <BehaviorTree ID="Talker">
+      <Sequence>
+        <NaughtyNav2Node/>
+      </Sequence>
+    </BehaviorTree>
+
+</root>

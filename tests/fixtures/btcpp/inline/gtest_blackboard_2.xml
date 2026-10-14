@@ -1,0 +1,16 @@
+
+
+    <root BTCPP_format="4" >
+        <BehaviorTree ID="MainTree">
+            <Sequence>
+                <BB_TestNode in_port="11"
+                             out_port="{my_input_port}"/>
+
+                <BB_TestNode in_port="{my_input_port}"
+                             out_port="{my_input_port}" />
+
+                <BB_TestNode in_port="{my_input_port}"
+                             out_port="{my_output_port}" />
+            </Sequence>
+        </BehaviorTree>
+    </root>

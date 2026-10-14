@@ -1,0 +1,9 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <TryCatch>
+            <RunningThenSuccess/>
+            <TestA/>  <!-- catch -->
+          </TryCatch>
+       </BehaviorTree>
+    </root>

@@ -1,0 +1,8 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <KeepRunningUntilFailure>
+            <SuccessThenFail/>
+          </KeepRunningUntilFailure>
+       </BehaviorTree>
+    </root>

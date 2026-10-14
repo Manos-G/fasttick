@@ -1,0 +1,11 @@
+
+    <root BTCPP_format="4">
+      <BehaviorTree>
+        <Sequence>
+          <SetBlackboard value="{point_value}" output_key="other_point"/>
+          <Sleep msec="5"/>
+          <SetBlackboard value="{string_value}" output_key="other_point"/>
+        </Sequence>
+      </BehaviorTree>
+    </root>
+  

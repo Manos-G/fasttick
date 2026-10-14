@@ -1,0 +1,8 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <ForceSuccess>
+            <AlwaysFailure/>
+          </ForceSuccess>
+       </BehaviorTree>
+    </root>

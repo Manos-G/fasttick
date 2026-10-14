@@ -1,0 +1,12 @@
+
+    <root BTCPP_format="4">
+      <BehaviorTree ID="MainTree">
+        <Sequence name="main_seq">
+          <SucceedingAction name="first"/>
+          <RetryUntilSuccessful num_attempts="1" name="retry">
+            <ThrowingAction name="nested_thrower"/>
+          </RetryUntilSuccessful>
+        </Sequence>
+      </BehaviorTree>
+    </root>
+  

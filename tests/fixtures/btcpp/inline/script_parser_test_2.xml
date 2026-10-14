@@ -1,0 +1,14 @@
+
+  <root BTCPP_format="4" >
+    <BehaviorTree ID="PowerManagerT">
+      <ReactiveSequence>
+        <Script code=" deviceA:=BATT; deviceB:=CONTROLLER; battery_level:=30 "/>
+        <CheckLevel deviceType="{deviceA}" percentage="{battery_level}" isLowBattery="{isLowBattery}"/>
+        <SaySomething message="FIRST low batteries!" _skipIf="!isLowBattery" />
+
+        <Script code=" battery_level:=20 "/>
+        <CheckLevel deviceType="{deviceA}" percentage="{battery_level}" isLowBattery="{isLowBattery}"/>
+        <SaySomething message="SECOND low batteries!" _skipIf="!isLowBattery" />
+      </ReactiveSequence>
+    </BehaviorTree>
+  </root> 

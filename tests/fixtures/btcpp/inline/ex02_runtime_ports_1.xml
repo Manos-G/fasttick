@@ -1,0 +1,10 @@
+
+ <root BTCPP_format="4" >
+     <BehaviorTree ID="MainTree">
+        <Sequence name="root">
+            <ThinkRuntimePort   text="{the_answer}"/>
+            <SayRuntimePort     message="{the_answer}" />
+        </Sequence>
+     </BehaviorTree>
+ </root>
+ 
