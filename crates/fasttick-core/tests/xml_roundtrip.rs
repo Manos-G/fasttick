@@ -556,8 +556,20 @@ fn expected_text(e: &GenElement, out: &mut String) {
     }
 }
 
+/// 512 cases, or the number in the `PROPTEST_CASES` environment variable.
+fn config() -> ProptestConfig {
+    let cases = std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(512);
+    ProptestConfig {
+        cases,
+        ..ProptestConfig::default()
+    }
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(512))]
+    #![proptest_config(config())]
 
     #[test]
     fn random_documents_round_trip(generated in document_strategy()) {
@@ -620,7 +632,64 @@ proptest! {
     #[test]
     fn arbitrary_strings_never_panic(s in any::<String>()) {
         if let Ok(doc) = Document::parse(&s) {
-            prop_assert_eq!(doc.to_string(), s);
+            prop_assert_eq!(doc.to_string(), s.clone());
+            prop_assert_eq!(doc.write_regenerated(), s);
+        }
+    }
+
+    #[test]
+    fn token_soup_never_panics(tokens in proptest::collection::vec(
+        prop_oneof![
+            Just("<a"), Just("<b"), Just(">"), Just("/>"), Just("</a>"), Just("</b>"),
+            Just(" x=\"1\""), Just(" y='&amp;'"), Just(" z = \"<'>\""), Just(" x"), Just("="),
+            Just("<!--"), Just("-->"), Just("<![CDATA["), Just("]]>"), Just("<?p "), Just("?>"),
+            Just("<?xml version='1.0'?>"), Just("<!DOCTYPE a ["), Just("]>"), Just("&"),
+            Just("&#65;"), Just("&#;"), Just("text"), Just(" "), Just("\n"), Just("\r\n"),
+            Just("\u{feff}"), Just("\""), Just("'"), Just("ü"),
+        ],
+        0..30,
+    )) {
+        let s: String = tokens.concat();
+        if let Ok(doc) = Document::parse(&s) {
+            prop_assert_eq!(doc.to_string(), s.clone());
+            prop_assert_eq!(doc.write_regenerated(), s);
+        }
+    }
+
+    #[test]
+    fn random_pretty_edits_undo(
+        generated in document_strategy(),
+        pick in any::<proptest::sample::Index>(),
+        target in any::<proptest::sample::Index>(),
+        position in any::<proptest::sample::Index>(),
+    ) {
+        let text = render(&generated);
+        let mut doc = Document::parse(&text).unwrap();
+        let elements: Vec<NodeId> =
+            doc.descendants(doc.root()).filter(|&n| doc.is_element(n)).collect();
+        let source = *pick.get(&elements);
+        let parent = *target.get(&elements);
+        let copy = doc.clone_subtree(source).unwrap();
+        let count = doc.element_children(parent).count();
+        let index = position.index(count + 1);
+        let undo = doc.insert_element_pretty(parent, index, copy).unwrap();
+        let edited = doc.to_string();
+        let reparsed = Document::parse(&edited);
+        prop_assert!(reparsed.is_ok(), "{:?}\n{}", reparsed.err(), edited);
+        prop_assert_eq!(doc.element_children(parent).nth(index), Some(copy));
+        let redo = doc.apply_all(undo).unwrap();
+        prop_assert_eq!(doc.to_string(), text.clone());
+        doc.apply_all(redo).unwrap();
+        prop_assert_eq!(doc.to_string(), edited);
+
+        // Remove an element (not the document element) with its white space.
+        let doc_element = doc.document_element().unwrap();
+        if let Some(&victim) = elements.iter().find(|&&e| e != doc_element && doc.is_attached(e)) {
+            let before = doc.to_string();
+            let undo = doc.remove_element_pretty(victim).unwrap();
+            prop_assert!(Document::parse(&doc.to_string()).is_ok());
+            doc.apply_all(undo).unwrap();
+            prop_assert_eq!(doc.to_string(), before);
         }
     }
 
