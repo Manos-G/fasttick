@@ -1,0 +1,27 @@
+[package]
+name = "fasttick-log"
+description = "FastTick log support: BehaviorTree.CPP .btlog and SQLite logs, replay index, statistics and export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+default = ["sqlite"]
+sqlite = ["dep:rusqlite"]
+
+[dependencies]
+fasttick-core.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite = { workspace = true, optional = true }
+
+[dev-dependencies]
+fasttick-testkit.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

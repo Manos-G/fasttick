@@ -1,17 +1,15 @@
 # FastTick plan (for approval)
 
-- Status: draft, waits for approval.
+- Status: approved on 2026-10-14. Licence: MIT. All other recommendations (D2 to D6) approved.
 - Date: 2026-10-14.
 - Reference library: BehaviorTree.CPP 4.9.0 (commit `3ff6a32`).
 - Writing standard: ASD-STE100 (Simplified Technical English).
 
 ## 1. Project licence
 
-Recommendation: dual licence, **MIT OR Apache-2.0**.
+Decision: **MIT** (the user selected MIT on 2026-10-14).
 
-- This is the usual licence for Rust crates. Each user can select one of the two.
-- Apache-2.0 gives a patent grant. MIT is short and simple.
-- Both licences are compatible with BT.CPP (MIT) and libzmq (MPL-2.0).
+- MIT is compatible with BT.CPP (MIT) and libzmq (MPL-2.0).
 - The `zmq` crate builds libzmq from source and links it statically.
   MPL-2.0 then requires that we tell users where to get the libzmq source.
   The `.deb` and the AppImage will contain this notice.
@@ -33,7 +31,7 @@ fasttick/
   tests/fixtures/         XML from the BT.CPP repository (MIT, with attribution)
   docs/                   plan, design notes, one demo note for each milestone
   deny.toml, about.toml   licence and advisory checks, licence report template
-  LICENSE-MIT, LICENSE-APACHE, THIRD_PARTY_LICENSES.md
+  LICENSE (MIT), THIRD_PARTY_LICENSES.md
 ```
 
 Dependency rules:
@@ -165,7 +163,7 @@ Each milestone ends with these steps:
 1. `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` and `cargo deny check` pass.
 2. A short demo note in `docs/demo/Mn.md`.
 3. An update of `THIRD_PARTY_LICENSES.md`.
-4. A commit.
+4. A commit and a push. The user asked for a commit and a push every few minutes during the work.
 
 ### M1: XML model, round trip and editor
 
@@ -196,11 +194,11 @@ Each milestone ends with these steps:
 3. Optional: editable XML panel, v3 to v4 conversion.
 4. Packages: `.deb` with `cargo deb`, AppImage. User guide.
 
-## 6. Decisions for the user
+## 6. Decisions (approved 2026-10-14)
 
 | ID | Question | Recommendation |
 |---|---|---|
-| D1 | Project licence | MIT OR Apache-2.0 (dual). |
+| D1 | Project licence | Decided: MIT. |
 | D2 | Build environment. This session runs in a cloud container (Ubuntu 24.04), not on your Kubuntu machine. Rust 1.97 is already here, so no rustup step is necessary. ROS, BT.CPP and libzmq are not here. | Install `libzmq3-dev` and `cppzmq-dev` with apt. Build BT.CPP 4.9.0 from the reference clone into `/home/user/ref/btcpp-install` (outside the repository). On your machine, the harness links the ROS Jazzy 4.9.0 package with the same CMake code. |
 | D3 | Push. The session pushes to branch `claude/fasttick-ide-build-mcjem9` of `Manos-G/fasttick`. Your brief says "do not push until the user says so". | Push to that branch at the end of each milestone. No pull request unless you ask. The container is temporary, so unpushed work can be lost. |
 | D4 | "After" breakpoints. BT.CPP 4.9.0 cannot stop after a node ticks (fact 1). | The UI gives "before" breakpoints. It shows "after" as not available, with the reason. The protocol crate keeps full support for a later BT.CPP version. |

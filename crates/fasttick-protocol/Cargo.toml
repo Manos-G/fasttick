@@ -1,0 +1,24 @@
+[package]
+name = "fasttick-protocol"
+description = "FastTick client for the BehaviorTree.CPP publisher protocol (live debugging)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+fasttick-core.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zmq.workspace = true
+rmpv.workspace = true
+
+[dev-dependencies]
+fasttick-testkit.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

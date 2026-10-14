@@ -1,0 +1,32 @@
+[package]
+name = "fasttick-app"
+description = "FastTick: a fast tree editor and debugger for BehaviorTree.CPP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "fasttick"
+path = "src/main.rs"
+
+[dependencies]
+fasttick-core.workspace = true
+fasttick-protocol.workspace = true
+fasttick-log.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+egui.workspace = true
+eframe.workspace = true
+egui_extras.workspace = true
+egui_dock.workspace = true
+rfd.workspace = true
+
+[dev-dependencies]
+egui_kittest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
