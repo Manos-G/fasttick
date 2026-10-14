@@ -118,7 +118,7 @@ fn extend_in_order_and_out_of_order() {
         t(150, 7, NodeStatus::Running),
         t(2_000, 1, NodeStatus::Success),
     ];
-    index.extend(&late, all.len());
+    assert!(!index.extend(&late, all.len()));
     let mut combined = all.clone();
     combined.extend_from_slice(&late);
     let full = ReplayIndex::with_snapshot_interval(&combined, 4);
@@ -342,9 +342,149 @@ proptest! {
             prop_assert!(cursor.applied() >= index.count_before_time(start));
             prop_assert!(cursor.applied() <= index.count_at_time(end));
             prop_assert!(cursor.applied() <= index.count_at_time(cursor.time_us()));
+            prop_assert!(cursor.applied() >= index.count_before_time(cursor.time_us()));
             if action == 2 {
                 prop_assert_eq!(cursor.state(&index), index.state_at(cursor.time_us()));
             }
+        }
+    }
+}
+
+#[test]
+fn extend_in_place_keeps_positions() {
+    let all = ticks();
+    let mut index = ReplayIndex::with_snapshot_interval(&all[..6], 4);
+    let before: Vec<Transition> = index.transitions().to_vec();
+    // Known UIDs, at or after the last time (300): in place.
+    assert!(index.extend(&all[6..], 6));
+    assert_eq!(&index.transitions()[..6], &before[..]);
+    assert_eq!(index.snapshot_interval(), 4);
+    // Nothing new: in place.
+    assert!(index.extend(&[], 10));
+    assert_eq!(index.len(), 10);
+}
+
+#[test]
+fn default_interval_grows_with_the_number_of_uids() {
+    // Few UIDs: the default interval.
+    assert_eq!(ReplayIndex::new(&ticks()).snapshot_interval(), 1024);
+    // 3000 different UIDs: one snapshot for each 3000 transitions.
+    let many: Vec<Transition> = (0..9_000u16)
+        .map(|position| t(u64::from(position), position % 3_000, NodeStatus::Running))
+        .collect();
+    let index = ReplayIndex::new(&many);
+    assert_eq!(index.uids().len(), 3_000);
+    assert_eq!(index.snapshot_interval(), 3_000);
+    let small = ReplayIndex::with_snapshot_interval(&many, 5);
+    assert_eq!(small.snapshot_interval(), 5);
+    for time in [0, 1, 2_999, 3_000, 4_500, 8_999, 10_000] {
+        assert_eq!(index.state_at(time), small.state_at(time), "time {time}");
+    }
+
+    // A rebuild with more UIDs makes the interval larger again.
+    let mut index = ReplayIndex::new(&ticks());
+    let more: Vec<Transition> = (0..2_000u16)
+        .map(|uid| t(50, uid + 10, NodeStatus::Success))
+        .collect();
+    assert!(!index.extend(&more, 10));
+    assert_eq!(index.uids().len(), 2_003);
+    assert_eq!(index.snapshot_interval(), 2_003);
+    let mut combined = ticks();
+    combined.extend_from_slice(&more);
+    let full = ReplayIndex::with_snapshot_interval(&combined, 3);
+    for count in [0, 1, 500, 2_003, 2_009, 2_010] {
+        assert_eq!(
+            index.state_after(count),
+            full.state_after(count),
+            "count {count}"
+        );
+    }
+}
+
+#[test]
+fn cursor_after_a_rebuild() {
+    let all = ticks();
+    let mut index = ReplayIndex::new(&all);
+    let mut cursor = Cursor::new();
+    cursor.seek(&index, 305);
+    assert_eq!(cursor.applied(), 6);
+    // Late transitions before the cursor time: the cursor is stale.
+    assert!(!index.extend(
+        &[
+            t(250, 3, NodeStatus::Running),
+            t(260, 5, NodeStatus::Running)
+        ],
+        10
+    ));
+    cursor.clamp(&index);
+    assert_eq!(cursor.time_us(), 305);
+    assert_eq!(cursor.applied(), 8);
+    assert_eq!(cursor.state(&index), index.state_at(305));
+}
+
+#[test]
+fn cursor_extreme_values() {
+    let index = ReplayIndex::new(&ticks());
+    let mut cursor = Cursor::new();
+    cursor.seek_to_index(&index, usize::MAX);
+    assert_eq!(cursor.applied(), 10);
+    cursor.seek(&index, u64::MAX);
+    assert_eq!(cursor.time_us(), 1_000);
+    cursor.go_to_start(&index);
+    cursor.set_speed(PlaybackSpeed::new(f64::INFINITY));
+    assert_eq!(cursor.speed().factor(), 100.0);
+    cursor.play(&index);
+    assert!(cursor.advance(&index, Duration::MAX));
+    assert_eq!(cursor.time_us(), 1_000);
+    assert_eq!(cursor.applied(), 10);
+    assert!(!cursor.is_playing());
+
+    // A range after the last transition.
+    cursor.set_range(&index, Some((5_000, u64::MAX)));
+    assert_eq!(cursor.time_us(), 5_000);
+    assert_eq!(cursor.applied(), 10);
+    assert!(!cursor.step_forward(&index));
+    assert!(!cursor.step_back(&index));
+    cursor.set_speed(PlaybackSpeed::NORMAL);
+    cursor.play(&index);
+    assert!(!cursor.advance(&index, Duration::from_secs(1)));
+    assert_eq!(cursor.time_us(), 5_000 + 1_000_000);
+    assert!(cursor.is_playing());
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(96))]
+
+    /// Adding transitions in chunks (in order or not) gives the same index
+    /// as one build of all transitions.
+    #[test]
+    fn prop_extend_equals_full_build(
+        transitions in transitions_strategy(8, 80, 120),
+        cuts in prop::collection::vec(any::<prop::sample::Index>(), 0..6),
+        interval in 1usize..10,
+        with_cursor in any::<bool>(),
+    ) {
+        let mut points: Vec<usize> = cuts.iter().map(|cut| cut.index(transitions.len() + 1)).collect();
+        points.push(0);
+        points.push(transitions.len());
+        points.sort_unstable();
+        let mut index = ReplayIndex::with_snapshot_interval(&[], interval);
+        let mut cursor = Cursor::new();
+        for pair in points.windows(2) {
+            index.extend(&transitions[pair[0]..pair[1]], pair[0]);
+            if with_cursor {
+                cursor.clamp(&index);
+                prop_assert!(cursor.applied() >= index.count_before_time(cursor.time_us()));
+                prop_assert!(cursor.applied() <= index.count_at_time(cursor.time_us()));
+                cursor.step_forward(&index);
+            }
+        }
+        let full = ReplayIndex::with_snapshot_interval(&transitions, interval);
+        prop_assert_eq!(index.transitions(), full.transitions());
+        prop_assert_eq!(index.uids(), full.uids());
+        for count in 0..=transitions.len() {
+            prop_assert_eq!(index.state_after(count), full.state_after(count));
+            prop_assert_eq!(index.source_index(count), full.source_index(count));
         }
     }
 }

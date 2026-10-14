@@ -174,3 +174,34 @@ fn filter_serde_round_trip() {
     let back: TransitionFilter = serde_json::from_str(&json).unwrap();
     assert_eq!(back, filter);
 }
+
+/// A slow, plain matcher for `*` and `?` that matches the full text.
+fn naive_glob(pattern: &[char], text: &[char]) -> bool {
+    match pattern.split_first() {
+        None => text.is_empty(),
+        Some(('*', rest)) => (0..=text.len()).any(|skip| naive_glob(rest, &text[skip..])),
+        Some(('?', rest)) => !text.is_empty() && naive_glob(rest, &text[1..]),
+        Some((c, rest)) => text.first() == Some(c) && naive_glob(rest, &text[1..]),
+    }
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(512))]
+
+    #[test]
+    fn prop_pattern_matches_like_a_naive_matcher(
+        pattern in "[aAbB*?]{1,8}",
+        text in "[aAbB]{0,10}",
+    ) {
+        let compiled = fasttick_log::filter::Pattern::new(&pattern).unwrap();
+        let pattern_chars: Vec<char> = pattern.to_lowercase().chars().collect();
+        let text_lower = text.to_lowercase();
+        let text_chars: Vec<char> = text_lower.chars().collect();
+        let expected = if pattern.contains(['*', '?']) {
+            naive_glob(&pattern_chars, &text_chars)
+        } else {
+            text_lower.contains(&pattern.to_lowercase())
+        };
+        proptest::prop_assert_eq!(compiled.matches(&text), expected);
+    }
+}

@@ -128,3 +128,100 @@ fn json_output() {
     export_json(&[], &mut out).unwrap();
     assert_eq!(String::from_utf8(out).unwrap(), "[]\n");
 }
+
+/// A small RFC 4180 reader for the tests. It also checks that a field
+/// without quotes has no comma, quote, CR or LF.
+fn parse_csv(text: &str) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    let mut field = String::new();
+    let mut chars = text.chars().peekable();
+    let mut in_quotes = false;
+    let mut at_field_start = true;
+    while let Some(c) = chars.next() {
+        if in_quotes {
+            if c == '"' {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    field.push('"');
+                } else {
+                    in_quotes = false;
+                }
+            } else {
+                field.push(c);
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                assert!(at_field_start, "quote inside a field without quotes");
+                in_quotes = true;
+            }
+            ',' => {
+                row.push(std::mem::take(&mut field));
+                at_field_start = true;
+                continue;
+            }
+            '\r' => {
+                assert_eq!(chars.next(), Some('\n'), "CR without LF");
+                row.push(std::mem::take(&mut field));
+                rows.push(std::mem::take(&mut row));
+                at_field_start = true;
+                continue;
+            }
+            '\n' => panic!("LF without CR outside quotes"),
+            other => field.push(other),
+        }
+        at_field_start = false;
+    }
+    assert!(!in_quotes, "unterminated quotes");
+    assert!(field.is_empty() && row.is_empty(), "last line without CRLF");
+    rows
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(256))]
+
+    #[test]
+    fn prop_csv_fields_read_back(
+        names in proptest::collection::vec(
+            (
+                proptest::prelude::any::<String>(),
+                "[a,\" \r\n]{0,8}",
+                "[ab\"]{0,4}",
+            ),
+            0..6,
+        ),
+    ) {
+        let rows: Vec<ExportRow> = names
+            .iter()
+            .enumerate()
+            .map(|(position, (name, path, kind))| ExportRow {
+                offset_us: position as u64,
+                absolute_time_us: -(position as i64),
+                uid: Uid(position as u16),
+                node_name: name.clone(),
+                node_path: path.clone(),
+                node_type: kind.clone(),
+                previous_status: NodeStatus::Idle,
+                status: NodeStatus::Skipped,
+            })
+            .collect();
+        let table = parse_csv(&csv(&rows));
+        proptest::prop_assert_eq!(table.len(), rows.len() + 1);
+        proptest::prop_assert_eq!(table[0].len(), 8);
+        for (row, fields) in rows.iter().zip(&table[1..]) {
+            let expected = vec![
+                row.offset_us.to_string(),
+                row.absolute_time_us.to_string(),
+                row.uid.0.to_string(),
+                row.node_name.clone(),
+                row.node_path.clone(),
+                row.node_type.clone(),
+                "IDLE".to_string(),
+                "SKIPPED".to_string(),
+            ];
+            proptest::prop_assert_eq!(fields, &expected);
+        }
+    }
+}

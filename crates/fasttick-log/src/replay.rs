@@ -238,11 +238,15 @@ impl ReplayIndex {
 
     /// Adds transitions, for example from a log that is still written.
     ///
+    /// `source_offset` is the position of `new[0]` in the full list of
+    /// transitions (see [`ReplayIndex::source_index`]).
+    ///
     /// If all new transitions are at or after the last time and all their
-    /// UIDs are known, the index grows in place. Otherwise the index is
-    /// built again. `source_offset` is the position of `new[0]` in the full
-    /// list of transitions (see [`ReplayIndex::source_index`]).
-    pub fn extend(&mut self, new: &[Transition], source_offset: usize) {
+    /// UIDs are known, the index grows in place and the function returns
+    /// true. Otherwise the index is built again and the function returns
+    /// false: the sorted positions of the old transitions can change. In both
+    /// cases, call [`Cursor::clamp`] after this function.
+    pub fn extend(&mut self, new: &[Transition], source_offset: usize) -> bool {
         let last = self.last_time().unwrap_or(0);
         let in_order = new
             .windows(2)
@@ -263,6 +267,7 @@ impl ReplayIndex {
                     .map(|position| source_offset.saturating_add(position))
                     .collect();
                 self.append_sorted(new.to_vec(), source, slots);
+                true
             }
             _ => {
                 // Rebuild from the input order.
@@ -295,6 +300,7 @@ impl ReplayIndex {
                 self.uids = rebuilt.uids;
                 self.interval = rebuilt.interval;
                 self.snapshots = rebuilt.snapshots;
+                false
             }
         }
     }
@@ -497,14 +503,18 @@ impl Default for PlaybackSpeed {
 /// The playback position of a replay.
 ///
 /// The cursor does not hold the index. Its methods take the
-/// [`ReplayIndex`] as a parameter. Use the cursor only with one index (or
-/// with an index that only grows, see [`ReplayIndex::extend`]).
+/// [`ReplayIndex`] as a parameter. Use the cursor only with one index. After
+/// the index grows ([`ReplayIndex::extend`]), call [`Cursor::clamp`].
 ///
 /// The position has two parts:
 ///
 /// - `applied`: the number of sorted transitions that are applied. The
 ///   shown state is [`ReplayIndex::state_after`]`(applied)`.
 /// - `time_us`: the time on the timeline.
+///
+/// All transitions before `time_us` are applied, and no transition after
+/// it. Of the transitions at exactly `time_us`, the first ones can be
+/// applied and the others not (after a step).
 ///
 /// The bounds are the selected time range, or else `0` to the time of the
 /// last transition. Play, seek and step stay in the bounds. At the start of
@@ -604,14 +614,19 @@ impl Cursor {
         self.clamp(index);
     }
 
-    /// Moves the cursor into the bounds. Call this after the index grows.
+    /// Moves the cursor into the bounds, and makes `applied` agree with the
+    /// time again: all transitions before the time are applied, and none
+    /// after it. Call this after the index changes (see
+    /// [`ReplayIndex::extend`]).
     pub fn clamp(&mut self, index: &ReplayIndex) {
         let (start, end) = self.bounds(index);
         if self.time_us < start || self.time_us > end {
             self.seek(index, self.time_us.clamp(start, end));
             return;
         }
-        let (low, high) = self.applied_bounds(index);
+        // The time is in the bounds, so this is a part of `applied_bounds`.
+        let low = index.count_before_time(self.time_us);
+        let high = index.count_at_time(self.time_us);
         self.applied = self.applied.clamp(low, high);
     }
 

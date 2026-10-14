@@ -464,3 +464,130 @@ proptest! {
         let _ = reader.to_log();
     }
 }
+
+/// A reader that fails in a given way, then gives the data.
+struct Flaky<'a> {
+    data: &'a [u8],
+    interrupt_next: bool,
+    fail_at: Option<usize>,
+    position: usize,
+}
+
+impl std::io::Read for Flaky<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.interrupt_next {
+            self.interrupt_next = false;
+            return Err(std::io::ErrorKind::Interrupted.into());
+        }
+        if self.fail_at.is_some_and(|at| self.position >= at) {
+            return Err(std::io::Error::other("disk on fire"));
+        }
+        let end = self.fail_at.unwrap_or(self.data.len()).min(self.data.len());
+        let count = 5.min(buf.len()).min(end - self.position);
+        buf[..count].copy_from_slice(&self.data[self.position..self.position + count]);
+        self.position += count;
+        // Interrupt again after each read.
+        self.interrupt_next = true;
+        Ok(count)
+    }
+}
+
+#[test]
+fn read_from_retries_interrupted_reads() {
+    let transitions = sample_transitions();
+    let bytes = write_log(SAMPLE_XML, START_US, &transitions);
+    let mut source = Flaky {
+        data: &bytes,
+        interrupt_next: true,
+        fail_at: None,
+        position: 0,
+    };
+    let mut reader = BtLogReader::new();
+    assert_eq!(reader.read_from(&mut source).unwrap(), transitions.len());
+    assert_eq!(
+        reader.into_log().unwrap(),
+        BtLog::from_bytes(&bytes).unwrap()
+    );
+}
+
+#[test]
+fn read_from_reports_io_errors() {
+    let bytes = write_log(SAMPLE_XML, START_US, &sample_transitions());
+    let fail_at = header_len(SAMPLE_XML) + 20;
+    let mut source = Flaky {
+        data: &bytes,
+        interrupt_next: false,
+        fail_at: Some(fail_at),
+        position: 0,
+    };
+    let mut reader = BtLogReader::new();
+    match reader.read_from(&mut source) {
+        Err(LogError::Io(err)) => assert_eq!(err.to_string(), "disk on fire"),
+        other => panic!("unexpected result {other:?}"),
+    }
+    // The bytes before the error are kept.
+    assert!(reader.header().is_some());
+    assert_eq!(reader.transitions().len(), 2);
+    assert_eq!(reader.pending_bytes(), 2);
+}
+
+#[test]
+fn create_error_names_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("no_such_dir").join("run.btlog");
+    match BtLogWriter::create(&path, SAMPLE_XML, START_US) {
+        Err(LogError::Write { path: reported, .. }) => assert_eq!(reported, path),
+        other => panic!("unexpected result {other:?}"),
+    }
+    let message = BtLogWriter::create(&path, SAMPLE_XML, START_US)
+        .unwrap_err()
+        .to_string();
+    assert!(message.contains("no_such_dir"), "{message}");
+}
+
+#[test]
+fn header_error_after_the_full_header_keeps_the_reader() {
+    // The XML is not valid. The error comes when the header is complete,
+    // and the reader stays at the bytes from before.
+    let bytes = handmade_log("<root><BehaviorTree", START_US, &[(1, 1, 1)]);
+    let header_end = 23 + "<root><BehaviorTree".len() + 8;
+    let mut reader = BtLogReader::new();
+    reader.push(&bytes[..header_end - 1]).unwrap();
+    assert!(matches!(
+        reader.push(&bytes[header_end - 1..]),
+        Err(LogError::InvalidXml(_))
+    ));
+    assert_eq!(reader.pending_bytes(), header_end - 1);
+    assert!(reader.header().is_none());
+    // The same error again, with the same bytes.
+    assert!(matches!(
+        reader.push(&bytes[header_end - 1..]),
+        Err(LogError::InvalidXml(_))
+    ));
+    assert!(matches!(
+        reader.to_log(),
+        Err(LogError::TruncatedHeader { .. })
+    ));
+}
+
+#[test]
+fn decode_records_of_a_transitions_reply() {
+    use fasttick_log::btlog::decode_records;
+    // GET_TRANSITIONS: the same 9-byte records, with an offset from the
+    // start of the recording.
+    let records = [(0, 3, 1), (1_500, 3, 2), (1_501, 3, 0)];
+    let full = handmade_log("", 0, &records);
+    let body = &full[header_len("")..];
+    let decoded = decode_records(body);
+    assert_eq!(
+        decoded.transitions,
+        vec![
+            t(0, 3, NodeStatus::Running),
+            t(1_500, 3, NodeStatus::Success),
+            t(1_501, 3, NodeStatus::Idle),
+        ]
+    );
+    assert_eq!(decoded.invalid_records, 0);
+    assert_eq!(decoded.trailing_bytes, 0);
+    assert_eq!(decode_records(&[]).transitions, vec![]);
+}
