@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  FastTick test tree (MIT) for the hook tests of fasttick-protocol.
+
+  Run it with the executor option loops = 0: the tree runs again and again,
+  and the executor writes one RESULT line for each run.
+
+  Each run takes three ticks:
+  - "count_runs" adds 1 to {runs} on each run. The RESULT line "loop=N"
+    belongs to the run that set {runs} to N.
+  - "probe" adds 1 to {probe_ticks} only when it really ticks. A hook that
+    replaces the tick (replace mode, or an unlock with SUCCESS or FAILURE)
+    does not change {probe_ticks}. The post-conditions write the result of
+    "probe" to {probe_result}, also for a replaced tick.
+  - "probe_wait" stays RUNNING for two ticks, so that STATUS replies change
+    over time.
+  - "count_done" adds 1 to {done} when the run gets past "probe".
+-->
+<root BTCPP_format="4" main_tree_to_execute="Probe">
+
+  <BehaviorTree ID="Probe">
+    <Sequence name="probe_sequence">
+      <IncrementCounter name="count_runs" counter="{runs}"/>
+      <IncrementCounter name="probe" counter="{probe_ticks}"
+                        _onSuccess="probe_result:='success'"
+                        _onFailure="probe_result:='failure'"/>
+      <WaitTicks name="probe_wait" ticks="2"/>
+      <IncrementCounter name="count_done" counter="{done}"/>
+    </Sequence>
+  </BehaviorTree>
+
+</root>
