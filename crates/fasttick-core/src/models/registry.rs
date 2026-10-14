@@ -73,6 +73,8 @@ pub struct ModelRegistry {
     closure: HashMap<FileId, Vec<FileId>>,
     project: ModelList,
     inferred: Vec<NodeModel>,
+    /// The positions in `inferred` for each tree ID, in project order.
+    inferred_by_id: HashMap<String, Vec<usize>>,
 }
 
 impl Default for ModelRegistry {
@@ -101,6 +103,7 @@ impl ModelRegistry {
             closure: HashMap::new(),
             project: ModelList::new(Vec::new()),
             inferred: Vec::new(),
+            inferred_by_id: HashMap::new(),
         }
     }
 
@@ -124,6 +127,7 @@ impl ModelRegistry {
         self.closure.clear();
         let mut project = Vec::new();
         self.inferred.clear();
+        self.inferred_by_id.clear();
         for f in files {
             let index = f.file.index();
             if f.is_model_file {
@@ -145,6 +149,10 @@ impl ModelRegistry {
             for tree in &index.trees {
                 let mut model = NodeModel::new(tree.id.clone(), NodeKind::SubTree);
                 model.source = ModelSource::InferredSubTree(f.id);
+                self.inferred_by_id
+                    .entry(tree.id.clone())
+                    .or_default()
+                    .push(self.inferred.len());
                 self.inferred.push(model);
             }
         }
@@ -192,18 +200,19 @@ impl ModelRegistry {
         file: impl Into<Option<FileId>>,
         tree_id: &str,
     ) -> Option<&NodeModel> {
+        let candidates = self.inferred_by_id.get(tree_id)?;
         if let Some(file) = file.into() {
             for f in self.closure_of(&file) {
-                let found = self
-                    .inferred
+                let found = candidates
                     .iter()
-                    .find(|m| m.id == tree_id && m.source == ModelSource::InferredSubTree(*f));
+                    .map(|&i| &self.inferred[i])
+                    .find(|m| m.source == ModelSource::InferredSubTree(*f));
                 if found.is_some() {
                     return found;
                 }
             }
         }
-        self.inferred.iter().find(|m| m.id == tree_id)
+        candidates.first().map(|&i| &self.inferred[i])
     }
 
     /// Finds the model of a type ID in the full look-up order. `file` is the

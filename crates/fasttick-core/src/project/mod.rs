@@ -35,7 +35,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::bt::{BtError, BtFile, StructureHash, TreeEntry, format_index_path, parse_index_path};
-use crate::fsio::{normalize, relative_path, write_atomic};
+use crate::fsio::{clean_path, normalize, relative_path, write_atomic};
 use crate::models::{ModelRegistry, ModelSource, NodeModel, RegistryFile};
 use crate::xml::{Node, NodeId};
 
@@ -284,7 +284,7 @@ impl Project {
     /// unconnected nodes do not stop the load; see [`Project::warnings`].
     /// Include problems are in [`Project::includes`].
     pub fn open(path: impl AsRef<Path>) -> Result<Project, ProjectError> {
-        let path = normalize(path.as_ref());
+        let path = clean_path(path.as_ref());
         let text = std::fs::read_to_string(&path).map_err(|source| ProjectError::Read {
             path: path.clone(),
             source,
@@ -307,7 +307,7 @@ impl Project {
     /// The project also loads the files that it includes. The project name
     /// is the file name without the extension.
     pub fn open_xml(path: impl AsRef<Path>) -> Result<Project, ProjectError> {
-        let path = normalize(path.as_ref());
+        let path = clean_path(path.as_ref());
         let mut project = Project::new(stem(&path));
         project.load_entry(&path, FileRole::Tree)?;
         project.refresh();
@@ -316,9 +316,11 @@ impl Project {
     }
 
     /// Makes an in-memory project with one file (for example a new file).
+    /// The project loads the files that the file includes.
     pub fn with_file(name: impl Into<String>, file: BtFile) -> (Project, FileId) {
         let mut project = Project::new(name);
         let id = project.add_bt_file(file, FileRole::Tree);
+        project.refresh();
         project.dirty = false;
         (project, id)
     }
@@ -337,7 +339,7 @@ impl Project {
             (&project_file.model_files, FileRole::Models),
         ] {
             for rel in list {
-                let path = normalize(&base.join(rel));
+                let path = clean_path(&base.join(rel));
                 if let Err(error) = self.load_entry(&path, role) {
                     self.warnings.push(ProjectWarning::FileNotLoaded {
                         path: path.clone(),
@@ -461,7 +463,7 @@ impl Project {
             }
             return Ok(id);
         }
-        let file = BtFile::load(normalize(path))?;
+        let file = BtFile::load(clean_path(path))?;
         Ok(self.add_bt_file(file, role))
     }
 
@@ -595,7 +597,9 @@ impl Project {
                 continue;
             };
             let base_dir = match entry.file.path().and_then(Path::parent) {
-                Some(dir) => normalize(dir),
+                // As BT.CPP: the directory of the path as loaded, without
+                // the resolution of a link at the file itself.
+                Some(dir) => clean_path(dir),
                 // BT.CPP uses the current directory for text that is not
                 // from a file (`loadFromText`).
                 None => normalize(Path::new(".")),
@@ -1092,7 +1096,7 @@ impl Project {
     /// Saves one XML file to a new path, then resolves the includes again
     /// (relative includes now start at the new directory).
     pub fn save_file_as(&mut self, id: FileId, path: impl AsRef<Path>) -> Result<(), ProjectError> {
-        let path = normalize(path.as_ref());
+        let path = clean_path(path.as_ref());
         let file = self.file_mut(id).ok_or(ProjectError::UnknownFile(id))?;
         file.save(&path)?;
         if let Some(entry) = self.entries[id.0].as_mut() {
@@ -1144,7 +1148,13 @@ impl Project {
                 LayoutEntry {
                     direction: state.direction,
                     structure_hash: state.structure_hash.to_string(),
-                    positions: state.positions.clone(),
+                    // JSON cannot hold values that are not finite.
+                    positions: state
+                        .positions
+                        .iter()
+                        .filter(|(_, p)| p.iter().all(|v| v.is_finite()))
+                        .map(|(k, p)| (k.clone(), *p))
+                        .collect(),
                 },
             );
         }
@@ -1159,7 +1169,7 @@ impl Project {
                     file: rel(*file)?,
                     tree: tree.clone(),
                     xml: bt.doc().write_node(item.node),
-                    position: item.position,
+                    position: finite_or_zero(item.position),
                 });
             }
         }
@@ -1176,7 +1186,7 @@ impl Project {
     /// Writes the project file to a new path and makes it the project path.
     /// The paths in the file are relative to its directory.
     pub fn save_as(&mut self, path: impl AsRef<Path>) -> Result<(), ProjectError> {
-        let path = normalize(path.as_ref());
+        let path = clean_path(path.as_ref());
         let base = path
             .parent()
             .map(Path::to_path_buf)
@@ -1192,6 +1202,16 @@ impl Project {
         self.path = Some(path);
         self.dirty = false;
         Ok(())
+    }
+}
+
+/// The position, or the origin if a value is not finite (JSON cannot hold
+/// it).
+fn finite_or_zero(position: [f32; 2]) -> [f32; 2] {
+    if position.iter().all(|v| v.is_finite()) {
+        position
+    } else {
+        [0.0, 0.0]
     }
 }
 

@@ -84,6 +84,35 @@ pub(crate) fn normalize(path: &Path) -> PathBuf {
     out
 }
 
+/// Makes a path absolute and removes `.` and `..` parts, but only if that
+/// does not change the file that the path names.
+///
+/// The operating system resolves `..` after it follows a symbolic link:
+/// `a/link/../f.xml` is `f.xml` in the parent of the link target, not
+/// `a/f.xml`. BT.CPP gives the joined path to the operating system without
+/// normalization. So the normalized path is used only if its directory and
+/// the directory of the original path are the same directory (or if
+/// neither exists). Else the result is the absolute path without changes.
+pub(crate) fn clean_path(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    let normalized = normalize(&absolute);
+    if normalized == absolute {
+        return normalized;
+    }
+    let dir = |p: &Path| p.parent().map(fs::canonicalize);
+    match (dir(&absolute), dir(&normalized)) {
+        (Some(Ok(a)), Some(Ok(b))) if a == b => normalized,
+        (Some(Err(_)) | None, Some(Err(_)) | None) => normalized,
+        _ => absolute,
+    }
+}
+
 /// The path of `target` relative to the directory `base`, with `/` as the
 /// separator. Both paths are normalized first. If the paths have no common
 /// root (for example two Windows drives), the result is the absolute
@@ -124,6 +153,38 @@ mod tests {
         );
         assert_eq!(normalize(Path::new("/../a")), PathBuf::from("/a"));
         assert!(normalize(Path::new("x/y")).is_absolute());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clean_path_keeps_the_meaning_of_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().canonicalize().unwrap();
+        // d/a/link -> d/x/y; the file is d/x/b/f.xml.
+        fs::create_dir_all(d.join("a")).unwrap();
+        fs::create_dir_all(d.join("x/y")).unwrap();
+        fs::create_dir_all(d.join("x/b")).unwrap();
+        fs::write(d.join("x/b/f.xml"), "<root/>").unwrap();
+        std::os::unix::fs::symlink(d.join("x/y"), d.join("a/link")).unwrap();
+        let through_link = d.join("a/link/../b/f.xml");
+        // The OS resolves ".." after the link.
+        assert!(through_link.is_file());
+        assert_eq!(clean_path(&through_link), through_link);
+        // Without links, the path is normalized.
+        assert_eq!(clean_path(&d.join("x/y/../b/./f.xml")), d.join("x/b/f.xml"));
+        // A missing directory in the original path: the OS cannot open it,
+        // so the path stays as it is (the load fails, as in BT.CPP).
+        assert_eq!(
+            clean_path(&d.join("none/../z.xml")),
+            d.join("none/../z.xml")
+        );
+        // Neither directory exists: the path is normalized.
+        assert_eq!(
+            clean_path(&d.join("none/../other/z.xml")),
+            d.join("other/z.xml")
+        );
+        assert_eq!(clean_path(&d.join("x/b/f.xml")), d.join("x/b/f.xml"));
+        assert!(clean_path(Path::new("rel/../f.xml")).is_absolute());
     }
 
     #[test]

@@ -5,6 +5,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::bt::IncludeEntry;
+use crate::fsio::clean_path;
+#[cfg(test)]
 use crate::fsio::normalize;
 use crate::xml::NodeId;
 
@@ -84,7 +86,8 @@ impl fmt::Display for IncludeProblem {
 pub struct IncludeLink {
     /// The `<include>` element.
     pub element: NodeId,
-    /// The resolved, normalized path, if the path could be made.
+    /// The resolved absolute path, if the path could be made. `.` and `..`
+    /// parts are removed when that does not change the meaning.
     pub path: Option<PathBuf>,
     /// The loaded target file. It is set also for a cycle.
     pub target: Option<FileId>,
@@ -130,7 +133,9 @@ pub fn find_package_share(package: &str, prefix_path: &OsStr) -> Option<PathBuf>
 /// 2. A relative path is relative to `base_dir`: the directory of the
 ///    including file.
 ///
-/// The result is absolute and normalized (`.` and `..` are removed).
+/// The result is absolute. `.` and `..` parts are removed if that does not
+/// change the file that the path names (see the symbolic link rule of
+/// `clean_path`: BT.CPP lets the operating system resolve the path).
 pub fn resolve_include_path(
     base_dir: &Path,
     include: &IncludeEntry,
@@ -152,7 +157,7 @@ pub fn resolve_include_path(
     if !file_path.is_absolute() {
         file_path = base_dir.join(file_path);
     }
-    Ok(normalize(&file_path))
+    Ok(clean_path(&file_path))
 }
 
 /// The value of `AMENT_PREFIX_PATH` in the environment.

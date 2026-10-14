@@ -749,3 +749,73 @@ fn remove_file_drops_unneeded_includes() {
     assert!(project.find_tree("MainTree").is_some());
     assert_eq!(project.find_trees("MainTree").len(), 1);
 }
+
+/// BT.CPP resolves an include relative to the directory of the including
+/// file as it was given (it does not follow a link at the file), and the
+/// operating system resolves `..` after it follows a directory link. This is
+/// the layout of a ROS workspace that is built with `--symlink-install`.
+#[cfg(unix)]
+#[test]
+fn includes_through_symbolic_links_resolve_like_btcpp() {
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().canonicalize().unwrap();
+    let main_text = r#"<root BTCPP_format="4">
+  <include path="../other/x.xml"/>
+  <BehaviorTree ID="Main"><AlwaysSuccess/></BehaviorTree>
+</root>"#;
+    write(&d, "src/pkg/trees/main.xml", main_text);
+    write(&d, "src/pkg/other/x.xml", &tree_xml("SrcX", &[]));
+    write(
+        &d,
+        "install/share/pkg/other/x.xml",
+        &tree_xml("InstallX", &[]),
+    );
+
+    // 1. A link at the file: the include is relative to the install tree.
+    fs::create_dir_all(d.join("install/share/pkg/trees")).unwrap();
+    symlink(
+        d.join("src/pkg/trees/main.xml"),
+        d.join("install/share/pkg/trees/main.xml"),
+    )
+    .unwrap();
+    let project = Project::open_xml(d.join("install/share/pkg/trees/main.xml")).unwrap();
+    assert!(project.find_tree("InstallX").is_some());
+    assert!(project.find_tree("SrcX").is_none());
+
+    // 2. A link at the directory: ".." goes to the parent of the target.
+    symlink(
+        d.join("src/pkg/trees"),
+        d.join("install/share/pkg/trees_link"),
+    )
+    .unwrap();
+    let project = Project::open_xml(d.join("install/share/pkg/trees_link/main.xml")).unwrap();
+    assert!(project.find_tree("SrcX").is_some());
+    assert!(project.find_tree("InstallX").is_none());
+}
+
+#[test]
+fn values_that_json_cannot_hold_are_not_saved() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let file = write(d, "t.xml", &tree_xml("T", &[]));
+    let mut project = Project::new("n");
+    let id = project.add_file(&file).unwrap();
+    let mut state = LayoutState::new(LayoutDirection::TopDown, StructureHash(3));
+    state.positions.insert("0".into(), [f32::NAN, 1.0]);
+    state.positions.insert("0/0".into(), [1.0, 2.0]);
+    project.set_layout(id, "T", state);
+    let nodes = project
+        .file_mut(id)
+        .unwrap()
+        .doc_mut()
+        .parse_fragment("<A/>")
+        .unwrap();
+    project.add_unconnected(id, "T", nodes[0], [f32::INFINITY, 0.0]);
+    let path = d.join("n.ftproj");
+    project.save_as(&path).unwrap();
+    let loaded = Project::open(&path).unwrap();
+    let id = loaded.file_id_by_path(&file).unwrap();
+    assert_eq!(loaded.layout(id, "T").unwrap().positions.len(), 1);
+    assert_eq!(loaded.unconnected(id, "T")[0].position, [0.0, 0.0]);
+}
