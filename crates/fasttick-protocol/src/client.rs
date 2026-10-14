@@ -15,6 +15,7 @@
 //! stop the executor.
 
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::messages::{
@@ -142,13 +143,59 @@ impl ClientError {
     }
 }
 
+/// The events that the client reads from the monitor of the notification
+/// socket (`zmq_socket_monitor`).
+const MONITOR_EVENTS: i32 = zmq::SocketEvent::HANDSHAKE_SUCCEEDED as i32
+    | zmq::SocketEvent::DISCONNECTED as i32
+    | zmq::SocketEvent::CLOSED as i32;
+
+/// The SUB socket for notifications, with a socket monitor that tells if it
+/// is connected.
+struct NotificationSocket {
+    socket: zmq::Socket,
+    /// A PAIR socket that receives the monitor events of `socket`.
+    monitor: zmq::Socket,
+    /// True after a complete ZeroMQ handshake, false after a disconnect.
+    connected: bool,
+}
+
+impl NotificationSocket {
+    /// Reads the monitor events that arrived and updates `connected`.
+    ///
+    /// Each event has two parts. Part 1 has the event number (`u16`) and a
+    /// value (`u32`), in the byte order of the host. Part 2 is the
+    /// endpoint (see `zmq_socket_monitor`).
+    fn update(&mut self) {
+        loop {
+            let parts = match self.monitor.recv_multipart(zmq::DONTWAIT) {
+                Ok(parts) => parts,
+                Err(_) => return,
+            };
+            let Some(event) = parts
+                .first()
+                .and_then(|part| part.get(..2))
+                .map(|bytes| u16::from_ne_bytes([bytes[0], bytes[1]]))
+            else {
+                continue;
+            };
+            if event == zmq::SocketEvent::HANDSHAKE_SUCCEEDED.to_raw() {
+                self.connected = true;
+            } else if event == zmq::SocketEvent::DISCONNECTED.to_raw()
+                || event == zmq::SocketEvent::CLOSED.to_raw()
+            {
+                self.connected = false;
+            }
+        }
+    }
+}
+
 /// A blocking client for the publisher protocol. See the module
 /// documentation.
 pub struct Client {
     config: ClientConfig,
     context: zmq::Context,
     request_socket: Option<zmq::Socket>,
-    notification_socket: Option<zmq::Socket>,
+    notification_socket: Option<NotificationSocket>,
     last_tree_uuid: Option<TreeUuid>,
 }
 
@@ -214,6 +261,36 @@ impl Client {
         self.request_socket = Some(self.open_request_socket()?);
         self.notification_socket = Some(self.open_notification_socket()?);
         Ok(())
+    }
+
+    /// Closes the notification socket and opens a new one. A new socket
+    /// tries to connect at once. An old socket that lost its connection
+    /// tries again only after the ZeroMQ reconnect interval (100 ms to
+    /// 200 ms). Notifications that were not read are lost.
+    pub fn reset_notifications(&mut self) -> Result<(), ClientError> {
+        self.notification_socket = None;
+        self.notification_socket = Some(self.open_notification_socket()?);
+        Ok(())
+    }
+
+    /// True if the notification socket (SUB, `port + 1`) is connected to
+    /// the publisher: the ZeroMQ handshake is complete. This call does not
+    /// wait. It reads the events of a ZeroMQ socket monitor.
+    ///
+    /// Check it before a request that can make a node stop at a
+    /// breakpoint. The publisher sends BREAKPOINT_REACHED only once for
+    /// each stop, and its PUB socket drops the message if no subscriber is
+    /// connected. ZeroMQ connects the REQ and the SUB socket independently,
+    /// so after a restart of the executor the REQ socket can be connected
+    /// some time before the SUB socket.
+    pub fn notifications_connected(&mut self) -> bool {
+        match self.notification_socket.as_mut() {
+            Some(notifications) => {
+                notifications.update();
+                notifications.connected
+            }
+            None => false,
+        }
     }
 
     /// FULLTREE: gets the tree as XML (`WriteTreeToXML(tree, true, true)`).
@@ -338,7 +415,7 @@ impl Client {
         if self.notification_socket.is_none() {
             self.notification_socket = Some(self.open_notification_socket()?);
         }
-        let Some(socket) = self.notification_socket.as_ref() else {
+        let Some(socket) = self.notification_socket.as_ref().map(|n| &n.socket) else {
             return Ok(None);
         };
         if !wait_readable(socket, Instant::now() + timeout)? {
@@ -443,13 +520,28 @@ impl Client {
         Ok(socket)
     }
 
-    fn open_notification_socket(&self) -> Result<zmq::Socket, ClientError> {
+    fn open_notification_socket(&self) -> Result<NotificationSocket, ClientError> {
+        static MONITOR_COUNT: AtomicU64 = AtomicU64::new(0);
         let endpoint = self.config.notification_endpoint()?;
         let socket = self.context.socket(zmq::SUB)?;
         self.configure(&socket)?;
         socket.set_subscribe(b"")?;
+        // The monitor must be ready before the connect, so that no event is
+        // lost. The name must be unique in the context.
+        let monitor_endpoint = format!(
+            "inproc://fasttick-notification-monitor-{}",
+            MONITOR_COUNT.fetch_add(1, Ordering::Relaxed)
+        );
+        socket.monitor(&monitor_endpoint, MONITOR_EVENTS)?;
+        let monitor = self.context.socket(zmq::PAIR)?;
+        monitor.set_linger(0)?;
+        monitor.connect(&monitor_endpoint)?;
         socket.connect(&endpoint)?;
-        Ok(socket)
+        Ok(NotificationSocket {
+            socket,
+            monitor,
+            connected: false,
+        })
     }
 
     fn configure(&self, socket: &zmq::Socket) -> Result<(), ClientError> {
