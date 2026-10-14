@@ -263,6 +263,26 @@ pub fn wait_hit(client: &mut Client, uid: u16) -> usize {
     }
 }
 
+/// Same as [`wait_hit`], but the client sends a STATUS request every
+/// 100 ms during the wait, so that the publisher keeps its heartbeat.
+pub fn wait_hit_with_heartbeat(client: &mut Client, uid: u16) {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "no BREAKPOINT_REACHED for node {uid} within {WAIT:?}"
+        );
+        if let Some(notification) = client
+            .poll_notification(Duration::from_millis(100))
+            .expect("notification socket")
+            && notification.uid == Uid(uid)
+        {
+            return;
+        }
+        client.status().expect("STATUS");
+    }
+}
+
 /// See [`Live::sync_notifications`].
 pub fn sync_notifications(client: &mut Client, uid: u16) {
     client
