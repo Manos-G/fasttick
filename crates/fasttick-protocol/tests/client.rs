@@ -513,3 +513,61 @@ fn requests_are_well_formed() {
     }
     fake.assert_not_crashed();
 }
+
+#[test]
+fn notifications_connected_follows_the_publisher() {
+    let mut fake = FakePublisher::start();
+    let mut client = client_for(&fake, 2000);
+    let wait_for = |client: &mut Client, connected: bool| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while client.notifications_connected() != connected {
+            assert!(
+                Instant::now() < deadline,
+                "notifications_connected() did not become {connected}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    // The handshake with the PUB socket completes in the background.
+    wait_for(&mut client, true);
+    // The subscription is active: a notification arrives.
+    fake.notify(3);
+    let notification = client
+        .poll_notification(Duration::from_secs(10))
+        .unwrap()
+        .expect("a notification");
+    assert_eq!(notification.uid, Uid(3));
+
+    // The executor goes away: the monitor reports the disconnect.
+    fake.stop();
+    wait_for(&mut client, false);
+    // A new socket does not connect while nothing listens.
+    client.reset_notifications().unwrap();
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(!client.notifications_connected());
+
+    // The executor comes back. The new socket connects and subscribes.
+    fake.start_again();
+    wait_for(&mut client, true);
+    fake.notify(5);
+    let notification = client
+        .poll_notification(Duration::from_secs(10))
+        .unwrap()
+        .expect("a notification");
+    assert_eq!(notification.uid, Uid(5));
+    fake.assert_not_crashed();
+}
+
+#[test]
+fn notifications_connected_is_false_without_a_publisher() {
+    let config = ClientConfig {
+        request_timeout: Duration::from_millis(50),
+        ..ClientConfig::new("127.0.0.1", 9)
+    };
+    let mut client = Client::connect(config).unwrap();
+    assert!(!client.notifications_connected());
+    client.reset_notifications().unwrap();
+    assert!(!client.notifications_connected());
+    client.reset().unwrap();
+    assert!(!client.notifications_connected());
+}

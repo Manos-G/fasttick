@@ -166,6 +166,12 @@ impl NotificationSocket {
     /// value (`u32`), in the byte order of the host. Part 2 is the
     /// endpoint (see `zmq_socket_monitor`).
     fn update(&mut self) {
+        // A SUB socket sends its subscription again after a reconnect only
+        // when the thread that uses it handles its pending commands
+        // (`session_base_t::reconnect` and `xsub_t::xhiccuped` in libzmq).
+        // Reading ZMQ_EVENTS handles them. Without the subscription, the
+        // PUB socket of the publisher drops all notifications.
+        let _ = self.socket.get_events();
         loop {
             let parts = match self.monitor.recv_multipart(zmq::DONTWAIT) {
                 Ok(parts) => parts,

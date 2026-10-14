@@ -1070,3 +1070,58 @@ fn unlock_with_remove_when_done_forgets_the_hook() {
     assert!(handle.join());
     fake.assert_not_crashed();
 }
+
+#[test]
+fn hooks_go_back_only_after_the_notification_socket_connects() {
+    // Regression test. After a restart of the executor, ZeroMQ can connect
+    // the REQ socket some time before the SUB socket. A hook that goes back
+    // at once can stop a node at once, and the publisher sends the
+    // notification only once: without a subscriber, the PUB socket drops
+    // it, and the session never learns about the stopped node.
+    let mut fake = FakePublisher::start();
+    let (handle, mut events, old_uuid) = connect(&fake, fast_config());
+    handle.send(SessionCommand::InsertHook(Hook::breakpoint(2)));
+    assert!(has_hook(&fake, 2));
+
+    fake.stop();
+    events.wait_for("Reconnecting", |event| {
+        matches!(
+            event,
+            SessionEvent::State(ConnectionState::Reconnecting { .. })
+        )
+    });
+    // The new executor binds its server port at once and its PUB port
+    // later (less than the connect timeout of the session).
+    let new_uuid = fake.restart_executor();
+    fake.start_again_with_publisher_delay(Duration::from_millis(150));
+    let event = events.wait_for("ExecutorRestarted", |event| {
+        matches!(event, SessionEvent::ExecutorRestarted { .. })
+    });
+    assert_eq!(
+        event,
+        SessionEvent::ExecutorRestarted {
+            old: old_uuid,
+            new: new_uuid
+        }
+    );
+    assert!(has_hook(&fake, 2));
+    let bound_at = fake
+        .state()
+        .publisher_bound_at
+        .expect("the PUB socket is bound");
+    let reinserted = fake.requests_of(RequestType::HookInsert);
+    let reinserted_at = reinserted.last().unwrap().at;
+    assert!(
+        reinserted_at > bound_at,
+        "the hooks went back {:?} before the PUB socket was bound",
+        bound_at - reinserted_at
+    );
+
+    // One single hit is reported.
+    assert_eq!(fake.hit(2), Some(HookMode::Breakpoint));
+    events.wait_for("BreakpointReached", |event| {
+        *event == SessionEvent::BreakpointReached { uid: Uid(2) }
+    });
+    assert!(handle.join());
+    fake.assert_not_crashed();
+}
