@@ -363,6 +363,70 @@ fn insert_errors_do_not_change_the_document() {
 }
 
 #[test]
+fn processing_instructions_follow_the_declaration_rules() {
+    // tinyxml2 reads each `<?...?>` as a declaration.
+    let src = "<?xml version=\"1.0\"?><?pi x?>\n<r/>";
+    let mut doc = parse(src);
+    let top = doc.children(doc.root()).to_vec();
+    let (pi, r) = (top[1], top[3]);
+    let copy = doc.clone_subtree(pi).unwrap();
+    assert_eq!(
+        doc.insert_child(r, 0, copy),
+        Err(EditError::WrongKind(copy))
+    );
+    let root = doc.root();
+    assert_eq!(
+        doc.insert_child(root, 4, copy),
+        Err(EditError::DeclarationPosition(copy))
+    );
+    assert_eq!(
+        doc.move_node(pi, root, 3),
+        Err(EditError::DeclarationPosition(pi))
+    );
+    assert_eq!(doc.to_string(), src);
+    // Before the declaration is allowed (both are declarations for tinyxml2).
+    doc.move_node(pi, root, 0).unwrap();
+    assert_eq!(doc.to_string(), "<?pi x?><?xml version=\"1.0\"?>\n<r/>");
+    assert!(Document::parse(&doc.to_string()).is_ok());
+}
+
+#[test]
+fn text_cannot_end_the_document() {
+    // tinyxml2 needs a `<` after text (XML_ERROR_PARSING_TEXT).
+    let src = "<a/>text<b/>\n";
+    let mut doc = parse(src);
+    let top = doc.children(doc.root()).to_vec();
+    let (text, b, ws) = (top[1], top[2], top[3]);
+    let root = doc.root();
+    assert_eq!(doc.detach(b), Err(EditError::TrailingText(text)));
+    assert_eq!(
+        doc.remove_element_pretty(b),
+        Err(EditError::TrailingText(text))
+    );
+    assert_eq!(
+        doc.move_node(text, root, 3),
+        Err(EditError::TrailingText(text))
+    );
+    assert_eq!(doc.set_text(ws, "x"), Err(EditError::TrailingText(ws)));
+    let t = doc.create_text("more").unwrap();
+    assert_eq!(doc.append_child(root, t), Err(EditError::TrailingText(t)));
+    let a = doc.document_element().unwrap();
+    let inner = doc.element_children(a).count();
+    assert_eq!(inner, 0);
+    assert_eq!(doc.move_node(b, a, 0), Err(EditError::TrailingText(text)));
+    assert_eq!(doc.to_string(), src);
+    // White space at the end is fine.
+    doc.set_text(ws, "\n\n").unwrap();
+    let t = doc.create_text(" \t").unwrap();
+    doc.append_child(root, t).unwrap();
+    assert_eq!(doc.to_string(), "<a/>text<b/>\n\n \t");
+    assert!(Document::parse(&doc.to_string()).is_ok());
+    // Text before the last element is fine.
+    doc.set_text(text, "other").unwrap();
+    assert_eq!(doc.to_string(), "<a/>other<b/>\n\n \t");
+}
+
+#[test]
 fn declaration_stays_first() {
     let src = "<?xml version=\"1.0\"?>\n<r/>";
     let mut doc = parse(src);

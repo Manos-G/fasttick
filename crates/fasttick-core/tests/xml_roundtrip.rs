@@ -241,7 +241,6 @@ enum GenNode {
     Text(Vec<Piece>),
     Comment(String),
     CData(String),
-    Pi(String),
 }
 
 #[derive(Debug, Clone)]
@@ -356,9 +355,6 @@ fn leaf_strategy() -> impl Strategy<Value = GenNode> {
         1 => "[a-z <>&'\"\n\\]]{0,10}"
             .prop_filter("no ]]>", |s| !s.contains("]]>") && !s.ends_with(']'))
             .prop_map(GenNode::CData),
-        1 => "[a-z <>&'\"=]{0,10}"
-            .prop_filter("no ?>", |s| !s.contains("?>"))
-            .prop_map(GenNode::Pi),
         3 => element_strategy(Just(Vec::new()).boxed()).prop_map(GenNode::Element),
     ]
 }
@@ -400,8 +396,19 @@ fn misc_strategy() -> impl Strategy<Value = String> {
         Just("\n".to_owned()),
         Just("\r\n".to_owned()),
         Just("<!-- top comment -->".to_owned()),
+    ]
+}
+
+/// Processing instructions. tinyxml2 reads them as declarations, so they
+/// can only come at the start, before all other content
+/// (`XMLNode::ParseDeep`, "wellLocated").
+fn pi_strategy() -> impl Strategy<Value = String> {
+    prop_oneof![
         Just("<?xml-stylesheet href=\"a.xsl\"?>".to_owned()),
         Just("<?pi?>".to_owned()),
+        "[a-z <>&'\"=]{0,10}"
+            .prop_filter("no ?>", |s| !s.contains("?>"))
+            .prop_map(|s| format!("<?target {s}?>")),
     ]
 }
 
@@ -423,12 +430,17 @@ fn document_strategy() -> impl Strategy<Value = GenDocument> {
         proptest::collection::vec(misc_strategy(), 0..3),
         tree_strategy(),
         proptest::collection::vec(misc_strategy(), 0..3),
+        proptest::collection::vec((pi_strategy(), opt_ws_strategy()), 0..3),
     )
-        .prop_map(|(bom, decl, doctype, mut misc, root, epilog)| {
+        .prop_map(|(bom, decl, doctype, mut misc, root, epilog, pis)| {
             let mut prolog = Vec::new();
             if let Some(d) = decl {
                 prolog.push(d.to_owned());
                 prolog.push("\n".to_owned());
+            }
+            for (pi, ws) in pis {
+                prolog.push(pi);
+                prolog.push(ws);
             }
             if let Some(d) = doctype {
                 prolog.push(d.to_owned());
@@ -479,11 +491,6 @@ fn render_element(e: &GenElement, out: &mut String) {
                 out.push_str("<![CDATA[");
                 out.push_str(c);
                 out.push_str("]]>");
-            }
-            GenNode::Pi(c) => {
-                out.push_str("<?target ");
-                out.push_str(c);
-                out.push_str("?>");
             }
         }
     }

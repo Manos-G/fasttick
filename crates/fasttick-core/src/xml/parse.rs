@@ -9,7 +9,7 @@ use quick_xml::events::Event;
 
 use super::document::{DEFAULT_INDENT, Document, line_col_in};
 use super::error::XmlError;
-use super::escape::{is_all_whitespace, is_xml_whitespace, name_len};
+use super::escape::{is_all_whitespace, is_xml_whitespace, name_len, trim_whitespace_start};
 use super::node::{
     Attribute, CData, Comment, Declaration, DocType, Element, Node, NodeId, ProcessingInstruction,
     Quote, Slot, Text,
@@ -42,30 +42,44 @@ impl Document {
     /// The parser accepts what tinyxml2 (the XML reader of BT.CPP) accepts.
     /// Like tinyxml2, it also accepts some text that is not well-formed XML:
     /// a `&` that does not start a reference, `<` in attribute values, more
-    /// than one top-level element, text outside the document element, `--`
-    /// in comments, `]]>` in text and attributes without white space between
-    /// them.
+    /// than one top-level element, text before and between top-level items,
+    /// `--` in comments, `]]>` in text, attributes without white space
+    /// between them, and vertical tab and form feed as white space.
     ///
-    /// These are errors: an empty input, a malformed tag, a missing or wrong
-    /// end tag, a duplicate attribute, an XML declaration after other
-    /// content, unclosed comments, CDATA sections, processing instructions
-    /// or DOCTYPE declarations, and elements nested deeper than
-    /// [`MAX_ELEMENT_DEPTH`].
+    /// These are errors, as for tinyxml2:
     ///
-    /// Differences from tinyxml2:
+    /// - an input with only white space (and a byte order mark after it);
+    /// - a malformed tag, a missing or wrong end tag, a duplicate attribute;
+    /// - an XML declaration or a processing instruction after other content
+    ///   or inside an element (tinyxml2 reads each `<?...?>` as a
+    ///   declaration, `XMLNode::ParseDeep`, "wellLocated");
+    /// - text other than white space after the last markup of the input
+    ///   (`XMLText::ParseDeep` needs a `<` after the text);
+    /// - unclosed comments, CDATA sections, processing instructions or
+    ///   DOCTYPE declarations;
+    /// - elements nested deeper than [`MAX_ELEMENT_DEPTH`].
     ///
-    /// - Processing instructions are allowed everywhere. tinyxml2 reads each
-    ///   `<?...?>` as a declaration and accepts it only at the start.
+    /// Differences from tinyxml2. tinyxml2 accepts these inputs, but they are
+    /// errors here:
+    ///
+    /// - An end tag without a start tag at the top level. tinyxml2 stops
+    ///   there and ignores the rest of the input.
     /// - Markup that starts with `<!` and is not a comment, a CDATA section
-    ///   or a DOCTYPE is an error. tinyxml2 keeps it as an "unknown" node.
-    /// - A DOCTYPE with an internal subset is one node. tinyxml2 ends the
-    ///   "unknown" node at the first `>` (`XMLDocument::Identify`,
-    ///   `XMLUnknown::ParseDeep`).
-    /// - Only space, tab, CR and LF are white space in tags. tinyxml2 also
-    ///   accepts vertical tab and form feed.
-    /// - White space between `<` (or `</`) and the name is an error, and so
-    ///   are attributes in an end tag. tinyxml2 skips the white space and
-    ///   ignores the attributes (`XMLElement::ParseDeep`).
+    ///   or a DOCTYPE. tinyxml2 keeps it as an "unknown" node.
+    /// - White space between `<` (or `</`) and the name, and attributes in an
+    ///   end tag. tinyxml2 skips the white space and ignores the attributes
+    ///   (`XMLElement::ParseDeep`).
+    /// - A processing instruction without a target name, or without white
+    ///   space after the target name.
+    /// - A DOCTYPE declaration without a name (`<!DOCTYPE>`).
+    /// - A NUL character. tinyxml2 stops reading at the first NUL.
+    /// - A byte order mark at the start and only white space after it.
+    ///   tinyxml2 gives a document without nodes; BT.CPP then fails because
+    ///   there is no root element.
+    ///
+    /// A DOCTYPE with an internal subset is one node here. tinyxml2 ends its
+    /// "unknown" node at the first `>` and reads the rest as text
+    /// (`XMLDocument::Identify`, `XMLUnknown::ParseDeep`).
     pub fn parse(text: &str) -> Result<Document, XmlError> {
         parse_document(text, Mode::Document)
     }
@@ -144,7 +158,14 @@ pub(crate) fn parse_document(text: &str, mode: Mode) -> Result<Document, XmlErro
     let base = if bom { '\u{feff}'.len_utf8() } else { 0 };
     let mut doc = Document::with_source(text, bom);
     let body = &text[base..];
-    let result = if is_all_whitespace(body) {
+    let result = if let Some(nul) = text.find('\0') {
+        Err((
+            nul,
+            "the input contains a NUL character; BT.CPP (tinyxml2) stops \
+             reading at this point"
+                .to_owned(),
+        ))
+    } else if is_blank(body, bom) {
         // tinyxml2: XML_ERROR_EMPTY_DOCUMENT (XMLDocument::Parse).
         Err((
             base,
@@ -172,6 +193,24 @@ pub(crate) fn parse_document(text: &str, mode: Mode) -> Result<Document, XmlErro
             })
         }
     }
+}
+
+/// Returns true if `body` has no content.
+///
+/// `XMLDocument::Parse` skips the white space at the start, then reads one
+/// byte order mark, and reports `XML_ERROR_EMPTY_DOCUMENT` if nothing
+/// follows. `bom_read` is true when the byte order mark was at the very
+/// start (it is not in `body`). Only white space after the byte order mark
+/// gives a document without nodes in tinyxml2; BT.CPP then fails because
+/// there is no root element, so it is an error here too.
+fn is_blank(body: &str, bom_read: bool) -> bool {
+    let rest = trim_whitespace_start(body);
+    let rest = if bom_read {
+        rest
+    } else {
+        rest.strip_prefix('\u{feff}').unwrap_or(rest)
+    };
+    is_all_whitespace(rest)
 }
 
 /// Builds the arena from the reader events.
@@ -210,7 +249,12 @@ impl<'d, 't> Builder<'d, 't> {
     /// Adds a node as the last child of the current parent.
     fn push(&mut self, node: Node, offset: usize) -> Result<NodeId, Fail> {
         let parent = self.parent();
-        if self.stack.len() == 1 && !matches!(node, Node::Declaration(_) | Node::Text(_)) {
+        if self.stack.len() == 1
+            && !matches!(
+                node,
+                Node::Declaration(_) | Node::ProcessingInstruction(_) | Node::Text(_)
+            )
+        {
             self.top_level_content = true;
         }
         let index = self.doc.slots.len();
@@ -267,6 +311,14 @@ impl<'d, 't> Builder<'d, 't> {
                     {
                         return Err((self.base + at + rel, message));
                     }
+                    if let quick_xml::Error::Syntax(SyntaxError::InvalidBangMarkup) = e {
+                        return Err((
+                            self.base + at,
+                            "unknown markup after '<!': expected a comment (<!--), \
+                             a CDATA section (<![CDATA[) or a DOCTYPE declaration"
+                                .to_owned(),
+                        ));
+                    }
                     return Err((self.base + at, e.to_string()));
                 }
             };
@@ -315,8 +367,18 @@ impl<'d, 't> Builder<'d, 't> {
     }
 
     fn text(&mut self, raw: &str, offset: usize) -> Result<(), Fail> {
-        if self.stack.len() == 1 && !is_all_whitespace(raw) {
-            self.top_level_content = true;
+        if self.stack.len() == 1 {
+            // `XMLDocument::Parse` reads one byte order mark after the white
+            // space at the start of the input. It is not content.
+            let mut rest = trim_whitespace_start(raw);
+            if offset == 0
+                && let Some(after) = rest.strip_prefix('\u{feff}')
+            {
+                rest = after;
+            }
+            if !is_all_whitespace(rest) {
+                self.top_level_content = true;
+            }
         }
         if let Some(id) = self.open_text {
             if let Some(Node::Text(t)) = self.doc.slots.get_mut(id.index()).map(|s| &mut s.node) {
@@ -419,6 +481,16 @@ impl<'d, 't> Builder<'d, 't> {
     }
 
     fn processing_instruction(&mut self, raw: &str, offset: usize) -> Result<(), Fail> {
+        // tinyxml2 reads each `<?...?>` as a declaration
+        // (`XMLDocument::Identify`), so the rule for declarations applies.
+        if self.stack.len() > 1 || self.top_level_content {
+            return Err((
+                offset,
+                "a processing instruction must be at the start of the document, \
+                 before all other content (BT.CPP reads it as an XML declaration)"
+                    .to_owned(),
+            ));
+        }
         let content = raw.get(2..raw.len().saturating_sub(2)).unwrap_or("");
         let target_len = name_len(content);
         if target_len == 0 {
@@ -461,14 +533,29 @@ impl<'d, 't> Builder<'d, 't> {
         }
         let root = self.doc.root();
         let tops = self.doc.children(root).to_vec();
+        if self.mode == Mode::Document
+            && let Some(&last) = tops.last()
+            && let Some(Node::Text(t)) = self.doc.node(last)
+            && !t.is_whitespace()
+        {
+            // `XMLText::ParseDeep` reads text up to the next `<`. Without one,
+            // it reports XML_ERROR_PARSING_TEXT.
+            let offset = self.doc.source_offset(last).unwrap_or(0);
+            let skip = t.raw.len() - trim_whitespace_start(&t.raw).len();
+            return Err((
+                offset + skip,
+                "text after the last element or markup is not allowed; \
+                 BT.CPP (tinyxml2) rejects it"
+                    .to_owned(),
+            ));
+        }
         if self.mode == Mode::Fragment {
             for id in &tops {
                 if let Some(Node::Text(t)) = self.doc.node(*id)
                     && !t.is_whitespace()
                 {
                     let offset = self.doc.source_offset(*id).unwrap_or(0);
-                    let skip =
-                        t.raw.len() - t.raw.trim_start_matches([' ', '\t', '\r', '\n']).len();
+                    let skip = t.raw.len() - trim_whitespace_start(&t.raw).len();
                     return Err((offset + skip, "text outside an element".to_owned()));
                 }
             }

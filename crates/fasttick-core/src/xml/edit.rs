@@ -203,7 +203,12 @@ impl Document {
         match parent_slot.node {
             Node::Document => {}
             Node::Element(_) => {
-                if matches!(child_slot.node, Node::Declaration(_)) {
+                // tinyxml2 reads each `<?...?>` as a declaration and accepts
+                // it only at the document level.
+                if matches!(
+                    child_slot.node,
+                    Node::Declaration(_) | Node::ProcessingInstruction(_)
+                ) {
                     return Err(EditError::WrongKind(child));
                 }
             }
@@ -241,29 +246,42 @@ impl Document {
         Ok(())
     }
 
-    /// Checks the rule of tinyxml2 for the top level: an XML declaration has
-    /// only declarations and white space before it. `text` replaces the
-    /// "is white space" property of one text node.
+    /// Checks the rules of tinyxml2 for the top level:
+    ///
+    /// - An XML declaration or a processing instruction has only
+    ///   declarations, processing instructions and white space before it
+    ///   (`XMLNode::ParseDeep`, "wellLocated").
+    /// - The text after the last top-level node that is not text has only
+    ///   white space (`XMLText::ParseDeep` needs a `<` after text).
+    ///
+    /// `text` replaces the "is white space" property of one text node.
     fn check_top_level_order(
         &self,
         order: &[NodeId],
         text: Option<(NodeId, bool)>,
     ) -> Result<(), EditError> {
+        let is_whitespace = |n: NodeId, t: &Text| match text {
+            Some((id, ws)) if id == n => ws,
+            _ => t.is_whitespace(),
+        };
         let mut other_content = false;
         for &n in order {
             match self.node(n) {
-                Some(Node::Declaration(_)) if other_content => {
+                Some(Node::Declaration(_) | Node::ProcessingInstruction(_)) if other_content => {
                     return Err(EditError::DeclarationPosition(n));
                 }
-                Some(Node::Declaration(_)) => {}
-                Some(Node::Text(t)) => {
-                    let whitespace = match text {
-                        Some((id, ws)) if id == n => ws,
-                        _ => t.is_whitespace(),
-                    };
-                    other_content |= !whitespace;
-                }
+                Some(Node::Declaration(_) | Node::ProcessingInstruction(_)) => {}
+                Some(Node::Text(t)) => other_content |= !is_whitespace(n, t),
                 _ => other_content = true,
+            }
+        }
+        for &n in order.iter().rev() {
+            match self.node(n) {
+                Some(Node::Text(t)) if !is_whitespace(n, t) => {
+                    return Err(EditError::TrailingText(n));
+                }
+                Some(Node::Text(_)) => {}
+                _ => break,
             }
         }
         Ok(())
@@ -289,6 +307,11 @@ impl Document {
         let index = self
             .index_in_parent(node)
             .ok_or(EditError::NotAttached(node))?;
+        if parent == self.root() {
+            let mut order = self.children(parent).to_vec();
+            order.remove(index);
+            self.check_top_level_order(&order, None)?;
+        }
         self.slots[parent.index()].children.remove(index);
         self.slots[node.index()].parent = None;
         Ok(Position { parent, index })
@@ -324,6 +347,11 @@ impl Document {
                 order.remove(old_index);
             }
             order.insert(index, node);
+            self.check_top_level_order(&order, None)?;
+        }
+        if old_parent == self.root() && new_parent != old_parent {
+            let mut order = self.children(old_parent).to_vec();
+            order.remove(old_index);
             self.check_top_level_order(&order, None)?;
         }
         self.slots[old_parent.index()].children.remove(old_index);

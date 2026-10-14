@@ -69,7 +69,7 @@ fn unclosed_markup() {
     assert_error("<a", 1, 1, "tag not closed");
     assert_error("<a b=\"1", 1, 6, "has no closing quote");
     assert_error("<a b='1", 1, 6, "has no closing quote");
-    assert_error("<a><!x></a>", 1, 4, "unknown or missed symbol");
+    assert_error("<a><!x></a>", 1, 4, "unknown markup after '<!'");
 }
 
 #[test]
@@ -87,11 +87,71 @@ fn wrong_quote_is_found() {
 
 #[test]
 fn processing_instructions() {
-    assert_error("<a><??></a>", 1, 6, "target name");
-    assert_error("<a><?=x?></a>", 1, 6, "target name");
-    assert_error("<a><?t\"x\"?></a>", 1, 7, "white space after");
-    let doc = Document::parse("<a><?t x?><?t?></a>").unwrap();
-    assert_eq!(doc.to_string(), "<a><?t x?><?t?></a>");
+    assert_error("<??><a/>", 1, 3, "target name");
+    assert_error("<?=x?><a/>", 1, 3, "target name");
+    assert_error("<?t\"x\"?><a/>", 1, 4, "white space after");
+    let doc = Document::parse("<?t x?><?t?><a/>").unwrap();
+    assert_eq!(doc.to_string(), "<?t x?><?t?><a/>");
+    // tinyxml2 reads each `<?...?>` as a declaration: it must come before
+    // all other content (XML_ERROR_PARSING_DECLARATION).
+    assert_error("<a><?t x?></a>", 1, 4, "processing instruction");
+    assert_error("<!-- c --><?t x?><a/>", 1, 11, "processing instruction");
+    assert_error("<a/><?t x?>", 1, 5, "processing instruction");
+    let text = "<?xml version='1.0'?>\n<?xml-stylesheet href='a'?>\n<a/>";
+    assert_eq!(Document::parse(text).unwrap().to_string(), text);
+}
+
+#[test]
+fn text_at_the_end_is_an_error() {
+    // tinyxml2: XML_ERROR_PARSING_TEXT, because no `<` follows the text.
+    assert_error("<a/>text", 1, 5, "text after the last element");
+    assert_error("<a/>\n  &amp;", 2, 3, "text after the last element");
+    assert_error("<a/><!-- c -->\n x \n", 2, 2, "text after the last element");
+    // Text before and between top-level items is accepted.
+    for text in [
+        "x<a/>",
+        "<a/>x<b/>",
+        "<a/>x<!-- c -->",
+        "<a/> \t\r\n\u{b}\u{c}",
+    ] {
+        assert_eq!(Document::parse(text).unwrap().to_string(), text);
+    }
+}
+
+#[test]
+fn nul_characters_are_errors() {
+    assert_error("<a>\0</a>", 1, 4, "NUL");
+    assert_error("<a/>\n\0", 2, 1, "NUL");
+    let e = Document::parse_bytes(b"<a x='\0'/>").unwrap_err();
+    assert_eq!((e.line, e.column, e.offset), (1, 7, 6));
+}
+
+#[test]
+fn vertical_tab_and_form_feed_are_white_space() {
+    // tinyxml2 uses `isspace` (XMLUtil::IsWhiteSpace).
+    let text = "<a\u{b}b=\"1\"\u{c}/>";
+    let doc = Document::parse(text).unwrap();
+    let a = doc.document_element().unwrap();
+    assert_eq!(doc.attribute(a, "b"), Some("1"));
+    assert_eq!(doc.attributes(a)[0].leading_whitespace(), "\u{b}");
+    assert_eq!(doc.to_string(), text);
+    assert_eq!(doc.write_regenerated(), text);
+    let text = "<a></a\u{c}>";
+    assert_eq!(Document::parse(text).unwrap().to_string(), text);
+    assert_error("\u{b}\u{c}", 1, 1, "empty");
+    // White space before a declaration is skipped.
+    let text = "\u{c}<?xml version='1.0'?><a/>";
+    assert_eq!(Document::parse(text).unwrap().to_string(), text);
+}
+
+#[test]
+fn byte_order_mark_after_white_space() {
+    // `XMLDocument::Parse` skips white space, then reads a byte order mark.
+    assert_error(" \n\u{feff}", 1, 1, "empty");
+    let text = " \n\u{feff}<?xml version='1.0'?><a/>";
+    let doc = Document::parse(text).unwrap();
+    assert_eq!(doc.to_string(), text);
+    assert!(!doc.has_bom());
 }
 
 #[test]
@@ -128,17 +188,16 @@ fn columns_count_characters_and_skip_the_bom() {
 
 #[test]
 fn a_second_byte_order_mark_is_text() {
-    for text in [
-        "\u{feff}\u{feff}",
-        "\u{feff}\u{feff}\u{feff}<a/>",
-        "\u{feff}\u{feff}text<a/>",
-    ] {
+    for text in ["\u{feff}\u{feff}\u{feff}<a/>", "\u{feff}\u{feff}text<a/>"] {
         let doc = Document::parse(text).unwrap();
         assert!(doc.has_bom());
         assert_eq!(doc.to_string(), text);
         let first = doc.children(doc.root())[0];
         assert!(matches!(doc.node(first), Some(Node::Text(_))));
     }
+    // The extra mark is text, and text cannot be at the end
+    // (XML_ERROR_PARSING_TEXT).
+    assert_error("\u{feff}\u{feff}", 1, 1, "text after the last element");
     // The extra mark is content, so a declaration cannot follow it.
     assert_error(
         "\u{feff}\u{feff}<?xml version='1.0'?><a/>",
@@ -271,7 +330,7 @@ fn get_text_matches_tinyxml2() {
 
 #[test]
 fn doctype_with_internal_subset_and_misc_survive() {
-    let text = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<!DOCTYPE root [\r\n  <!ELEMENT root ANY>\r\n  <!ENTITY e \"<x>\">\r\n]>\r\n<?pi data?>\r\n<!-- c -->\r\n<root/>\r\n<!-- after -->\r\n";
+    let text = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<?pi data?>\r\n<!DOCTYPE root [\r\n  <!ELEMENT root ANY>\r\n  <!ENTITY e \"<x>\">\r\n]>\r\n<!-- c -->\r\n<root/>\r\n<!-- after -->\r\n";
     let doc = Document::parse(text).unwrap();
     assert_eq!(doc.to_string(), text);
     let kinds: Vec<_> = doc
@@ -285,9 +344,9 @@ fn doctype_with_internal_subset_and_misc_survive() {
         [
             K::Declaration,
             K::Text,
-            K::DocType,
-            K::Text,
             K::ProcessingInstruction,
+            K::Text,
+            K::DocType,
             K::Text,
             K::Comment,
             K::Text,
@@ -297,7 +356,7 @@ fn doctype_with_internal_subset_and_misc_survive() {
             K::Text
         ]
     );
-    match doc.node(doc.children(doc.root())[2]) {
+    match doc.node(doc.children(doc.root())[4]) {
         Some(Node::DocType(d)) => assert!(d.content().starts_with("root [")),
         other => panic!("{other:?}"),
     }

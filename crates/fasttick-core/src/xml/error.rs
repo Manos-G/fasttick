@@ -44,10 +44,15 @@ pub enum EditError {
     /// The document node cannot be moved, inserted or removed.
     #[error("the document node cannot be moved, inserted or removed")]
     DocumentNode,
-    /// An XML declaration must come before all other top-level content
-    /// except white space (the rule of tinyxml2).
-    #[error("the XML declaration {0} must come before all other content")]
+    /// An XML declaration or a processing instruction must come before all
+    /// other top-level content except white space (the rule of tinyxml2,
+    /// which reads each `<?...?>` as a declaration).
+    #[error("the XML declaration or processing instruction {0} must come before all other content")]
     DeclarationPosition(NodeId),
+    /// Text other than white space cannot be the last top-level content:
+    /// tinyxml2 needs a `<` after text.
+    #[error("the text {0} cannot come after the last top-level element or markup")]
+    TrailingText(NodeId),
     /// The operation would put a node inside itself.
     #[error("node {0} cannot be put inside itself or one of its descendants")]
     Cycle(NodeId),

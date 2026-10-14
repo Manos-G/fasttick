@@ -33,8 +33,13 @@ enum Reference {
     /// tinyxml2 removes the `&` and keeps the next bytes as text. This
     /// happens only for the text `&#` at the end of the value.
     DropAmpersand,
-    /// The `&` is not a reference. It stays as a literal character.
+    /// `&#` does not start a valid character reference. tinyxml2 copies the
+    /// `&` and continues after it.
     Literal,
+    /// `&` does not start a predefined entity. tinyxml2 moves its read and
+    /// write positions by one byte but does not copy the byte (see
+    /// [`decode`]).
+    Unknown,
 }
 
 /// Decodes raw character data with the rules of tinyxml2
@@ -49,20 +54,32 @@ enum Reference {
 ///
 /// Text, attribute values use `entities = true`. CDATA, comments and
 /// processing instructions use `entities = false`.
+///
+/// tinyxml2 decodes in place, with a read position and a write position.
+/// For an `&` that does not start a predefined entity or `&#`, it moves both
+/// positions by one byte but does not copy the byte. While the two positions
+/// are equal, the `&` stays. After an earlier reference or line end made the
+/// text shorter, the byte at the write position is the source byte at that
+/// index, so BT.CPP sees a wrong character there. For example, the value
+/// `a &lt; b && c` becomes `a < b  b c`. This function gives the same
+/// result. If that result is not valid UTF-8, the invalid bytes become
+/// U+FFFD.
 pub(crate) fn decode(raw: &str, entities: bool) -> Cow<'_, str> {
     let bytes = raw.as_bytes();
     let needs_work = bytes.iter().any(|&b| b == b'\r' || (entities && b == b'&'));
     if !needs_work {
         return Cow::Borrowed(raw);
     }
-    let mut out = String::with_capacity(raw.len());
+    // The bytes that tinyxml2 writes. `out.len()` is its write position and
+    // `i` is its read position; `out.len() <= i` is always true.
+    let mut out: Vec<u8> = Vec::with_capacity(raw.len());
     let mut copy_from = 0;
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
             b'\r' => {
-                out.push_str(&raw[copy_from..i]);
-                out.push('\n');
+                out.extend_from_slice(&bytes[copy_from..i]);
+                out.push(b'\n');
                 i += if bytes.get(i + 1) == Some(&b'\n') {
                     2
                 } else {
@@ -72,8 +89,8 @@ pub(crate) fn decode(raw: &str, entities: bool) -> Cow<'_, str> {
             }
             b'\n' => {
                 if bytes.get(i + 1) == Some(&b'\r') {
-                    out.push_str(&raw[copy_from..i]);
-                    out.push('\n');
+                    out.extend_from_slice(&bytes[copy_from..i]);
+                    out.push(b'\n');
                     i += 2;
                     copy_from = i;
                 } else {
@@ -82,27 +99,46 @@ pub(crate) fn decode(raw: &str, entities: bool) -> Cow<'_, str> {
             }
             b'&' if entities => match decode_reference(&raw[i..]) {
                 Reference::Char(c, len) => {
-                    out.push_str(&raw[copy_from..i]);
-                    out.push(c);
+                    out.extend_from_slice(&bytes[copy_from..i]);
+                    let mut buf = [0u8; 4];
+                    out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
                     i += len;
                     copy_from = i;
                 }
                 Reference::Nul => {
-                    out.push_str(&raw[copy_from..i]);
-                    return Cow::Owned(out);
+                    out.extend_from_slice(&bytes[copy_from..i]);
+                    return Cow::Owned(into_string(out));
                 }
                 Reference::DropAmpersand => {
-                    out.push_str(&raw[copy_from..i]);
+                    out.extend_from_slice(&bytes[copy_from..i]);
                     i += 1;
                     copy_from = i;
                 }
                 Reference::Literal => i += 1,
+                Reference::Unknown => {
+                    out.extend_from_slice(&bytes[copy_from..i]);
+                    // `++p; ++q;` without a copy: the byte at the write
+                    // position is the source byte at that index.
+                    let stale = bytes.get(out.len()).copied().unwrap_or(b'&');
+                    out.push(stale);
+                    i += 1;
+                    copy_from = i;
+                }
             },
             _ => i += 1,
         }
     }
-    out.push_str(&raw[copy_from..]);
-    Cow::Owned(out)
+    out.extend_from_slice(&bytes[copy_from..]);
+    Cow::Owned(into_string(out))
+}
+
+/// Converts decoded bytes to a string. Invalid UTF-8 (possible only after
+/// the stale-byte case of [`decode`]) becomes U+FFFD.
+fn into_string(bytes: Vec<u8>) -> String {
+    match String::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
+    }
 }
 
 /// Decodes one reference. `s` starts with `&`.
@@ -177,7 +213,7 @@ fn decode_reference(s: &str) -> Reference {
             return Reference::Char(value, n + 2);
         }
     }
-    Reference::Literal
+    Reference::Unknown
 }
 
 /// Escapes an attribute value for the given quote character.
@@ -267,14 +303,27 @@ pub(crate) fn name_len(s: &str) -> usize {
     s.len()
 }
 
-/// Returns true for the four XML white-space characters.
+/// Returns true for the white-space characters of tinyxml2.
+///
+/// `XMLUtil::IsWhiteSpace` in `tinyxml2.h` uses `isspace` of the C locale:
+/// space, tab, LF, CR, vertical tab (U+000B) and form feed (U+000C). This
+/// is more than the four white-space characters of XML 1.0. tinyxml2 uses
+/// the same set in tags, between top-level items and to find text with
+/// only white space.
 pub(crate) fn is_xml_whitespace(b: u8) -> bool {
-    matches!(b, b' ' | b'\t' | b'\n' | b'\r')
+    matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
 }
 
-/// Returns true if all characters of `s` are XML white space.
+/// Returns true if all characters of `s` are white space (see
+/// [`is_xml_whitespace`]).
 pub(crate) fn is_all_whitespace(s: &str) -> bool {
     s.bytes().all(is_xml_whitespace)
+}
+
+/// Returns `s` without the white space (see [`is_xml_whitespace`]) at its
+/// start.
+pub(crate) fn trim_whitespace_start(s: &str) -> &str {
+    s.trim_start_matches(|c: char| c.is_ascii() && is_xml_whitespace(c as u8))
 }
 
 #[cfg(test)]
@@ -331,6 +380,37 @@ mod tests {
         assert_eq!(d("ab&#x;cd"), "ab");
         // Surrogates cannot be in a Rust string.
         assert_eq!(d("&#xD800;"), "\u{FFFD}");
+    }
+
+    #[test]
+    fn unknown_entity_after_a_shorter_reference_gets_a_stale_byte() {
+        // The expected values are the output of tinyxml2 11.0.0 (the copy in
+        // BT.CPP 4.9.0) for the same attribute values.
+        assert_eq!(d("a &lt; b && c"), "a < b  b c");
+        assert_eq!(d("&lt;&foo;"), "<lfoo;");
+        assert_eq!(d("x&#65;&"), "xA#");
+        // A line end that becomes shorter has the same effect.
+        assert_eq!(d("&\r\n&#&foo;"), "&\n&##foo;");
+        // Before the first shorter reference, the `&` stays.
+        assert_eq!(d("a && b &lt;"), "a && b <");
+        // The stale byte can be part of a multi-byte character: tinyxml2
+        // gives the bytes 3C C3 A4 C3 A4 A4 78, which are not valid UTF-8.
+        assert_eq!(d("&lt;\u{e4}\u{e4}&x"), "<\u{e4}\u{e4}\u{fffd}x");
+        // Without entity processing, nothing changes.
+        assert_eq!(decode("&lt;&foo;", false), "&lt;&foo;");
+    }
+
+    #[test]
+    fn whitespace_set_of_tinyxml2() {
+        for b in [b' ', b'\t', b'\n', b'\r', 0x0B, 0x0C] {
+            assert!(is_xml_whitespace(b), "{b:#x}");
+        }
+        for b in [0u8, b'a', 0x85, 0xA0, 0x1F] {
+            assert!(!is_xml_whitespace(b), "{b:#x}");
+        }
+        assert_eq!(trim_whitespace_start("\u{b}\u{c} \u{feff}x"), "\u{feff}x");
+        assert!(is_all_whitespace(""));
+        assert!(!is_all_whitespace("\u{a0}"));
     }
 
     #[test]
