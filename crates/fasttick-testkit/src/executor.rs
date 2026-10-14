@@ -20,8 +20,11 @@ const POLL_PERIOD: Duration = Duration::from_millis(10);
 /// Command-line options of `fasttick_executor`.
 ///
 /// [`ExecutorOptions::new`] gives the defaults. The defaults are the same as
-/// the defaults of the program, but `port` is 0 (no publisher), because a
-/// test must use a port from [`free_port_pair`](crate::free_port_pair).
+/// the defaults of the program, with two differences:
+///
+/// - `port` is 0 (no publisher), because a test must use a port from
+///   [`free_port_pair`](crate::free_port_pair).
+/// - `exit_with_parent` is `true`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutorOptions {
     /// The XML file. A relative path is relative to

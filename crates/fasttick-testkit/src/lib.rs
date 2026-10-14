@@ -8,7 +8,8 @@
 //! - [`harness`] builds the C++ harness with CMake, once for each process
 //!   and once at a time across processes.
 //! - [`require_harness!`] skips a test cleanly when BT.CPP is not available.
-//! - [`Executor`] starts `fasttick_executor` and stops it with a signal.
+//! - [`Executor`] starts `fasttick_executor`, reads its output (for
+//!   example [`Executor::wait_for_stdout`]) and stops it with a signal.
 //! - [`free_port_pair`] gives a port `p` where `p` and `p + 1` are free.
 //! - [`TempDir`] is a temporary directory that is removed on drop.
 //!
