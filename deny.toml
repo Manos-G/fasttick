@@ -3,9 +3,18 @@
 
 [graph]
 all-features = true
+# Linux is the required platform. Windows and macOS are a stretch goal; when
+# they are added, review the extra licences (for example BSL-1.0 in
+# clipboard-win) with the user.
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # `paste` is unmaintained, but it has no known vulnerability. It is a
+    # build-time proc-macro that egui_dock (required by the project brief) uses.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained only; proc-macro used by egui_dock" },
+]
 
 [licenses]
 # Licences that the project brief allows (OSI-approved, compatible with MIT).
