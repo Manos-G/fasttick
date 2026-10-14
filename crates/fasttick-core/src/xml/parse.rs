@@ -15,7 +15,13 @@ use super::node::{
     Quote, Slot, Text,
 };
 
-/// The deepest element nesting that BT.CPP accepts.
+/// The deepest element nesting that the XML reader of BT.CPP (tinyxml2)
+/// accepts.
+///
+/// BT.CPP has a lower limit for the nodes of a tree: 256 levels below the
+/// `<BehaviorTree>` element (`kMaxNestingDepth` in `VerifyXML` and in
+/// `recursivelyCreateSubtree`, `src/xml_parsing.cpp`). This module does not
+/// check that limit.
 ///
 /// tinyxml2 stops with `XML_ELEMENT_DEPTH_EXCEEDED` when its parse depth
 /// reaches `TINYXML2_MAX_ELEMENT_DEPTH` (500). The document level counts as

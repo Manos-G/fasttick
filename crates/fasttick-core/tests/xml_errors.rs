@@ -247,6 +247,10 @@ fn nesting_limit_of_btcpp() {
     let (line, column, message) = error(&nested(MAX_ELEMENT_DEPTH + 1, ""));
     assert_eq!((line, column), (1, 3 * MAX_ELEMENT_DEPTH + 1));
     assert!(message.contains("nested too deeply"), "{message}");
+    // A start tag and an end tag without content count as content for
+    // tinyxml2 (XML_ELEMENT_DEPTH_EXCEEDED).
+    let (_, _, message) = error(&nested(MAX_ELEMENT_DEPTH, "<leaf></leaf>"));
+    assert!(message.contains("nested too deeply"), "{message}");
 }
 
 #[test]
