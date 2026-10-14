@@ -73,7 +73,9 @@ Output on stdout, one line for each event:
   `--exit-with-parent`).
 
 SIGINT and SIGTERM stop the ticks, halt the running nodes, close the loggers
-and then the publisher. The exit code is then 0. A second signal ends the
+and then the publisher. Before it closes the loggers, the executor waits
+100 ms: the logger threads of BT.CPP stop without a last write, so they need
+this time to write the last transitions. The exit code is then 0. A second signal ends the
 program at once. If a tick waits at a breakpoint, the executor tells its own
 publisher to disable all hooks (this needs libzmq), so the tick can end.
 Errors go to stderr. The exit code is 1 for a run-time error and 2 for a bad

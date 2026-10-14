@@ -934,6 +934,20 @@ int run(const Options& options, pid_t parent_pid)
   // Stop: halt the running nodes (the loggers record the transitions to
   // IDLE), then destroy the loggers, then the publisher.
   haltActiveNodes(tree);
+  bool have_logger = file_logger != nullptr;
+#ifdef FASTTICK_HAVE_SQLITE_LOGGER
+  have_logger = have_logger || sqlite_logger != nullptr;
+#endif
+  if(have_logger)
+  {
+    // The writer threads of FileLogger2 and SqliteLogger end when the
+    // destructor clears their loop flag, without a last pass over the
+    // queue (FileLogger2::writerLoop in src/loggers/bt_file_logger_v2.cpp,
+    // SqliteLogger::writerLoop in src/loggers/bt_sqlite_logger.cpp). The
+    // last transitions can then be lost. A short pause lets the writers
+    // empty their queues first (FileLogger2 wakes up at least every 10 ms).
+    std::this_thread::sleep_for(milliseconds(100));
+  }
 #ifdef FASTTICK_HAVE_SQLITE_LOGGER
   sqlite_logger.reset();
 #endif

@@ -234,6 +234,18 @@ fn every_tree_runs_once_and_writes_a_btlog() {
         // Header: magic, version byte, XML length, XML, start time.
         assert!(bytes.len() > BTLOG_MAGIC.len() + 1 + 4 + 8);
         assert_eq!(bytes[BTLOG_MAGIC.len()], 1, "version byte");
+        // The log is complete: the last record is the root (UID 1) going
+        // back to IDLE (0), after the completed run or after the halt.
+        let xml_length = btlog_xml(&bytes).len();
+        let records = &bytes[BTLOG_MAGIC.len() + 1 + 4 + xml_length + 8..];
+        assert_eq!(records.len() % 9, 0, "9-byte records");
+        let last = &records[records.len() - 9..];
+        assert_eq!(
+            (u16::from_le_bytes([last[6], last[7]]), last[8]),
+            (1, 0),
+            "{}: last record",
+            xml.display()
+        );
 
         if xml.file_name().is_some_and(|name| name == "main.xml") {
             if update_fixtures() {
