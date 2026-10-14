@@ -6,10 +6,10 @@
 //!   for complete files ([`BtLog`]), an incremental reader for files that
 //!   the executor still writes ([`BtLogReader`]) and a writer for live
 //!   recordings ([`BtLogWriter`]).
-//! - [`sqlite`] (feature `sqlite`, on by default): the database of
+//! - `sqlite` (feature `sqlite`, on by default): the database of
 //!   `BT::SqliteLogger`.
 //! - [`replay`]: an index that gives the state of all nodes at a time or at
-//!   a transition, and a playback [`Cursor`](replay::Cursor).
+//!   a transition, and a playback [`Cursor`].
 //! - [`stats`]: statistics for each node in a time range.
 //! - [`filter`]: include and exclude filters for transitions.
 //! - [`export`]: export of transitions to JSON and CSV.

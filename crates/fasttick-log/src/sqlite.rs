@@ -29,17 +29,26 @@
 //!   `2026-10-14 21:05:00` without a time zone. `xml_tree` is
 //!   `WriteTreeToXML(tree, true, true)`.
 //! - `Nodes`: one row for each node of the session: the node path
-//!   (`TreeNode::fullPath()`) and the UID.
+//!   (`TreeNode::fullPath()`) and the UID. For a node without its own name,
+//!   BT.CPP writes the name as `<type>::<uid>` in this path (for example
+//!   `navigate/Script::26`), but the tree XML has `name="<type>"`.
 //! - `Transitions.timestamp`: microseconds since the Unix epoch (the logger
 //!   default, `TimestampType::absolute`). The logger makes the values
 //!   strictly increasing: `max(previous + 1, now)`. The value is the primary
 //!   key of the table.
 //! - `Transitions.duration`: for a transition from RUNNING to another
 //!   status, the microseconds since the last IDLE to RUNNING transition of
-//!   that node; otherwise 0.
+//!   that node; otherwise 0. If the logger did not see such a transition,
+//!   the value is the `timestamp` itself.
 //! - `Transitions.state`: the new status, 0 to 4 (`BT::NodeStatus`).
 //! - `Transitions.extra_data`: text from an optional user callback; usually
 //!   empty.
+//!
+//! The logger writes the rows in a background thread, one `INSERT` for
+//! each transition. When the logger stops, its thread ends without writing
+//! the rows that are still in its queue (`SqliteLogger::writerLoop`). The
+//! last transitions of a session can thus be missing. A `.btlog` file of
+//! the same run has them.
 //!
 //! How FastTick maps a session to a [`BtLog`]:
 //!

@@ -2,11 +2,18 @@
 //!
 //! [`ReplayIndex`] sorts the transitions by time. Transitions with the same
 //! time keep their order from the log (the sort is stable). The index keeps
-//! a full snapshot of all node states after each `K` transitions
-//! (`K` = [`DEFAULT_SNAPSHOT_INTERVAL`] by default). The state at a time or
-//! at a transition starts from the nearest snapshot before it and applies at
-//! most `K - 1` transitions. A query thus costs `O(log n + K + m)`, where `m`
-//! is the number of nodes (the size of the returned state).
+//! a full snapshot of all node states after each `K` transitions. The state
+//! at a time or at a transition starts from the nearest snapshot before it
+//! and applies at most `K - 1` transitions. A query thus costs
+//! `O(log n + K + m)`, where `m` is the number of nodes (the size of the
+//! returned state).
+//!
+//! By default, `K` is [`DEFAULT_SNAPSHOT_INTERVAL`] (1024), or `m` if the
+//! index has more than 1024 nodes. A query must copy `m` node states in any
+//! case, so this does not change the cost. It keeps the memory of the
+//! snapshots at about 2 bytes for each transition, also for a damaged log
+//! with many different UIDs. [`ReplayIndex::with_snapshot_interval`] sets an
+//! exact `K`.
 //!
 //! Positions: "the state after `count` transitions" means that the first
 //! `count` transitions of the sorted list are applied. The state at a time
@@ -102,6 +109,9 @@ pub struct ReplayIndex {
     uids: Arc<[Uid]>,
     /// The number of transitions between two snapshots (at least 1).
     interval: usize,
+    /// True if `interval` follows the number of UIDs (see
+    /// [`Interval::Auto`]).
+    auto_interval: bool,
     /// Snapshot `k` is the state after `k * interval` transitions. All
     /// snapshots are in one vector, `uids.len()` states each.
     snapshots: Vec<NodeState>,
@@ -113,29 +123,57 @@ impl Default for ReplayIndex {
     }
 }
 
+/// How the index chooses the snapshot interval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Interval {
+    /// [`DEFAULT_SNAPSHOT_INTERVAL`], or the number of UIDs if that is
+    /// larger. See the module documentation.
+    Auto,
+    /// An exact value (at least 1).
+    Fixed(usize),
+}
+
+impl Interval {
+    fn resolve(self, uid_count: usize) -> usize {
+        match self {
+            Interval::Auto => DEFAULT_SNAPSHOT_INTERVAL.max(uid_count),
+            Interval::Fixed(interval) => interval.max(1),
+        }
+    }
+}
+
 impl ReplayIndex {
-    /// Builds the index with the default snapshot interval.
+    /// Builds the index with the default snapshot interval (see the module
+    /// documentation).
     pub fn new(transitions: &[Transition]) -> ReplayIndex {
-        ReplayIndex::build(transitions, &[], DEFAULT_SNAPSHOT_INTERVAL)
+        ReplayIndex::build_with(transitions, &[], Interval::Auto)
     }
 
     /// Builds the index with a snapshot after each `interval` transitions.
     /// An interval of 0 is used as 1.
     pub fn with_snapshot_interval(transitions: &[Transition], interval: usize) -> ReplayIndex {
-        ReplayIndex::build(transitions, &[], interval)
+        ReplayIndex::build_with(transitions, &[], Interval::Fixed(interval))
     }
 
-    /// Builds the index for a log. The index knows all UIDs of the tree and
-    /// all UIDs of the transitions.
+    /// Builds the index for a log, with the default snapshot interval. The
+    /// index knows all UIDs of the tree and all UIDs of the transitions.
     pub fn from_log(log: &BtLog) -> ReplayIndex {
         let tree_uids: Vec<Uid> = log.tree.nodes.iter().filter_map(|node| node.uid).collect();
-        ReplayIndex::build(&log.transitions, &tree_uids, DEFAULT_SNAPSHOT_INTERVAL)
+        ReplayIndex::build_with(&log.transitions, &tree_uids, Interval::Auto)
     }
 
-    /// Builds the index. `extra_uids` are UIDs that the index must know
+    /// Builds the index with a snapshot after each `interval` transitions
+    /// (0 is used as 1). `extra_uids` are UIDs that the index must know
     /// even if no transition uses them (for example all nodes of the tree).
     pub fn build(transitions: &[Transition], extra_uids: &[Uid], interval: usize) -> ReplayIndex {
-        let interval = interval.max(1);
+        ReplayIndex::build_with(transitions, extra_uids, Interval::Fixed(interval))
+    }
+
+    fn build_with(
+        transitions: &[Transition],
+        extra_uids: &[Uid],
+        interval: Interval,
+    ) -> ReplayIndex {
         let mut order: Vec<usize> = (0..transitions.len()).collect();
         // `sort_by_key` is stable: equal times keep the order of the log.
         order.sort_by_key(|&position| transitions[position].offset_us);
@@ -165,8 +203,9 @@ impl ReplayIndex {
             transitions: Vec::new(),
             source: Vec::new(),
             slots: Vec::new(),
+            interval: interval.resolve(uids.len()),
+            auto_interval: interval == Interval::Auto,
             uids: uids.into(),
-            interval,
             snapshots: Vec::new(),
         };
         index.append_sorted(sorted, order, slots);
@@ -220,7 +259,9 @@ impl ReplayIndex {
             .collect();
         match slots {
             Some(slots) if in_order => {
-                let source = (source_offset..source_offset + new.len()).collect();
+                let source = (0..new.len())
+                    .map(|position| source_offset.saturating_add(position))
+                    .collect();
                 self.append_sorted(new.to_vec(), source, slots);
             }
             _ => {
@@ -231,15 +272,18 @@ impl ReplayIndex {
                     .copied()
                     .zip(self.transitions.iter().copied())
                     .collect();
-                all.extend(
-                    new.iter()
-                        .enumerate()
-                        .map(|(position, transition)| (source_offset + position, *transition)),
-                );
+                all.extend(new.iter().enumerate().map(|(position, transition)| {
+                    (source_offset.saturating_add(position), *transition)
+                }));
                 all.sort_by_key(|(position, _)| *position);
                 let transitions: Vec<Transition> =
                     all.iter().map(|(_, transition)| *transition).collect();
-                let rebuilt = ReplayIndex::build(&transitions, &self.uids, self.interval);
+                let interval = if self.auto_interval {
+                    Interval::Auto
+                } else {
+                    Interval::Fixed(self.interval)
+                };
+                let rebuilt = ReplayIndex::build_with(&transitions, &self.uids, interval);
                 let sources: Vec<usize> = all.iter().map(|(position, _)| *position).collect();
                 self.transitions = rebuilt.transitions;
                 self.source = rebuilt
@@ -249,6 +293,7 @@ impl ReplayIndex {
                     .collect();
                 self.slots = rebuilt.slots;
                 self.uids = rebuilt.uids;
+                self.interval = rebuilt.interval;
                 self.snapshots = rebuilt.snapshots;
             }
         }

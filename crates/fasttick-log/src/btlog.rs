@@ -65,6 +65,14 @@ pub enum LogError {
         /// The cause.
         source: io::Error,
     },
+    /// A file could not be created or written.
+    #[error("cannot write {path}: {source}")]
+    Write {
+        /// The file.
+        path: PathBuf,
+        /// The cause.
+        source: io::Error,
+    },
     /// A read or write operation failed.
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
@@ -641,14 +649,23 @@ pub struct BtLogWriter<W: Write> {
 }
 
 impl BtLogWriter<BufWriter<File>> {
-    /// Creates (or truncates) a file and writes the header.
+    /// Creates (or truncates) a file and writes the header. An I/O error
+    /// here is a [`LogError::Write`] with the path.
     pub fn create(
         path: impl AsRef<Path>,
         xml: &str,
         start_time_us: i64,
     ) -> Result<BtLogWriter<BufWriter<File>>, LogError> {
-        let file = File::create(path)?;
-        BtLogWriter::new(BufWriter::new(file), xml, start_time_us)
+        let path = path.as_ref();
+        let write_error = |source| LogError::Write {
+            path: path.to_owned(),
+            source,
+        };
+        let file = File::create(path).map_err(write_error)?;
+        BtLogWriter::new(BufWriter::new(file), xml, start_time_us).map_err(|err| match err {
+            LogError::Io(source) => write_error(source),
+            other => other,
+        })
     }
 }
 

@@ -86,7 +86,8 @@ impl TransitionFilter {
         }
     }
 
-    /// The sorted positions of the transitions that pass the filter.
+    /// The positions in `transitions` of the transitions that pass the
+    /// filter, in increasing order.
     pub fn apply(&self, tree: &RuntimeTree, transitions: &[Transition]) -> Vec<usize> {
         let compiled = self.compile(tree);
         transitions
