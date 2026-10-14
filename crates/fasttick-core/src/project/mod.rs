@@ -311,6 +311,7 @@ impl Project {
         let mut project = Project::new(stem(&path));
         project.load_entry(&path, FileRole::Tree)?;
         project.refresh();
+        project.dirty = false;
         Ok(project)
     }
 
@@ -476,7 +477,10 @@ impl Project {
             identity,
             includes: Vec::new(),
         }));
-        self.dirty = true;
+        // An included file does not change the project file.
+        if role != FileRole::Included {
+            self.dirty = true;
+        }
         id
     }
 
