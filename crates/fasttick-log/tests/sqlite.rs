@@ -235,3 +235,52 @@ fn errors() {
     ));
     assert!(matches!(db.load_session(id), Err(LogError::InvalidXml(_))));
 }
+
+#[test]
+fn other_schemas_give_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    // Tables with the right names but other columns.
+    let path = dir.path().join("other_columns.db3");
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE Definitions (id INTEGER PRIMARY KEY, tree TEXT);
+             CREATE TABLE Transitions (t INTEGER, uid INTEGER);
+             INSERT INTO Definitions VALUES (1, '<root/>');",
+        )
+        .unwrap();
+    let db = SqliteLog::open(&path).unwrap();
+    assert!(matches!(db.sessions(), Err(LogError::Sqlite(_))));
+    assert!(matches!(db.load_session(1), Err(LogError::Sqlite(_))));
+
+    // Values of unusual types in the right columns.
+    let path = dir.path().join("odd_values.db3");
+    let connection = create_database(&path);
+    let id = add_session(&connection, SAMPLE_XML, &[("main_seq", 1)]);
+    connection
+        .execute_batch(&format!(
+            "INSERT INTO Transitions VALUES (20, {id}, 1, 'x', 1, 7);
+             INSERT INTO Transitions VALUES (21, {id}, 1.5, 0, 1, NULL);
+             INSERT INTO Transitions VALUES (22, {id}, 2, 0, X'02', NULL);
+             INSERT INTO Transitions VALUES (23, {id}, 2, NULL, ' 2 ', 3.5);
+             INSERT INTO Nodes VALUES ({id}, NULL, 'bad');"
+        ))
+        .unwrap();
+    drop(connection);
+    let session = SqliteLog::open(&path).unwrap().load_session(id).unwrap();
+    // Row 21: a REAL UID, and row 22: a BLOB state, are invalid. Row 20
+    // has a text duration: the transition is kept, without the duration.
+    // Row 23 is valid: a text with a number is accepted.
+    assert_eq!(session.log.invalid_records, 2);
+    assert_eq!(
+        session.log.transitions,
+        vec![t(0, 1, NodeStatus::Running), t(3, 2, NodeStatus::Success)]
+    );
+    assert_eq!(session.log.start_time_us, 20);
+    assert_eq!(session.extra[0].duration_us, None);
+    assert_eq!(session.extra[0].extra_data.as_deref(), Some("7"));
+    assert_eq!(session.extra[1].duration_us, None);
+    assert_eq!(session.extra[1].extra_data.as_deref(), Some("3.5"));
+    // The Nodes row with a bad UID is left out.
+    assert_eq!(session.nodes, vec![("main_seq".to_string(), Uid(1))]);
+}

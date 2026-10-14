@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3eda4b17f55a2c595a276dd2eb7c70e60de96ac3c0aaf1c7752d0afb766b5ec0 # shrinks to transitions = [Transition { offset_us: 0, uid: Uid(1), status: Idle }, Transition { offset_us: 21, uid: Uid(1), status: Idle }, Transition { offset_us: 0, uid: Uid(1), status: Idle }, Transition { offset_us: 21, uid: Uid(1), status: Idle }, Transition { offset_us: 21, uid: Uid(1), status: Idle }, Transition { offset_us: 21, uid: Uid(1), status: Idle }, Transition { offset_us: 21, uid: Uid(1), status: Idle }, Transition { offset_us: 21, uid: Uid(1), status: Idle }, Transition { offset_us: 21, uid: Uid(1), status: Idle }, Transition { offset_us: 21, uid: Uid(1), status: Idle }, Transition { offset_us: 21, uid: Uid(1), status: Idle }, Transition { offset_us: 0, uid: Uid(1), status: Idle }, Transition { offset_us: 0, uid: Uid(1), status: Idle }], cuts = [Index(1317624576693539402), Index(2635249153387078803), Index(0)], interval = 4, with_cursor = true

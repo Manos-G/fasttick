@@ -59,10 +59,12 @@
 //! - Each row becomes a [`Transition`]: `offset_us = timestamp -
 //!   start_time_us`, `uid = node_uid`, `status = state`. The rows are in
 //!   `timestamp` order.
-//! - A row with a `state` that is not 0 to 4, or a `node_uid` that is not a
-//!   `u16`, or a value of the wrong type is counted in
-//!   [`BtLog::invalid_records`] and skipped.
-//! - `duration` and `extra_data` are in [`SqliteSession::extra`].
+//! - A row with a `state` that is not 0 to 4, a `node_uid` that is not a
+//!   `u16`, or a `timestamp`, `node_uid` or `state` that is not an integer
+//!   is counted in [`BtLog::invalid_records`] and skipped.
+//! - `duration` and `extra_data` are in [`SqliteSession::extra`]. A
+//!   `duration` that is NULL or not an integer gives `None`; the row is
+//!   kept.
 //! - `truncated_bytes` is always 0.
 
 use std::path::Path;
@@ -93,7 +95,7 @@ pub struct SessionInfo {
 pub struct SqliteTransitionExtra {
     /// The `timestamp` column (microseconds since the Unix epoch).
     pub timestamp_us: i64,
-    /// The `duration` column (microseconds), if it is not NULL.
+    /// The `duration` column (microseconds), if it is an integer.
     pub duration_us: Option<i64>,
     /// The `extra_data` column, if it is not NULL.
     pub extra_data: Option<String>,
@@ -290,10 +292,9 @@ fn decode_row(
     let status = u8::try_from(integer(state)?)
         .ok()
         .and_then(NodeStatus::from_u8)?;
-    let duration_us = match duration {
-        ValueRef::Null => None,
-        other => Some(integer(other)?),
-    };
+    // The duration is extra information: a bad value does not make the
+    // transition invalid.
+    let duration_us = integer(duration);
     let extra_data = match extra_data {
         ValueRef::Null => None,
         other => Some(text(other)),
