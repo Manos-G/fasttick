@@ -1251,6 +1251,7 @@ name = "fasttick-protocol"
 version = "0.1.0"
 dependencies = [
  "fasttick-core",
+ "fasttick-log",
  "fasttick-testkit",
  "proptest",
  "rmpv",

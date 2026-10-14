@@ -414,8 +414,11 @@ fn replace_hook_with_once_replaces_one_tick() {
     let results = live.executor.results();
     let failures = results.iter().filter(|status| *status == "FAILURE").count();
     assert_eq!(failures, 1, "{results:?}");
+    // One run has no real tick of "probe". The read can also fall between
+    // "count_runs" and "probe" of a run.
     let counters = live.probe_counters();
-    assert_eq!(counters.probe_ticks + 1, counters.runs - u64::from(counters.probe_ticks + 1 < counters.runs && false));
+    let missing = counters.runs - counters.probe_ticks;
+    assert!(missing == 1 || missing == 2, "{counters:?}");
 }
 
 #[test]

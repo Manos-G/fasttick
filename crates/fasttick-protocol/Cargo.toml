@@ -16,6 +16,9 @@ zmq.workspace = true
 rmpv.workspace = true
 
 [dev-dependencies]
+# Only for the end-to-end recording test (tests/real_recording.rs): the
+# library itself does not use fasttick-log (see docs/PLAN.md, section 2).
+fasttick-log.workspace = true
 fasttick-testkit.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
