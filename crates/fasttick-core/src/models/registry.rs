@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::bt::BtFile;
+use crate::bt::{BtFile, NodeView};
 use crate::builtin;
 use crate::project::FileId;
 
@@ -234,6 +234,27 @@ impl ModelRegistry {
         self.lookup(file, type_id).map(|(m, _)| m.kind)
     }
 
+    /// The kind of a node element, as BT.CPP creates it:
+    ///
+    /// - a `<SubTree>` element is a SubTree;
+    /// - else the kind of the declared model of its type ID (BT.CPP uses the
+    ///   registered type and ignores the tag of the explicit form);
+    /// - else, for the explicit form, the kind of the tag;
+    /// - else `None` (an unknown type).
+    pub fn node_kind(
+        &self,
+        file: impl Into<Option<FileId>>,
+        node: &NodeView<'_>,
+    ) -> Option<NodeKind> {
+        if node.is_subtree() {
+            return Some(NodeKind::SubTree);
+        }
+        node.type_id()
+            .and_then(|id| self.lookup_declared(file, id))
+            .map(|m| m.kind)
+            .or_else(|| node.category_tag())
+    }
+
     /// All models that are visible from a file (or without file context),
     /// one for each ID (the model that [`ModelRegistry::lookup`] gives),
     /// grouped by kind and sorted by ID. For the palette.
@@ -314,6 +335,32 @@ mod tests {
         let total: usize = palette.values().map(Vec::len).sum();
         assert_eq!(total, 42);
         assert_eq!(palette[&NodeKind::SubTree].len(), 1);
+    }
+
+    #[test]
+    fn node_kinds() {
+        let file = file(
+            r#"<root><BehaviorTree ID="T"><Sequence>
+            <SubTree ID="Inverter"/><Action ID="Fallback"/><Action ID="Unknown"/>
+            <Unknown/><Inverter/><Decorator/>
+            </Sequence></BehaviorTree></root>"#,
+        );
+        let reg = ModelRegistry::new();
+        let seq = file.node(file.trees()[0].root.unwrap()).unwrap();
+        let kinds: Vec<Option<NodeKind>> =
+            seq.children().map(|c| reg.node_kind(None, &c)).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                Some(NodeKind::SubTree),
+                Some(NodeKind::Control),
+                Some(NodeKind::Action),
+                None,
+                Some(NodeKind::Decorator),
+                Some(NodeKind::Decorator),
+            ]
+        );
+        assert_eq!(reg.node_kind(None, &seq), Some(NodeKind::Control));
     }
 
     #[test]

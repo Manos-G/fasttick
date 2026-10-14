@@ -11,7 +11,9 @@ pub struct TreeEntry {
     /// The tree ID. If the element has no `ID` attribute, this is
     /// `BehaviorTree_<n>` (see [`BtIndex`]).
     pub id: String,
-    /// True if the element has an `ID` attribute (it can be empty).
+    /// True if the element has an `ID` attribute. The attribute can be
+    /// empty; `VerifyXML` treats an empty ID like a missing one ("must have
+    /// the attribute [ID]" when the root has more than one child element).
     pub has_explicit_id: bool,
     /// The `<BehaviorTree>` element.
     pub element: NodeId,
