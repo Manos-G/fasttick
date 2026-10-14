@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fasttick_core::xml::{Document, Node, NodeId};
+use fasttick_core::xml::{Change, Document, Node, NodeId};
 use proptest::prelude::*;
 
 /// Fixtures that are not well-formed XML on purpose. The parser must return
@@ -575,8 +575,153 @@ fn config() -> ProptestConfig {
     }
 }
 
+/// One random edit. The indexes select nodes, positions and attributes.
+#[derive(Debug, Clone)]
+struct EditOp {
+    kind: u8,
+    a: proptest::sample::Index,
+    b: proptest::sample::Index,
+    c: proptest::sample::Index,
+    name: String,
+    value: String,
+}
+
+fn edit_op_strategy() -> impl Strategy<Value = EditOp> {
+    (
+        0u8..12,
+        any::<proptest::sample::Index>(),
+        any::<proptest::sample::Index>(),
+        any::<proptest::sample::Index>(),
+        prop_oneof![name_strategy(), Just("bad name".to_owned())],
+        "[^\u{0}]{0,8}",
+    )
+        .prop_map(|(kind, a, b, c, name, value)| EditOp {
+            kind,
+            a,
+            b,
+            c,
+            name,
+            value,
+        })
+}
+
+/// Applies one random edit. Returns the changes that undo it, or `None`
+/// when the edit was refused.
+fn apply_edit(doc: &mut Document, op: &EditOp) -> Option<Vec<Change>> {
+    let nodes: Vec<NodeId> = doc.descendants(doc.root()).collect();
+    let elements: Vec<NodeId> = nodes
+        .iter()
+        .copied()
+        .filter(|&n| doc.is_element(n))
+        .collect();
+    let containers: Vec<NodeId> = std::iter::once(doc.root())
+        .chain(elements.iter().copied())
+        .collect();
+    let node = *op.a.get(&nodes);
+    let parent = *op.b.get(&containers);
+    let index = op.c.index(doc.children(parent).len() + 1);
+    match op.kind {
+        0 => {
+            let e = doc.create_element(&op.name).ok()?;
+            doc.insert_child(parent, index, e).ok()?;
+            Some(vec![Change::Detach { node: e }])
+        }
+        1 => {
+            let t = doc.create_text(&op.value).ok()?;
+            doc.insert_child(parent, index, t).ok()?;
+            Some(vec![Change::Detach { node: t }])
+        }
+        2 => {
+            let c = doc.create_comment(&op.value).ok()?;
+            doc.insert_child(parent, index, c).ok()?;
+            Some(vec![Change::Detach { node: c }])
+        }
+        3 => {
+            let old = doc.detach(node).ok()?;
+            Some(vec![Change::Insert {
+                parent: old.parent,
+                index: old.index,
+                node,
+            }])
+        }
+        4 => {
+            // Out-of-range indexes test the error path.
+            let old = doc.move_node(node, parent, index).ok()?;
+            Some(vec![Change::Move {
+                node,
+                parent: old.parent,
+                index: old.index,
+            }])
+        }
+        5 => Some(vec![
+            doc.set_attribute(node, &op.name, &op.value).ok()?.inverse(),
+        ]),
+        6 => {
+            let name = doc.attributes(node).first().map(|a| a.name().to_owned())?;
+            let (index, attribute) = doc.remove_attribute(node, &name).ok()??;
+            Some(vec![Change::InsertAttribute {
+                node,
+                index,
+                attribute,
+            }])
+        }
+        7 => {
+            let old = doc.rename_element(node, &op.name).ok()?;
+            Some(vec![Change::Rename { node, name: old }])
+        }
+        8 => {
+            let old = doc.set_text(node, &op.value).ok()?;
+            Some(vec![Change::SetRaw { node, raw: old }])
+        }
+        9 => {
+            let copy = doc.clone_subtree(node).ok()?;
+            let count = doc.element_children(parent).count();
+            doc.insert_element_pretty(parent, op.c.index(count + 1), copy)
+                .ok()
+        }
+        10 => doc.remove_element_pretty(node).ok(),
+        _ => {
+            let written = doc.write_node(node);
+            let pasted = doc.parse_fragment(&written).ok()?;
+            let first = *pasted.first()?;
+            doc.insert_child(parent, index, first).ok()?;
+            Some(vec![Change::Detach { node: first }])
+        }
+    }
+}
+
 proptest! {
     #![proptest_config(config())]
+
+    #[test]
+    fn random_edit_sequences_reparse_and_undo(
+        generated in document_strategy(),
+        ops in proptest::collection::vec(edit_op_strategy(), 1..12),
+    ) {
+        let text = render(&generated);
+        let mut doc = Document::parse(&text).unwrap();
+        let mut undo: Vec<Vec<Change>> = Vec::new();
+        for op in &ops {
+            let before = doc.to_string();
+            match apply_edit(&mut doc, op) {
+                Some(changes) => {
+                    let after = doc.to_string();
+                    // Every edit gives a document that parses again to the
+                    // same bytes.
+                    let reparsed = Document::parse(&after);
+                    prop_assert!(reparsed.is_ok(), "{:?} after {:?}\n{}", reparsed.err(), op, after);
+                    prop_assert_eq!(reparsed.unwrap().to_string(), after);
+                    undo.push(changes);
+                }
+                // A refused edit does not change the document.
+                None => prop_assert_eq!(doc.to_string(), before, "{:?}", op),
+            }
+        }
+        for changes in undo.into_iter().rev() {
+            doc.apply_all(changes).unwrap();
+        }
+        prop_assert_eq!(doc.to_string(), text);
+    }
 
     #[test]
     fn random_documents_round_trip(generated in document_strategy()) {

@@ -70,6 +70,17 @@ pub enum EditError {
     /// An attribute with this name exists already.
     #[error("the element already has an attribute {0:?}")]
     DuplicateAttribute(String),
+    /// The top level would have only white space. Such a document cannot
+    /// be parsed again (tinyxml2: `XML_ERROR_EMPTY_DOCUMENT`).
+    #[error("the document would have no content")]
+    EmptyDocument,
+    /// The elements would be nested deeper than the limit of tinyxml2
+    /// ([`MAX_ELEMENT_DEPTH`](super::MAX_ELEMENT_DEPTH)).
+    #[error("the elements would be nested deeper than {limit} levels")]
+    TooDeep {
+        /// The limit.
+        limit: usize,
+    },
     /// The arena cannot hold more nodes (the limit is `u32::MAX`).
     #[error("the document has too many nodes")]
     TooManyNodes,

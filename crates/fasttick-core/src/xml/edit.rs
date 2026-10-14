@@ -10,6 +10,7 @@ use super::document::Document;
 use super::error::EditError;
 use super::escape::{escape_text, is_all_whitespace, is_valid_name};
 use super::node::{Attribute, CData, Comment, Element, Node, NodeId, NodeKind, Quote, Slot, Text};
+use super::parse::MAX_ELEMENT_DEPTH;
 
 /// The place of a node in the children of its parent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -217,6 +218,39 @@ impl Document {
         if parent == child || self.ancestors(parent).any(|a| a == child) {
             return Err(EditError::Cycle(child));
         }
+        self.check_depth(parent, child)
+    }
+
+    /// Checks that the elements stay within [`MAX_ELEMENT_DEPTH`] when
+    /// `child` goes into `parent`.
+    ///
+    /// The parser has the same limit (from tinyxml2). It applies to the
+    /// elements that are written with a start tag and an end tag; an
+    /// empty-element tag (`<a/>`) can be one level deeper.
+    fn check_depth(&self, parent: NodeId, child: NodeId) -> Result<(), EditError> {
+        let parent_level = std::iter::once(parent)
+            .chain(self.ancestors(parent))
+            .filter(|&n| self.is_element(n))
+            .count();
+        let too_deep = Err(EditError::TooDeep {
+            limit: MAX_ELEMENT_DEPTH,
+        });
+        // The parent gets content.
+        if self.is_element(parent) && parent_level > MAX_ELEMENT_DEPTH {
+            return too_deep;
+        }
+        let mut stack = vec![(child, parent_level + 1)];
+        while let Some((node, level)) = stack.pop() {
+            let Some(element) = self.element(node) else {
+                continue;
+            };
+            let children = self.children(node);
+            let has_content = !(element.self_closing && children.is_empty());
+            if has_content && level > MAX_ELEMENT_DEPTH {
+                return too_deep;
+            }
+            stack.extend(children.iter().map(|&c| (c, level + 1)));
+        }
         Ok(())
     }
 
@@ -253,6 +287,8 @@ impl Document {
     ///   (`XMLNode::ParseDeep`, "wellLocated").
     /// - The text after the last top-level node that is not text has only
     ///   white space (`XMLText::ParseDeep` needs a `<` after text).
+    /// - The top level has content other than white space
+    ///   (`XML_ERROR_EMPTY_DOCUMENT`).
     ///
     /// `text` replaces the "is white space" property of one text node.
     fn check_top_level_order(
@@ -275,14 +311,21 @@ impl Document {
                 _ => other_content = true,
             }
         }
+        let mut blank = true;
         for &n in order.iter().rev() {
             match self.node(n) {
                 Some(Node::Text(t)) if !is_whitespace(n, t) => {
                     return Err(EditError::TrailingText(n));
                 }
                 Some(Node::Text(_)) => {}
-                _ => break,
+                _ => {
+                    blank = false;
+                    break;
+                }
             }
+        }
+        if blank {
+            return Err(EditError::EmptyDocument);
         }
         Ok(())
     }

@@ -590,3 +590,71 @@ fn documents_and_changes_can_move_between_threads() {
     let a = doc.document_element().unwrap();
     assert_eq!(doc.attribute(a, "x"), Some("1"));
 }
+
+#[test]
+fn edits_keep_the_nesting_limit() {
+    use fasttick_core::xml::MAX_ELEMENT_DEPTH;
+    // A chain of elements with content down to the limit.
+    let mut text = "<e>".repeat(MAX_ELEMENT_DEPTH);
+    text.push_str(&"</e>".repeat(MAX_ELEMENT_DEPTH));
+    let mut doc = parse(&text);
+    let deepest = doc
+        .descendants(doc.root())
+        .filter(|&n| doc.is_element(n))
+        .last()
+        .unwrap();
+    let too_deep = EditError::TooDeep {
+        limit: MAX_ELEMENT_DEPTH,
+    };
+    // An empty-element tag can go one level deeper.
+    let leaf = doc.create_element("leaf").unwrap();
+    doc.append_child(deepest, leaf).unwrap();
+    assert!(Document::parse(&doc.to_string()).is_ok());
+    // But it cannot get content.
+    let inner = doc.create_element("inner").unwrap();
+    assert_eq!(doc.append_child(leaf, inner), Err(too_deep.clone()));
+    let t = doc.create_text("x").unwrap();
+    assert_eq!(doc.append_child(leaf, t), Err(too_deep.clone()));
+    // An element with content cannot go one level deeper either.
+    let wrapper = doc.create_element("w").unwrap();
+    let w_child = doc.create_element("c").unwrap();
+    doc.append_child(wrapper, w_child).unwrap();
+    doc.detach(leaf).unwrap();
+    assert_eq!(doc.append_child(deepest, wrapper), Err(too_deep.clone()));
+    // A move is checked too.
+    let top = doc.document_element().unwrap();
+    doc.append_child(top, wrapper).unwrap();
+    assert_eq!(doc.move_node(wrapper, deepest, 0), Err(too_deep));
+    assert!(Document::parse(&doc.to_string()).is_ok());
+}
+
+#[test]
+fn the_top_level_cannot_become_blank() {
+    // A document with only white space cannot be parsed again
+    // (XML_ERROR_EMPTY_DOCUMENT), so edits refuse to make one.
+    let src = "<a/>\n";
+    let mut doc = parse(src);
+    let a = doc.document_element().unwrap();
+    assert_eq!(doc.detach(a), Err(EditError::EmptyDocument));
+    assert_eq!(doc.remove_element_pretty(a), Err(EditError::EmptyDocument));
+    let b = doc.create_element("b").unwrap();
+    doc.append_child(a, b).unwrap();
+    let root = doc.root();
+    // Moving the last top-level element into another place works only if
+    // something else stays.
+    let c = doc.create_comment(" keep ").unwrap();
+    doc.insert_child(root, 0, c).unwrap();
+    doc.detach(a).unwrap();
+    assert_eq!(doc.to_string(), "<!-- keep -->\n");
+    assert!(Document::parse(&doc.to_string()).is_ok());
+    // A new document starts empty; white space alone cannot be its first
+    // content.
+    let mut doc = Document::new();
+    let ws = doc.create_text("\n").unwrap();
+    let root = doc.root();
+    assert_eq!(doc.append_child(root, ws), Err(EditError::EmptyDocument));
+    let e = doc.create_element("root").unwrap();
+    doc.append_child(root, e).unwrap();
+    doc.append_child(root, ws).unwrap();
+    assert_eq!(doc.to_string(), "<root/>\n");
+}
