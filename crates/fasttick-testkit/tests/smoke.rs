@@ -85,6 +85,16 @@ fn harness_builds_once() {
             .build_dir
             .starts_with(fasttick_testkit::workspace_root().join("target"))
     );
+    // The programs are copies that a later build does not change.
+    assert!(
+        harness
+            .executor_path
+            .starts_with(harness.build_dir.join("bin"))
+    );
+    assert_eq!(
+        harness.executor_path.parent(),
+        harness.dump_models_path.parent()
+    );
     // The second call gives the same instance; no second build.
     let again = fasttick_testkit::harness().unwrap();
     assert!(std::ptr::eq(harness, again));

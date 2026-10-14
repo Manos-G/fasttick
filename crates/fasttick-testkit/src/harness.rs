@@ -7,6 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::prefix::{self, REQUIRE_ENV};
 
@@ -20,9 +21,12 @@ pub struct Harness {
     pub prefix: PathBuf,
     /// The CMake build directory.
     pub build_dir: PathBuf,
-    /// Path of the `fasttick_executor` program.
+    /// Path of the `fasttick_executor` program. It is a copy in
+    /// `<build_dir>/bin/<stamp>/` that never changes, also when another
+    /// process builds the harness again.
     pub executor_path: PathBuf,
-    /// Path of the `fasttick_dump_models` program.
+    /// Path of the `fasttick_dump_models` program (a copy, as
+    /// [`Harness::executor_path`]).
     pub dump_models_path: PathBuf,
     /// The directory with the sample trees (`test_harness/trees`).
     pub trees_dir: PathBuf,
@@ -210,8 +214,10 @@ pub fn fixture_path(name: impl AsRef<Path>) -> PathBuf {
 ///
 /// The first call configures and builds `test_harness/` with CMake into
 /// `<workspace>/target/test_harness/<prefix-hash>`. A lock file in the build
-/// directory makes sure that only one process builds at a time. Later calls
-/// give the same result without a new build.
+/// directory makes sure that only one process builds at a time. Then the
+/// programs are copied to `<build dir>/bin/<stamp>/`. These copies never
+/// change, so a new build by another process does not disturb this process.
+/// Later calls give the same result without a new build.
 pub fn harness() -> Result<&'static Harness, SkipReason> {
     static HARNESS: OnceLock<Result<Harness, SkipReason>> = OnceLock::new();
     HARNESS
@@ -304,25 +310,112 @@ fn build_harness() -> Result<Harness, SkipReason> {
             log: tail_lines(&combined_output(&output), LOG_TAIL_LINES),
         });
     }
-    drop(lock_file);
-
-    let harness = Harness {
-        lib_dir: prefix::lib_dir(&prefix),
-        executor_path: build_dir.join("fasttick_executor"),
-        dump_models_path: build_dir.join("fasttick_dump_models"),
-        trees_dir: source_dir.join("trees"),
-        build_dir,
-        prefix,
-    };
-    for program in [&harness.executor_path, &harness.dump_models_path] {
-        if !program.is_file() {
+    for program in PROGRAMS {
+        let path = build_dir.join(program);
+        if !path.is_file() {
             return Err(SkipReason::BuildFailed {
-                prefix: harness.prefix.clone(),
-                log: format!("the build did not make {}", program.display()),
+                prefix,
+                log: format!("the build did not make {}", path.display()),
             });
         }
     }
-    Ok(harness)
+    let snapshot = snapshot_programs(&build_dir, &PROGRAMS).map_err(|error| SkipReason::Io {
+        context: format!("cannot copy the programs of {}", build_dir.display()),
+        error: error.to_string(),
+    })?;
+    drop(lock_file);
+
+    Ok(Harness {
+        lib_dir: prefix::lib_dir(&prefix),
+        executor_path: snapshot.join(PROGRAMS[0]),
+        dump_models_path: snapshot.join(PROGRAMS[1]),
+        trees_dir: source_dir.join("trees"),
+        build_dir,
+        prefix,
+    })
+}
+
+/// The programs that the build makes: the executor, then the model dump.
+const PROGRAMS: [&str; 2] = ["fasttick_executor", "fasttick_dump_models"];
+
+/// Directory (in the build directory) that holds the program copies.
+const SNAPSHOT_DIR: &str = "bin";
+
+/// Name of the file that records the last use of a program copy.
+const LAST_USED_FILE: &str = ".last-used";
+
+/// A program copy that no process used for this time is removed.
+const SNAPSHOT_MAX_AGE: Duration = Duration::from_secs(2 * 3600);
+
+/// Copies the built programs to `<build_dir>/bin/<stamp>/` and gives that
+/// directory.
+///
+/// Several test processes share one build directory. If a process builds
+/// again (for example after a change of the C++ sources), the linker
+/// rewrites the programs in the build directory. A process that starts a
+/// program at that moment could get a partly written file. The copies
+/// never change: a new build gives a new stamp (from the size and the
+/// modification time of the programs) and thus a new directory. The caller
+/// must hold the build lock.
+pub(crate) fn snapshot_programs(build_dir: &Path, programs: &[&str]) -> io::Result<PathBuf> {
+    let mut stamp = Vec::new();
+    for program in programs {
+        let metadata = fs::metadata(build_dir.join(program))?;
+        let modified = metadata
+            .modified()?
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        stamp.extend_from_slice(program.as_bytes());
+        stamp.push(0);
+        stamp.extend_from_slice(&metadata.len().to_le_bytes());
+        stamp.extend_from_slice(&modified.as_nanos().to_le_bytes());
+    }
+    let root = build_dir.join(SNAPSHOT_DIR);
+    let target = root.join(format!("{:016x}", fnv1a64(&stamp)));
+    if !programs
+        .iter()
+        .all(|program| target.join(program).is_file())
+    {
+        let staging = root.join(format!(".staging-{}", std::process::id()));
+        // Leftovers of an earlier, interrupted copy.
+        let _ = fs::remove_dir_all(&staging);
+        let _ = fs::remove_dir_all(&target);
+        fs::create_dir_all(&staging)?;
+        for program in programs {
+            fs::copy(build_dir.join(program), staging.join(program))?;
+        }
+        fs::rename(&staging, &target)?;
+    }
+    // Mark the copy as used now, so that no other process removes it.
+    fs::write(target.join(LAST_USED_FILE), b"")?;
+    remove_old_snapshots(&root, &target, SNAPSHOT_MAX_AGE);
+    Ok(target)
+}
+
+/// Removes the program copies (and interrupted copies) in `root` that were
+/// not used for `max_age`, except `keep`. Errors are ignored: a copy that
+/// stays is not a problem.
+pub(crate) fn remove_old_snapshots(root: &Path, keep: &Path, max_age: Duration) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    let now = SystemTime::now();
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path == keep || !path.is_dir() {
+            continue;
+        }
+        let last_used = fs::metadata(path.join(LAST_USED_FILE))
+            .or_else(|_| fs::metadata(&path))
+            .and_then(|metadata| metadata.modified());
+        let age = last_used
+            .ok()
+            .and_then(|time| now.duration_since(time).ok())
+            .unwrap_or_default();
+        if age > max_age {
+            let _ = fs::remove_dir_all(&path);
+        }
+    }
 }
 
 fn define(name: &str, value: &std::ffi::OsStr) -> OsString {
@@ -463,6 +556,45 @@ mod tests {
         };
         assert!(build.is_fatal());
         assert!(build.to_string().contains("error: x"));
+    }
+
+    #[test]
+    fn snapshot_copies_are_stable_and_old_ones_are_removed() {
+        let temp = crate::TempDir::new("snapshot").unwrap();
+        let build = temp.path();
+        fs::write(build.join("a"), b"first a").unwrap();
+        fs::write(build.join("b"), b"first b").unwrap();
+
+        let first = snapshot_programs(build, &["a", "b"]).unwrap();
+        assert!(first.starts_with(build.join(SNAPSHOT_DIR)));
+        assert_eq!(fs::read(first.join("a")).unwrap(), b"first a");
+        assert_eq!(fs::read(first.join("b")).unwrap(), b"first b");
+        // The same build gives the same copy.
+        assert_eq!(snapshot_programs(build, &["a", "b"]).unwrap(), first);
+
+        // A new build gives a new copy. The old copy does not change.
+        fs::write(build.join("a"), b"second build of a").unwrap();
+        let second = snapshot_programs(build, &["a", "b"]).unwrap();
+        assert_ne!(second, first);
+        assert_eq!(fs::read(second.join("a")).unwrap(), b"second build of a");
+        assert_eq!(fs::read(first.join("a")).unwrap(), b"first a");
+
+        // A recent copy stays; an old one goes. The kept one always stays.
+        let root = build.join(SNAPSHOT_DIR);
+        fs::create_dir_all(root.join(".staging-1")).unwrap();
+        remove_old_snapshots(&root, &second, Duration::from_secs(3600));
+        assert!(first.is_dir());
+        remove_old_snapshots(&root, &second, Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(20));
+        remove_old_snapshots(&root, &second, Duration::ZERO);
+        assert!(!first.exists());
+        assert!(!root.join(".staging-1").exists());
+        assert!(second.join("a").is_file());
+
+        // A missing program is an error, not a panic.
+        assert!(snapshot_programs(build, &["missing"]).is_err());
+        // A missing root directory is not a problem for the clean-up.
+        remove_old_snapshots(&build.join("none"), &second, Duration::ZERO);
     }
 
     #[test]

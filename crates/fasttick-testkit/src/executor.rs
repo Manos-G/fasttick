@@ -692,6 +692,13 @@ mod tests {
     }
 
     #[test]
+    fn executor_can_move_to_another_thread() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Executor>();
+        assert_send_sync::<ExecutorOptions>();
+    }
+
+    #[test]
     fn signal_names() {
         assert_eq!(Signal::Term.name(), "TERM");
         assert_eq!(Signal::Int.name(), "INT");

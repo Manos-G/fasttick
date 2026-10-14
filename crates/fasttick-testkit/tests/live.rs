@@ -14,7 +14,7 @@ use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, TcpStream};
 use std::time::{Duration, Instant};
 
-use fasttick_testkit::{Executor, ExecutorOptions, free_port_pair, require_harness};
+use fasttick_testkit::{Executor, ExecutorOptions, Harness, free_port_pair, require_harness};
 
 /// Time limit for one socket read or write.
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
@@ -266,8 +266,29 @@ fn publisher_answers_fulltree_and_status() {
     assert!(status.success(), "{status}");
 }
 
+/// True if CMake found libzmq for the harness build. Without libzmq, the
+/// executor cannot release a blocked breakpoint (see test_harness/README.md).
+fn harness_has_libzmq(harness: &Harness) -> bool {
+    let cache = std::fs::read_to_string(harness.build_dir.join("CMakeCache.txt")).unwrap();
+    ["FASTTICK_ZMQ_INCLUDE_DIR:", "FASTTICK_ZMQ_LIBRARY:"]
+        .iter()
+        .all(|key| {
+            cache.lines().any(|line| {
+                line.starts_with(key)
+                    && line.split_once('=').is_some_and(|(_, value)| {
+                        !value.is_empty() && !value.ends_with("-NOTFOUND")
+                    })
+            })
+        })
+}
+
 #[test]
 fn sigterm_releases_a_blocked_breakpoint() {
+    let harness = require_harness!();
+    if !harness_has_libzmq(harness) {
+        eprintln!("SKIPPED: the harness was built without libzmq");
+        return;
+    }
     // A long heartbeat: the publisher keeps the hook enabled without polls.
     // Only the executor's own release can then unblock the tick.
     let Some((mut executor, port)) = start_long_running(120_000) else {
