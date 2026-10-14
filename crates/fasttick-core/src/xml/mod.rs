@@ -34,6 +34,27 @@
 //! doc.apply(change.inverse()).unwrap();
 //! assert_eq!(doc.to_string(), text);
 //! ```
+//!
+//! Paste a node with the indentation of its new siblings, then undo:
+//!
+//! ```
+//! use fasttick_core::xml::Document;
+//!
+//! let text = "<root>\n    <Sequence>\n        <A/>\n    </Sequence>\n</root>\n";
+//! let mut doc = Document::parse(text).unwrap();
+//! let sequence = doc.descendants(doc.root()).find(|&n| doc.name(n) == Some("Sequence")).unwrap();
+//!
+//! let pasted = doc.parse_fragment("<B port=\"{value}\"/>").unwrap();
+//! let undo = doc.insert_element_pretty(sequence, 1, pasted[0]).unwrap();
+//! assert_eq!(
+//!     doc.to_string(),
+//!     "<root>\n    <Sequence>\n        <A/>\n        <B port=\"{value}\"/>\n    </Sequence>\n</root>\n"
+//! );
+//!
+//! let redo = doc.apply_all(undo).unwrap();
+//! assert_eq!(doc.to_string(), text);
+//! doc.apply_all(redo).unwrap();
+//! ```
 
 mod document;
 mod edit;
