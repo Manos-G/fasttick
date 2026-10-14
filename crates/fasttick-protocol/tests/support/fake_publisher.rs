@@ -152,6 +152,8 @@ pub struct FakeState {
     pub outbox: VecDeque<Vec<Vec<u8>>>,
     /// The time of the next recorded transition, in microseconds.
     pub clock_us: u64,
+    /// The time when the PUB socket was bound the last time.
+    pub publisher_bound_at: Option<Instant>,
 }
 
 pub fn random_uuid() -> TreeUuid {
@@ -187,6 +189,7 @@ impl FakeState {
             crashed: None,
             outbox: VecDeque::new(),
             clock_us: 0,
+            publisher_bound_at: None,
         }
     }
 
@@ -586,15 +589,33 @@ impl std::fmt::Debug for FakePublisher {
 static NEXT_CANDIDATE: AtomicU32 = AtomicU32::new(0);
 
 fn bind_pair(context: &zmq::Context, port: u16) -> Option<(zmq::Socket, zmq::Socket)> {
+    let server = bind_server(context, port)?;
+    let publisher = bind_publisher(context, port)?;
+    Some((server, publisher))
+}
+
+fn bind_server(context: &zmq::Context, port: u16) -> Option<zmq::Socket> {
     let server = context.socket(zmq::REP).ok()?;
-    let publisher = context.socket(zmq::PUB).ok()?;
     server.set_linger(0).ok()?;
-    publisher.set_linger(0).ok()?;
     server.bind(&format!("tcp://127.0.0.1:{port}")).ok()?;
+    Some(server)
+}
+
+/// Binds the PUB socket on `port + 1`.
+fn bind_publisher(context: &zmq::Context, port: u16) -> Option<zmq::Socket> {
+    let publisher = context.socket(zmq::PUB).ok()?;
+    publisher.set_linger(0).ok()?;
     publisher
         .bind(&format!("tcp://127.0.0.1:{}", port.checked_add(1)?))
         .ok()?;
-    Some((server, publisher))
+    Some(publisher)
+}
+
+/// A PUB socket that the server thread binds later.
+struct PendingPublisher {
+    context: zmq::Context,
+    port: u16,
+    at: Instant,
 }
 
 impl FakePublisher {
@@ -629,10 +650,20 @@ impl FakePublisher {
     }
 
     fn spawn(&mut self, server: zmq::Socket, publisher: zmq::Socket) {
+        self.state().publisher_bound_at = Some(Instant::now());
+        self.spawn_with(server, Some(publisher), None);
+    }
+
+    fn spawn_with(
+        &mut self,
+        server: zmq::Socket,
+        publisher: Option<zmq::Socket>,
+        pending: Option<PendingPublisher>,
+    ) {
         let stop = Arc::new(AtomicBool::new(false));
         let state = Arc::clone(&self.state);
         let flag = Arc::clone(&stop);
-        let thread = thread::spawn(move || serve(server, publisher, state, flag));
+        let thread = thread::spawn(move || serve(server, publisher, pending, state, flag));
         self.running = Some((stop, thread));
     }
 
@@ -670,6 +701,31 @@ impl FakePublisher {
             );
             thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// Binds the server port again after [`FakePublisher::stop`], and the
+    /// PUB socket only after `delay`. Messages for the PUB socket before
+    /// that time are lost, as with a PUB socket without subscribers.
+    pub fn start_again_with_publisher_delay(&mut self, delay: Duration) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let server = loop {
+            if let Some(server) = bind_server(&self.context, self.port) {
+                break server;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "cannot bind port {} again",
+                self.port
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
+        self.state().publisher_bound_at = None;
+        let pending = PendingPublisher {
+            context: self.context.clone(),
+            port: self.port,
+            at: Instant::now() + delay,
+        };
+        self.spawn_with(server, None, Some(pending));
     }
 
     /// Simulates a new executor process with another tree.
@@ -812,7 +868,8 @@ impl Drop for FakePublisher {
 
 fn serve(
     server: zmq::Socket,
-    publisher: zmq::Socket,
+    mut publisher: Option<zmq::Socket>,
+    mut pending: Option<PendingPublisher>,
     state: Arc<Mutex<FakeState>>,
     stop: Arc<AtomicBool>,
 ) {
@@ -822,9 +879,19 @@ fn serve(
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     };
     while !stop.load(Ordering::SeqCst) {
+        if let Some(later) = &pending
+            && Instant::now() >= later.at
+            && let Some(socket) = bind_publisher(&later.context, later.port)
+        {
+            publisher = Some(socket);
+            pending = None;
+            lock().publisher_bound_at = Some(Instant::now());
+        }
         let outbox: Vec<Vec<Vec<u8>>> = lock().outbox.drain(..).collect();
         for message in outbox {
-            let _ = publisher.send_multipart(message, 0);
+            if let Some(publisher) = &publisher {
+                let _ = publisher.send_multipart(message, 0);
+            }
         }
         match server.poll(zmq::POLLIN, 5) {
             Ok(count) if count > 0 => {}

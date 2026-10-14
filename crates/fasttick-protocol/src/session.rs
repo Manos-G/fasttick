@@ -21,6 +21,15 @@
 //!   node now.
 //! - After a timeout, it reconnects automatically with a backoff from
 //!   100 ms to 2 s.
+//! - Before the first request of a connection attempt, and before it
+//!   inserts its hooks again, it waits until the notification socket is
+//!   connected, for at most [`SessionConfig::connect_timeout`]. Such a
+//!   request can make a node stop at once (the publisher enables its hooks
+//!   again when the heartbeat comes back). The publisher sends
+//!   BREAKPOINT_REACHED only once for each stop, and its PUB socket drops
+//!   the message while no subscriber is connected. ZeroMQ connects the REQ
+//!   and the SUB socket independently: after a restart of the executor,
+//!   the SUB socket can connect about 200 ms after the REQ socket.
 //! - During a recording, it reads GET_TRANSITIONS every 100 ms.
 //! - On disconnect and on shutdown, it stops the recording (and reads the
 //!   last transitions), then removes all hooks (best effort, with a short
@@ -58,6 +67,10 @@ const COMMAND_CHECK_INTERVAL: Duration = Duration::from_millis(5);
 /// The most notifications that the session reads in one pass.
 const MAX_NOTIFICATIONS_PER_PASS: usize = 256;
 
+/// The interval between two checks of the notification socket while the
+/// session waits for its connection.
+const NOTIFICATION_CHECK_INTERVAL: Duration = Duration::from_millis(10);
+
 /// How often the session polls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PollConfig {
@@ -89,7 +102,9 @@ pub struct SessionConfig {
     pub poll: PollConfig,
     /// The longest time to wait for a reply. Default: 1 s.
     pub request_timeout: Duration,
-    /// The longest time to wait for a TCP connection. Default: 1 s.
+    /// The longest time to wait for a TCP connection. Default: 1 s. It is
+    /// also the longest time that the session waits for the connection of
+    /// the notification socket (see the module documentation).
     pub connect_timeout: Duration,
     /// The delay before the first reconnect attempt. The delay doubles
     /// after each failed attempt. Default: 100 ms.
@@ -354,6 +369,11 @@ pub struct LiveSession {
     tree_before_restart: Option<Arc<RuntimeTree>>,
     tree_refresh_at: Option<Instant>,
     rehook_pending: bool,
+    /// The time of the next try to insert the hooks again.
+    rehook_at: Instant,
+    /// The end of the current wait for the connection of the notification
+    /// socket, if the session waits.
+    notification_wait_until: Option<Instant>,
     hooks: BTreeMap<(u16, HookPosition), Hook>,
     hit: BTreeSet<u16>,
     recording: bool,
@@ -438,6 +458,8 @@ impl LiveSession {
             tree_before_restart: None,
             tree_refresh_at: None,
             rehook_pending: false,
+            rehook_at: now,
+            notification_wait_until: None,
             hooks: BTreeMap::new(),
             hit: BTreeSet::new(),
             recording: false,
@@ -539,7 +561,7 @@ impl LiveSession {
                     deadline = deadline.min(at);
                 }
                 if self.rehook_pending && self.tree_refresh_at.is_none() {
-                    deadline = Instant::now();
+                    deadline = deadline.min(self.rehook_at);
                 }
                 Some(deadline)
             }
@@ -655,7 +677,11 @@ impl LiveSession {
             Ok(client) => {
                 self.client = Some(client);
                 self.reset_connection_data();
-                self.next_attempt_at = Instant::now();
+                let now = Instant::now();
+                self.next_attempt_at = now;
+                // The new sockets connect at once: wait for the
+                // notification socket without a reset.
+                self.notification_wait_until = Some(now + self.config.connect_timeout);
                 self.set_state(ConnectionState::Connecting);
             }
             Err(err) => {
@@ -672,6 +698,7 @@ impl LiveSession {
         self.tree_before_restart = None;
         self.tree_refresh_at = None;
         self.rehook_pending = false;
+        self.notification_wait_until = None;
         self.hooks.clear();
         self.hit.clear();
         self.recording = false;
@@ -879,9 +906,18 @@ impl LiveSession {
                     self.refresh_tree_after_restart();
                 }
                 // After a restart, wait for the new tree: the hooks are
-                // moved to the new UIDs first.
-                if self.rehook_pending && self.is_connected() && self.tree_refresh_at.is_none() {
-                    self.rehook();
+                // moved to the new UIDs first. Wait for the notification
+                // socket too: a hook can make a node stop at once.
+                if self.rehook_pending
+                    && self.is_connected()
+                    && self.tree_refresh_at.is_none()
+                    && now >= self.rehook_at
+                {
+                    if self.notifications_ready() {
+                        self.rehook();
+                    } else {
+                        self.rehook_at = now + NOTIFICATION_CHECK_INTERVAL;
+                    }
                 }
                 if self.recording && self.is_connected() && now >= self.next_transitions_at {
                     self.fetch_transitions();
@@ -904,6 +940,10 @@ impl LiveSession {
     }
 
     fn attempt_connection(&mut self) {
+        if self.client.is_some() && !self.notifications_ready() {
+            self.next_attempt_at = Instant::now() + NOTIFICATION_CHECK_INTERVAL;
+            return;
+        }
         let result = match self.client.as_mut() {
             None => {
                 self.set_state(ConnectionState::Disconnected);
@@ -933,7 +973,19 @@ impl LiveSession {
                 }
                 self.set_state(ConnectionState::Connected { uuid });
                 self.rehook_pending |= self.config.reinsert_hooks && !self.hooks.is_empty();
+                self.rehook_at = Instant::now();
                 self.next_status_at = Instant::now();
+                if !self.client.as_mut().is_some_and(Client::notifications_connected) {
+                    let port = self
+                        .client
+                        .as_ref()
+                        .map_or(0, |client| client.config().port);
+                    self.emit(SessionEvent::Warning(format!(
+                        "the notification socket is not connected (port {}); the \
+                         session can miss breakpoint hits",
+                        u32::from(port) + 1
+                    )));
+                }
                 match attempt {
                     Attempt::Tree((uuid, xml)) => self.publish_tree(uuid, &xml),
                     Attempt::Status(snapshot) => {
@@ -972,6 +1024,8 @@ impl LiveSession {
         // `check_uuid`.
         // Send the first status after the reconnect, also if it is unchanged.
         self.last_status = None;
+        // The next attempt waits again for the notification socket.
+        self.notification_wait_until = None;
         self.next_attempt_at = Instant::now() + self.backoff(attempt);
         self.set_state(ConnectionState::Reconnecting { attempt });
     }
@@ -1043,6 +1097,10 @@ impl LiveSession {
                 self.tree = None;
                 self.tree_refresh_at = Some(Instant::now());
                 self.rehook_pending = self.config.reinsert_hooks && !self.hooks.is_empty();
+                self.rehook_at = Instant::now();
+                // The notification socket can still wait for its
+                // reconnect: check it again before the hooks go back.
+                self.notification_wait_until = None;
                 self.emit(SessionEvent::ExecutorRestarted { old, new });
                 if self.recording {
                     self.recording = false;
@@ -1154,6 +1212,41 @@ impl LiveSession {
                         hook.uid
                     )));
                 }
+            }
+        }
+    }
+
+    /// True when the session can send a request that can make a node stop:
+    /// the notification socket is connected, or the wait for it is over
+    /// (see the module documentation).
+    ///
+    /// The first call of a wait opens a new notification socket, because a
+    /// new socket connects at once. The wait ends after
+    /// [`SessionConfig::connect_timeout`].
+    fn notifications_ready(&mut self) -> bool {
+        let Some(client) = self.client.as_mut() else {
+            return true;
+        };
+        if client.notifications_connected() {
+            self.notification_wait_until = None;
+            return true;
+        }
+        let now = Instant::now();
+        match self.notification_wait_until {
+            None => {
+                if let Err(err) = client.reset_notifications() {
+                    self.emit(SessionEvent::Warning(format!(
+                        "cannot open the notification socket: {err}"
+                    )));
+                    return true;
+                }
+                self.notification_wait_until = Some(now + self.config.connect_timeout);
+                false
+            }
+            Some(until) if now < until => false,
+            Some(_) => {
+                self.notification_wait_until = None;
+                true
             }
         }
     }
