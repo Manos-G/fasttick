@@ -1,0 +1,10 @@
+
+  <root BTCPP_format="4">
+
+    <BehaviorTree ID="Main">
+      <Sequence>
+        <KeepRunning _while="A==1" _onHalted="B=69" />
+      </Sequence>
+    </BehaviorTree>
+  </root>
+  

@@ -1,0 +1,15 @@
+
+<root BTCPP_format="4">
+  <BehaviorTree ID="TestTree">
+    <Parallel success_count="2" failure_count="1">
+      <Sequence>
+        <TestCondition name="cond1"/>
+        <Sleep msec="200"/>
+      </Sequence>
+      <Sequence>
+        <TestCondition name="cond2"/>
+        <Sleep msec="200"/>
+      </Sequence>
+    </Parallel>
+  </BehaviorTree>
+</root>

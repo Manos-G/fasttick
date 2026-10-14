@@ -1,0 +1,27 @@
+
+
+<root BTCPP_format="4" main_tree_to_execute="MainTree" >
+
+    <BehaviorTree ID="MainTree">
+        <Sequence>
+            <Fallback>
+                <Inverter>
+                    <IsDoorClosed/>
+                </Inverter>
+                <SubTree ID="DoorClosedSubtree"/>
+            </Fallback>
+            <PassThroughDoor/>
+        </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="DoorClosedSubtree">
+        <Fallback>
+            <OpenDoor/>
+            <RetryUntilSuccessful num_attempts="5">
+                <PickLock/>
+            </RetryUntilSuccessful>
+            <SmashDoor/>
+        </Fallback>
+    </BehaviorTree>
+
+</root>  

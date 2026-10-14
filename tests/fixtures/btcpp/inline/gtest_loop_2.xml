@@ -1,0 +1,8 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <LoopDouble queue="1.5;2.5;3.5" value="{val}">
+            <RecordDoubleValue value="{val}"/>
+          </LoopDouble>
+       </BehaviorTree>
+    </root>

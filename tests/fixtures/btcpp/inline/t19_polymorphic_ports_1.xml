@@ -1,0 +1,11 @@
+
+ <root BTCPP_format="4" >
+   <BehaviorTree ID="MainTree">
+     <Sequence>
+       <CreateCat    animal="{pet}" />
+       <SayHi        animal="{pet}" />
+       <CreateSphynx animal="{pet2}" />
+       <SayHi        animal="{pet2}" />
+     </Sequence>
+   </BehaviorTree>
+ </root>

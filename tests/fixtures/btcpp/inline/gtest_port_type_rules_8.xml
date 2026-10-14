@@ -1,0 +1,10 @@
+
+    <root BTCPP_format="4">
+      <BehaviorTree>
+        <Sequence>
+          <SetBlackboard value="3.14" output_key="value"/>
+          <NodeWithDoublePorts input="{value}" output="{result}"/>
+        </Sequence>
+      </BehaviorTree>
+    </root>
+  

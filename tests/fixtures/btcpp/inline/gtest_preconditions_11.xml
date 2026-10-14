@@ -1,0 +1,26 @@
+
+  <root BTCPP_format="4">
+
+    <BehaviorTree ID="Main">
+      <Sequence>
+        <SimpleOutput  output="{param}" />
+        <Script  code="value:=true" />
+
+        <SubTree ID="Sub1" param="{param}"/>
+        <SubTree ID="Sub1" param="{value}"/>
+        <SubTree ID="Sub1" param="true"/>
+        <TestA/>
+      </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="Sub1">
+      <Sequence>
+        <SubTree ID="Sub2" _skipIf="param != true" />
+      </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="Sub2">
+      <TestB/>
+    </BehaviorTree>
+  </root>
+  

@@ -1,0 +1,11 @@
+
+    <root BTCPP_format="4" main_tree_to_execute="MainTree">
+      <BehaviorTree ID="MainTree">
+        <SubTree ID="Issue953SubTree" data="123;subtree_test;1.5"/>
+      </BehaviorTree>
+
+      <BehaviorTree ID="Issue953SubTree">
+        <Issue953Action input="{data}"/>
+      </BehaviorTree>
+    </root>
+  

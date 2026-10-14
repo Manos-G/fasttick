@@ -1,0 +1,7 @@
+
+    <root BTCPP_format="4">
+      <BehaviorTree ID="MainTree">
+        <ThrowingAction name="my_action"/>
+      </BehaviorTree>
+    </root>
+  

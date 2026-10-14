@@ -1,0 +1,12 @@
+
+    <root BTCPP_format="4">
+      <BehaviorTree ID="MainTree">
+        <Sequence>
+          <ProduceVectorDouble numbers="{nums}" />
+          <LoopDouble queue="{nums}" value="{val}">
+            <CollectDouble value="{val}" />
+          </LoopDouble>
+        </Sequence>
+      </BehaviorTree>
+    </root>
+  

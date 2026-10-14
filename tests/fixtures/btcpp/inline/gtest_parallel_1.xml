@@ -1,0 +1,10 @@
+
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <Parallel name="parallel" success_count="1" failure_count="3">
+      <GoodTest name="first"/>
+      <BadTest name="second"/>
+      <SlowTest name="third"/>
+    </Parallel>
+  </BehaviorTree>
+</root>  

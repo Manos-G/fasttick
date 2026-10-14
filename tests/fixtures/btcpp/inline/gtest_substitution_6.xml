@@ -1,0 +1,12 @@
+
+  <root BTCPP_format="4">
+    <BehaviorTree ID="MainTree">
+      <Sequence>
+        <Delay delay_msec="50">
+          <AlwaysSuccess/>
+        </Delay>
+        <Script name="script_2" code=" val:=1 "/>
+      </Sequence>
+    </BehaviorTree>
+  </root>
+  

@@ -1,0 +1,14 @@
+
+    <root BTCPP_format="4" main_tree_to_execute="MainTree">
+      <BehaviorTree ID="MainTree">
+        <Sequence name="outer_seq">
+          <SubTree ID="InnerTree" name="subtree_call"/>
+        </Sequence>
+      </BehaviorTree>
+      <BehaviorTree ID="InnerTree">
+        <Sequence name="inner_seq">
+          <ThrowingAction name="subtree_thrower"/>
+        </Sequence>
+      </BehaviorTree>
+    </root>
+  

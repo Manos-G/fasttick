@@ -1,0 +1,10 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <WhileDoElse>
+            <RunningThenSuccess/>
+            <TestA/>
+            <TestB/>
+          </WhileDoElse>
+       </BehaviorTree>
+    </root>

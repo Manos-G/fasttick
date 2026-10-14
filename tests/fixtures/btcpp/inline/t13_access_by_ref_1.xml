@@ -1,0 +1,11 @@
+
+  <root BTCPP_format="4" >
+    <BehaviorTree ID="TreeA">
+      <Sequence>
+        <PushIntoVector vector="{vect}" value="3"/>
+        <PushIntoVector vector="{vect}" value="5"/>
+        <PushIntoVector vector="{vect}" value="7"/>
+      </Sequence>
+    </BehaviorTree>
+ </root>
+ 

@@ -1,0 +1,2 @@
+# Keep the fixture bytes exactly as in BehaviorTree.CPP.
+*.xml -text

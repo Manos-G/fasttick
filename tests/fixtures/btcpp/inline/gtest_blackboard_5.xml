@@ -1,0 +1,13 @@
+
+  <root BTCPP_format="4" >
+    <BehaviorTree ID="MySubtree">
+      <ComparisonNode first="{value}" second="42" operator="==" />
+    </BehaviorTree>
+
+    <BehaviorTree ID="MainTree">
+      <Sequence>
+        <SetBlackboard value="42" output_key="value" />
+        <SubTree ID="MySubtree" value="{value}  "/>
+      </Sequence>
+    </BehaviorTree>
+  </root> 

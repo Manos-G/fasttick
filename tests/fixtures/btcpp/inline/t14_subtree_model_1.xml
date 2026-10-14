@@ -1,0 +1,20 @@
+
+<root BTCPP_format="4">
+
+  <TreeNodesModel>
+    <SubTree ID="MySub">
+      <input_port name="sub_in_value" default="42"/>
+      <input_port name="sub_in_name"/>
+      <output_port name="sub_out_result" default="{out_result}"/>
+      <output_port name="sub_out_state"/>
+    </SubTree>
+  </TreeNodesModel>
+
+  <BehaviorTree ID="MySub">
+    <Sequence>
+      <ScriptCondition code="sub_in_value==42 && sub_in_name=='john'" />
+      <Script code="sub_out_result:=69; sub_out_state:='ACTIVE'" />
+    </Sequence>
+  </BehaviorTree>
+</root>
+ 

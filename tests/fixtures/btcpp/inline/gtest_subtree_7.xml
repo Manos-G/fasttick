@@ -1,0 +1,13 @@
+
+
+<root BTCPP_format="4" >
+
+    <BehaviorTree ID="MainTree">
+        <Sequence>
+            <SubTree ID="mySubtree" _autoremap="1"/>
+        </Sequence>
+    </BehaviorTree>
+    <BehaviorTree ID="mySubtree">
+            <ReadInConstructor message="{message}" />
+    </BehaviorTree>
+</root> 

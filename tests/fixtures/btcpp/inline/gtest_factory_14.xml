@@ -1,0 +1,9 @@
+
+  <root BTCPP_format="4">
+    <BehaviorTree ID="">
+      <AlwaysSuccess/>
+    </BehaviorTree>
+    <BehaviorTree ID="Other">
+      <AlwaysSuccess/>
+    </BehaviorTree>
+  </root>

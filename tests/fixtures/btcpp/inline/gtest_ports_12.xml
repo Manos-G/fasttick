@@ -1,0 +1,6 @@
+
+    <root BTCPP_format="4" >
+      <BehaviorTree>
+        <NodeWithDefaultNullptr/>
+      </BehaviorTree>
+    </root>

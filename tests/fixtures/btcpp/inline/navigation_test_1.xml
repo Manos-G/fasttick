@@ -1,0 +1,25 @@
+
+
+<root  BTCPP_format="4" main_tree_to_execute="BehaviorTree">
+    <BehaviorTree ID="BehaviorTree">
+        <Fallback name="root">
+
+            <ReactiveSequence name="navigation_subtree">
+                <Inverter>
+                    <Condition ID="IsStuck"/>
+                </Inverter>
+                <SequenceWithMemory name="navigate">
+                    <Action ID="ComputePathToPose"/>
+                    <Action ID="FollowPath"/>
+                </SequenceWithMemory>
+            </ReactiveSequence>
+
+            <SequenceWithMemory name="stuck_recovery">
+                <Condition ID="IsStuck"/>
+                <Action ID="BackUpAndSpin"/>
+            </SequenceWithMemory>
+
+        </Fallback>
+    </BehaviorTree>
+</root>
+ 

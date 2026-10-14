@@ -1,0 +1,9 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <TryCatch>
+            <AlwaysFailure/>  <!-- try fails -->
+            <AlwaysFailure/>  <!-- catch also fails -->
+          </TryCatch>
+       </BehaviorTree>
+    </root>

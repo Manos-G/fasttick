@@ -1,0 +1,19 @@
+
+
+<root BTCPP_format="4" >
+
+    <BehaviorTree ID="MainTree">
+        <Sequence>
+            <Script code = "myParam = 'Hello World'; param3='Auto remapped' " />
+            <SubTree ID="mySubtree" _autoremap="1" param1="{myParam}" param2="Straight Talking" />
+        </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="mySubtree">
+        <Sequence>
+            <SaySomething message="{param1}" />
+            <SaySomething message="{param2}" />
+            <SaySomething message="{param3}" />
+        </Sequence>
+    </BehaviorTree>
+</root> 

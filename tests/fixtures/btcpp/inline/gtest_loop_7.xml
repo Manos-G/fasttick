@@ -1,0 +1,8 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <LoopInt queue="1;2;3;4;5" value="{val}">
+            <FailOnThird/>
+          </LoopInt>
+       </BehaviorTree>
+    </root>

@@ -1,0 +1,10 @@
+
+  <root BTCPP_format="4">
+    <BehaviorTree ID="MainTree">
+      <Sequence>
+        <Script code="other_point:=first_point" />
+        <Sleep msec="5" />
+        <SetBlackboard value="{second_point}" output_key="other_point" />
+      </Sequence>
+    </BehaviorTree>
+  </root> 

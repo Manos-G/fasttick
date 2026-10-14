@@ -1,0 +1,16 @@
+
+
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+
+    <BehaviorTree ID="MainTree">
+        <Sequence>
+            <Script code = " thoughts = 'hello' " />
+            <SubTree ID="CopySubtree" in_arg="{thoughts}" out_arg="{greetings}"/>
+            <SaySomething  message="{greetings}" />
+        </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="CopySubtree">
+            <CopyPorts in="{in_arg}" out="{out_arg}"/>
+    </BehaviorTree>
+</root> 

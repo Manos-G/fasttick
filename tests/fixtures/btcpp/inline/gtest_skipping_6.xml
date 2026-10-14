@@ -1,0 +1,10 @@
+
+    <root BTCPP_format="4" >
+       <BehaviorTree>
+          <ReactiveSequence>
+            <Script code=" value:=10 "/>
+            <TestB _skipIf="value < 25"/>
+            <AsyncActionTest/>
+          </ReactiveSequence>
+       </BehaviorTree>
+    </root>

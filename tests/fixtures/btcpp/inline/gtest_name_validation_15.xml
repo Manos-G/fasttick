@@ -1,0 +1,14 @@
+
+    <root BTCPP_format="4" main_tree_to_execute="MainTree">
+      <BehaviorTree ID="MainTree">
+        <SubTree ID="MySubTree" input_value="{value}"/>
+      </BehaviorTree>
+      <BehaviorTree ID="MySubTree">
+        <AlwaysSuccess/>
+      </BehaviorTree>
+      <TreeNodesModel>
+        <SubTree ID="MySubTree">
+          <input_port name="input_value"/>
+        </SubTree>
+      </TreeNodesModel>
+    </root>

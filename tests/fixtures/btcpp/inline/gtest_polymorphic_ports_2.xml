@@ -1,0 +1,9 @@
+
+  <root BTCPP_format="4" >
+    <BehaviorTree ID="Main">
+      <Sequence>
+        <CreateSphynx out_sphynx="{pet}" />
+        <PrintAnimalName in_animal="{pet}" />
+      </Sequence>
+    </BehaviorTree>
+  </root>

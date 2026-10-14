@@ -1,0 +1,21 @@
+
+<root BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <Sequence>
+      <Script code="val_A:= 'john' "/>
+      <Script code="val_B:= 42 "/>
+      <SaySomething message="{val_A}" />
+      <SaySomething message="hello world" />
+      <SubTree ID="Sub" val="{val_A}" _autoremap="true" />
+      <SaySomething message="{reply}" />
+    </Sequence>
+  </BehaviorTree>
+  <BehaviorTree ID="Sub">
+    <Sequence>
+      <SaySomething message="{val}" />
+      <SaySomething message="{val_B}" />
+      <Script code="reply:= 'done' "/>
+    </Sequence>
+  </BehaviorTree>
+</root>
+ 

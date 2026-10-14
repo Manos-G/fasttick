@@ -1,0 +1,14 @@
+
+
+<root BTCPP_format="4" main_tree_to_execute="MainTree" >
+
+    <BehaviorTree ID="MainTree">
+        <SequenceWithMemory>
+            <Script code = " var := 0 " />
+            <TestA/>
+            <ScriptCondition code = "var+=1; var >= 5" />
+            <TestB/>
+            <TestC/>
+        </SequenceWithMemory>
+    </BehaviorTree>
+</root> 

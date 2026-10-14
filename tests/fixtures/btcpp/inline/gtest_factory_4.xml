@@ -1,0 +1,13 @@
+
+
+<root BTCPP_format="4">
+  <BehaviorTree ID="DoorClosedSubtree">
+    <Sequence name="door_sequence">
+      <Decorator ID="Inverter">
+        <Action ID="IsDoorClosed" />
+      </Decorator>
+      <Action ID="OpenDoor" />
+      <Action ID="PassThroughDoor" />
+    </Sequence>
+  </BehaviorTree>
+</root>  

@@ -1,0 +1,17 @@
+
+
+<root BTCPP_format="4" main_tree_to_execute="MainTree" >
+
+    <BehaviorTree ID="MainTree">
+        <Sequence>
+            <Script code = " myParam = 'hello' " />
+            <SubTree ID="mySubtree" param="{myParam}" />
+            <Script code = " myParam = 'world' " />
+            <SubTree ID="mySubtree" param="{myParam}" />
+        </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="mySubtree">
+            <SaySomething message="{param}" />
+    </BehaviorTree>
+</root> 

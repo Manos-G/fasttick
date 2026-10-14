@@ -1,0 +1,15 @@
+
+  <root BTCPP_format="4" >
+    <BehaviorTree ID="test_tree">
+      <Sequence>
+        <Script code="test := 'start'"/>
+          <Parallel failure_count="1"
+                    success_count="-1">
+            <Sleep msec="1000"
+                   _onHalted="test = 'halted'"
+                   _post="test = 'post'"/>
+            <AlwaysFailure/>
+          </Parallel>
+      </Sequence>
+    </BehaviorTree>
+  </root>

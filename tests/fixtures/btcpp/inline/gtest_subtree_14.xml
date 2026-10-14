@@ -1,0 +1,14 @@
+
+<root main_tree_to_execute = "MainTree" BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <Sequence>
+      <SubTree ID="Init" test="{test}" />
+      <Assert condition="{test}" />
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="Init">
+    <SetBlackboard output_key="test" value="true"/>
+  </BehaviorTree>
+</root>
+ 

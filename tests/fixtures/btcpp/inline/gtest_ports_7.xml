@@ -1,0 +1,6 @@
+
+    <root BTCPP_format="4" >
+      <BehaviorTree ID="Main">
+        <ActionVectorStringIn states="hello;world;with spaces"/>
+      </BehaviorTree>
+    </root>

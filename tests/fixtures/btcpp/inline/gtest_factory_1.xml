@@ -1,0 +1,36 @@
+
+
+<root BTCPP_format="4" >
+
+    <BehaviorTree ID="MainTree">
+        <Fallback name="root_selector">
+
+            <Sequence name="door_open_sequence">
+                <Action ID="IsDoorOpen" />
+                <Action ID="PassThroughDoor" />
+            </Sequence>
+
+            <Sequence name="door_closed_sequence">
+                <Decorator ID="Inverter">
+                     <Action ID="IsDoorOpen" />
+                </Decorator>
+                <Action ID="OpenDoor" />
+                <Action ID="PassThroughDoor" />
+                <Action ID="CloseDoor" />
+            </Sequence>
+
+            <Action ID="PassThroughWindow" />
+
+        </Fallback>
+    </BehaviorTree>
+
+    <!-- TreeNodesModel is used only by the Graphic interface -->
+    <TreeNodesModel>
+        <Action ID="IsDoorOpen" />
+        <Action ID="PassThroughDoor" />
+        <Action ID="CloseDoor" />
+        <Action ID="OpenDoor" />
+        <Action ID="PassThroughWindow" />
+    </TreeNodesModel>
+</root>
+        

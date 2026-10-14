@@ -1,0 +1,6 @@
+
+    <root BTCPP_format="4" >
+      <BehaviorTree>
+        <NodeWithDefaultPoints input="-1,-2"/>
+      </BehaviorTree>
+    </root>

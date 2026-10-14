@@ -1,0 +1,16 @@
+
+ <root BTCPP_format="4" >
+     <BehaviorTree ID="TreeA">
+        <Sequence>
+            <LoopDouble queue="1;2;3"  value="{number}">
+              <PrintNumber value="{number}" />
+            </LoopDouble>
+
+            <GenerateWaypoints waypoints="{waypoints}" />
+            <LoopPose queue="{waypoints}"  value="{wp}">
+              <UseWaypoint waypoint="{wp}" />
+            </LoopPose>
+        </Sequence>
+     </BehaviorTree>
+ </root>
+ 

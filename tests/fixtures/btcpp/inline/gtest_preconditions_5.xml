@@ -1,0 +1,20 @@
+
+
+    <root BTCPP_format="4" >
+        <BehaviorTree ID="MainTree">
+            <Sequence>
+                <Script code = "A:=0" />
+                <Script code = "B:=0" />
+                <Script code = "C:=1" />
+                <Repeat num_cycles="3">
+                    <Sequence>
+                        <Precondition if=" A==0 " else="SUCCESS">
+                            <TestA/>
+                        </Precondition>
+                        <KeepRunning _while="C==0" />
+                        <KeepRunning _while="B==0" />
+                    </Sequence>
+                </Repeat>
+            </Sequence>
+        </BehaviorTree>
+    </root>

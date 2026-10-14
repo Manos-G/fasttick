@@ -1,0 +1,10 @@
+
+    <root BTCPP_format="4">
+      <BehaviorTree ID="Main">
+        <SubTree ID="Sub" values="3;7"/>
+      </BehaviorTree>
+      <BehaviorTree ID="Sub">
+        <NodeWithVectorPorts input="{values}"/>
+      </BehaviorTree>
+    </root>
+  

@@ -1,0 +1,8 @@
+
+    <root BTCPP_format="4">
+       <BehaviorTree>
+          <LoopBool queue="true;false;true" value="{val}">
+            <RecordBoolValue value="{val}"/>
+          </LoopBool>
+       </BehaviorTree>
+    </root>

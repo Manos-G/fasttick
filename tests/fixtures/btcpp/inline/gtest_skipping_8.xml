@@ -1,0 +1,11 @@
+
+    <root BTCPP_format="4" >
+       <BehaviorTree>
+          <Sequence>
+            <Script code=" doit:=false "/>
+            <Sequence>
+              <TestB _while="doit"/>
+            </Sequence>
+          </Sequence>
+       </BehaviorTree>
+    </root>

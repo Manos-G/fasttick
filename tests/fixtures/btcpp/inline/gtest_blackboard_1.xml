@@ -1,0 +1,11 @@
+
+
+     <root BTCPP_format="4" >
+         <BehaviorTree ID="MainTree">
+            <Sequence>
+                <BB_TestNode in_port="11" out_port="{my_port}"/>
+                <Script code="my_port=-43" />
+            </Sequence>
+         </BehaviorTree>
+     </root>
+    

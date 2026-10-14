@@ -1,0 +1,9 @@
+
+  <root BTCPP_format="4" >
+    <BehaviorTree ID="Main">
+      <Sequence>
+        <CreateCat out_cat="{pet}" />
+        <PrintDogName in_dog="{pet}" />
+      </Sequence>
+    </BehaviorTree>
+  </root>

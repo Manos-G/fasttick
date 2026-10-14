@@ -1,0 +1,15 @@
+
+
+ <root BTCPP_format="4" >
+
+     <BehaviorTree ID="MainTree">
+        <Sequence name="root">
+            <BatteryOK/>
+            <SaySomething   message="mission started..." />
+            <MoveBase       goal="1;2;3"/>
+            <SaySomething   message="mission completed!" />
+        </Sequence>
+     </BehaviorTree>
+
+ </root>
+ 

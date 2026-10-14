@@ -1,0 +1,15 @@
+
+
+    <root BTCPP_format="4" >
+        <BehaviorTree ID="main">
+            <Sequence>
+                <TestA/>
+                <Script code=" data:=true "/>
+                <SubTree ID="sub" _skipIf="data"/>
+            </Sequence>
+        </BehaviorTree>
+
+        <BehaviorTree ID="sub">
+            <TestB/>
+        </BehaviorTree>
+    </root>

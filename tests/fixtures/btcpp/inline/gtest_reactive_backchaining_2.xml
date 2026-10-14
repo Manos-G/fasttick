@@ -1,0 +1,23 @@
+
+  <root BTCPP_format="4">
+    <BehaviorTree ID="EnsureWarm">
+      <ReactiveFallback>
+        <IsWarm />
+        <ReactiveSequence>
+          <SubTree ID="EnsureHoldingJacket" />
+          <WearJacket />
+        </ReactiveSequence>
+      </ReactiveFallback>
+    </BehaviorTree>
+
+    <BehaviorTree ID="EnsureHoldingJacket">
+      <ReactiveFallback>
+        <IsHoldingJacket />
+        <ReactiveSequence>
+          <IsNearCloset />
+          <GrabJacket />
+        </ReactiveSequence>
+      </ReactiveFallback>
+    </BehaviorTree>
+  </root>
+  
