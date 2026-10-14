@@ -336,7 +336,9 @@ impl CData {
 
     /// Returns the text between `<![CDATA[` and `]]>`.
     pub fn content(&self) -> &str {
-        self.raw.get(9..self.raw.len().saturating_sub(3)).unwrap_or("")
+        self.raw
+            .get(9..self.raw.len().saturating_sub(3))
+            .unwrap_or("")
     }
 
     /// Returns the content with line ends normalized as tinyxml2 does.
@@ -359,7 +361,9 @@ impl Comment {
 
     /// Returns the text between `<!--` and `-->`.
     pub fn content(&self) -> &str {
-        self.raw.get(4..self.raw.len().saturating_sub(3)).unwrap_or("")
+        self.raw
+            .get(4..self.raw.len().saturating_sub(3))
+            .unwrap_or("")
     }
 }
 
@@ -377,7 +381,9 @@ impl ProcessingInstruction {
 
     /// Returns the text between `<?` and `?>`.
     pub fn content(&self) -> &str {
-        self.raw.get(2..self.raw.len().saturating_sub(2)).unwrap_or("")
+        self.raw
+            .get(2..self.raw.len().saturating_sub(2))
+            .unwrap_or("")
     }
 
     /// Returns the target name.
@@ -410,7 +416,9 @@ impl Declaration {
 
     /// Returns the text between `<?xml` and `?>`.
     pub fn content(&self) -> &str {
-        self.raw.get(5..self.raw.len().saturating_sub(2)).unwrap_or("")
+        self.raw
+            .get(5..self.raw.len().saturating_sub(2))
+            .unwrap_or("")
     }
 
     /// Returns the value of a pseudo-attribute such as `version` or

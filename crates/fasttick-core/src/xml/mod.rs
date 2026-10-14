@@ -48,7 +48,7 @@ pub use edit::{AttributeChange, Change, Position};
 pub use error::{EditError, XmlError};
 pub use escape::is_valid_name;
 pub use node::{
-    Attribute, CData, Comment, DocType, Declaration, Element, Node, NodeId, NodeKind,
+    Attribute, CData, Comment, Declaration, DocType, Element, Node, NodeId, NodeKind,
     ProcessingInstruction, Quote, Text,
 };
 pub use parse::MAX_ELEMENT_DEPTH;

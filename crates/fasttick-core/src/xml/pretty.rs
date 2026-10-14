@@ -178,7 +178,11 @@ impl Document {
                 match self.node(k) {
                     Some(Node::Element(_)) => stack.push((k, depth + 1)),
                     Some(Node::Text(t)) if t.is_whitespace() && t.raw.contains('\n') => {
-                        let level = if i + 1 == kids.len() { depth } else { depth + 1 };
+                        let level = if i + 1 == kids.len() {
+                            depth
+                        } else {
+                            depth + 1
+                        };
                         let lines = t.raw.matches('\n').count();
                         let mut raw = nl.repeat(lines);
                         raw.push_str(base);

@@ -79,7 +79,10 @@ fn fixture_set_is_complete() {
         assert!(names.contains(&expected), "missing fixture {expected}");
     }
     for (name, reason) in MALFORMED_FIXTURES {
-        assert!(names.contains(name), "skip list names a missing file {name}");
+        assert!(
+            names.contains(name),
+            "skip list names a missing file {name}"
+        );
         assert!(!reason.is_empty());
     }
 }
@@ -360,25 +363,29 @@ fn leaf_strategy() -> impl Strategy<Value = GenNode> {
     ]
 }
 
-fn element_strategy(
-    children: BoxedStrategy<Vec<GenNode>>,
-) -> impl Strategy<Value = GenElement> {
+fn element_strategy(children: BoxedStrategy<Vec<GenNode>>) -> impl Strategy<Value = GenElement> {
     (
         name_strategy(),
         proptest::collection::vec(attr_strategy(), 0..4),
         opt_ws_strategy(),
         any::<bool>(),
-        prop_oneof![Just(String::new()), Just(" ".to_owned()), Just("\n".to_owned())],
+        prop_oneof![
+            Just(String::new()),
+            Just(" ".to_owned()),
+            Just("\n".to_owned())
+        ],
         children,
     )
-        .prop_map(|(name, attributes, tail, self_closing, end_ws, children)| GenElement {
-            name,
-            attributes,
-            tail,
-            self_closing: self_closing && children.is_empty(),
-            end_ws,
-            children,
-        })
+        .prop_map(
+            |(name, attributes, tail, self_closing, end_ws, children)| GenElement {
+                name,
+                attributes,
+                tail,
+                self_closing: self_closing && children.is_empty(),
+                end_ws,
+                children,
+            },
+        )
 }
 
 fn tree_strategy() -> impl Strategy<Value = GenElement> {
@@ -409,7 +416,9 @@ fn document_strategy() -> impl Strategy<Value = GenDocument> {
         prop_oneof![
             Just(None),
             Just(Some("<!DOCTYPE root>")),
-            Just(Some("<!DOCTYPE root [\n  <!ENTITY e \"x>y\">\n  <!-- ] -->\n]>")),
+            Just(Some(
+                "<!DOCTYPE root [\n  <!ENTITY e \"x>y\">\n  <!-- ] -->\n]>"
+            )),
         ],
         proptest::collection::vec(misc_strategy(), 0..3),
         tree_strategy(),
@@ -676,7 +685,9 @@ proptest! {
 fn ten_thousand_elements_round_trip() {
     let mut text = String::from("<?xml version=\"1.0\"?>\n<root BTCPP_format=\"4\">\n");
     for t in 0..100 {
-        text.push_str(&format!("  <BehaviorTree ID=\"Tree{t}\">\n    <Sequence name=\"s{t}\">\n"));
+        text.push_str(&format!(
+            "  <BehaviorTree ID=\"Tree{t}\">\n    <Sequence name=\"s{t}\">\n"
+        ));
         for i in 0..98 {
             text.push_str(&format!(
                 "      <Action ID=\"A{i}\" name='n &amp; {i}' value=\"{{bb_{i}}}\" _skipIf=\"x &lt; {i}\"/>\n"

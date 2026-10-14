@@ -8,8 +8,8 @@
 
 use super::document::Document;
 use super::error::EditError;
-use super::escape::{escape_text, is_valid_name};
-use super::node::{Attribute, CData, Comment, Element, Node, NodeId, Quote, Slot, Text};
+use super::escape::{escape_text, is_all_whitespace, is_valid_name};
+use super::node::{Attribute, CData, Comment, Element, Node, NodeId, NodeKind, Quote, Slot, Text};
 
 /// The place of a node in the children of its parent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -231,8 +231,41 @@ impl Document {
         if index > len {
             return Err(EditError::IndexOutOfRange { index, len });
         }
+        if parent == self.root() {
+            let mut order = self.children(parent).to_vec();
+            order.insert(index, child);
+            self.check_top_level_order(&order, None)?;
+        }
         self.slots[parent.index()].children.insert(index, child);
         self.slots[child.index()].parent = Some(parent);
+        Ok(())
+    }
+
+    /// Checks the rule of tinyxml2 for the top level: an XML declaration has
+    /// only declarations and white space before it. `text` replaces the
+    /// "is white space" property of one text node.
+    fn check_top_level_order(
+        &self,
+        order: &[NodeId],
+        text: Option<(NodeId, bool)>,
+    ) -> Result<(), EditError> {
+        let mut other_content = false;
+        for &n in order {
+            match self.node(n) {
+                Some(Node::Declaration(_)) if other_content => {
+                    return Err(EditError::DeclarationPosition(n));
+                }
+                Some(Node::Declaration(_)) => {}
+                Some(Node::Text(t)) => {
+                    let whitespace = match text {
+                        Some((id, ws)) if id == n => ws,
+                        _ => t.is_whitespace(),
+                    };
+                    other_content |= !whitespace;
+                }
+                _ => other_content = true,
+            }
+        }
         Ok(())
     }
 
@@ -284,6 +317,14 @@ impl Document {
         let len = self.children(new_parent).len() - usize::from(new_parent == old_parent);
         if index > len {
             return Err(EditError::IndexOutOfRange { index, len });
+        }
+        if new_parent == self.root() {
+            let mut order = self.children(new_parent).to_vec();
+            if new_parent == old_parent {
+                order.remove(old_index);
+            }
+            order.insert(index, node);
+            self.check_top_level_order(&order, None)?;
         }
         self.slots[old_parent.index()].children.remove(old_index);
         self.slots[new_parent.index()].children.insert(index, node);
@@ -406,10 +447,11 @@ impl Document {
         if index >= len {
             return Err(EditError::IndexOutOfRange { index, len });
         }
-        if let Some(other) = element.attribute_index(&attribute.name) {
-            if other != index {
-                return Err(EditError::DuplicateAttribute(attribute.name));
-            }
+        if element
+            .attribute_index(&attribute.name)
+            .is_some_and(|other| other != index)
+        {
+            return Err(EditError::DuplicateAttribute(attribute.name));
         }
         element.dirty = true;
         Ok(std::mem::replace(&mut element.attributes[index], attribute))
@@ -454,6 +496,10 @@ impl Document {
     /// document is parsed again.
     pub fn set_raw(&mut self, node: NodeId, raw: String) -> Result<String, EditError> {
         check_no_nul(&raw)?;
+        if self.parent(node) == Some(self.root()) && self.kind(node) == Some(NodeKind::Text) {
+            let order = self.children(self.root()).to_vec();
+            self.check_top_level_order(&order, Some((node, is_all_whitespace(&raw))))?;
+        }
         let target = match self.slot_mut(node).map(|s| &mut s.node) {
             Some(Node::Text(t)) => {
                 if raw.contains('<') {

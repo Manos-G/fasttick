@@ -29,7 +29,10 @@ fn set_existing_attribute_keeps_position_quote_and_whitespace() {
     let change = doc.set_attribute(a, "x", "a'b\"<&>").unwrap();
     assert_eq!(change.index, 0);
     assert_eq!(change.old.as_ref().unwrap().raw_value(), "1");
-    assert_eq!(doc.to_string(), "<a  x='a&apos;b\"&lt;&amp;&gt;'\n   y=\"2\" />");
+    assert_eq!(
+        doc.to_string(),
+        "<a  x='a&apos;b\"&lt;&amp;&gt;'\n   y=\"2\" />"
+    );
     assert_eq!(doc.attribute(a, "x"), Some("a'b\"<&>"));
     assert!(doc.element(a).unwrap().is_dirty());
     doc.apply(change.inverse()).unwrap();
@@ -151,12 +154,7 @@ fn rename_keeps_end_tag_white_space() {
     let old = doc.rename_element(a, "b").unwrap();
     assert_eq!(old, "a");
     assert_eq!(doc.to_string(), "<b  x=\"1\">t</b >");
-    let undo = doc
-        .apply(Change::Rename {
-            node: a,
-            name: old,
-        })
-        .unwrap();
+    let undo = doc.apply(Change::Rename { node: a, name: old }).unwrap();
     assert_eq!(doc.to_string(), src);
     assert_eq!(
         undo,
@@ -245,7 +243,10 @@ fn set_text_and_undo() {
     let old_text = doc.set_text(kids[0], "1 < 2").unwrap();
     let old_comment = doc.set_text(kids[1], " new ").unwrap();
     let old_cdata = doc.set_text(kids[2], "<raw>").unwrap();
-    assert_eq!(doc.to_string(), "<a>1 &lt; 2<!-- new --><![CDATA[<raw>]]></a>");
+    assert_eq!(
+        doc.to_string(),
+        "<a>1 &lt; 2<!-- new --><![CDATA[<raw>]]></a>"
+    );
     doc.set_raw(kids[0], old_text).unwrap();
     doc.set_raw(kids[1], old_comment).unwrap();
     doc.set_raw(kids[2], old_cdata).unwrap();
@@ -297,7 +298,10 @@ fn move_node_and_undo() {
         Err(EditError::IndexOutOfRange { index: 4, len: 3 })
     );
     let loose = doc.create_element("x").unwrap();
-    assert_eq!(doc.move_node(loose, r, 0), Err(EditError::NotAttached(loose)));
+    assert_eq!(
+        doc.move_node(loose, r, 0),
+        Err(EditError::NotAttached(loose))
+    );
     assert_eq!(doc.to_string(), src);
 }
 
@@ -309,7 +313,10 @@ fn insert_errors_do_not_change_the_document() {
     let a = child(&doc, r, "a");
     let t = doc.create_text("x").unwrap();
     let e = doc.create_element("e").unwrap();
-    assert_eq!(doc.insert_child(r, 0, a), Err(EditError::AlreadyAttached(a)));
+    assert_eq!(
+        doc.insert_child(r, 0, a),
+        Err(EditError::AlreadyAttached(a))
+    );
     assert_eq!(doc.insert_child(t, 0, e), Err(EditError::NotAContainer(t)));
     assert_eq!(
         doc.insert_child(r, 5, e),
@@ -328,7 +335,10 @@ fn insert_errors_do_not_change_the_document() {
         doc.insert_child(r, 0, unknown),
         Err(EditError::UnknownNode(unknown))
     );
-    assert_eq!(doc.set_attribute(t, "a", "b"), Err(EditError::NotAnElement(t)));
+    assert_eq!(
+        doc.set_attribute(t, "a", "b"),
+        Err(EditError::NotAnElement(t))
+    );
     assert_eq!(
         doc.set_attribute(a, "bad name", "b"),
         Err(EditError::InvalidName("bad name".to_owned()))
@@ -337,13 +347,54 @@ fn insert_errors_do_not_change_the_document() {
         doc.set_attribute(a, "x", "nul\0"),
         Err(EditError::InvalidContent(_))
     ));
-    assert_eq!(doc.rename_element(a, ""), Err(EditError::InvalidName(String::new())));
+    assert_eq!(
+        doc.rename_element(a, ""),
+        Err(EditError::InvalidName(String::new()))
+    );
     // A declaration can only be at the top level.
     let decl_doc = parse("<?xml version=\"1.0\"?><x/>");
     let decl = decl_doc.children(decl_doc.root())[0];
     let decl = doc.import_subtree(&decl_doc, decl).unwrap();
-    assert_eq!(doc.insert_child(r, 0, decl), Err(EditError::WrongKind(decl)));
+    assert_eq!(
+        doc.insert_child(r, 0, decl),
+        Err(EditError::WrongKind(decl))
+    );
     assert_eq!(doc.to_string(), src);
+}
+
+#[test]
+fn declaration_stays_first() {
+    let src = "<?xml version=\"1.0\"?>\n<r/>";
+    let mut doc = parse(src);
+    let top = doc.children(doc.root()).to_vec();
+    let (decl, ws, r) = (top[0], top[1], top[2]);
+    let c = doc.create_comment(" c ").unwrap();
+    let root = doc.root();
+    assert_eq!(
+        doc.insert_child(root, 0, c),
+        Err(EditError::DeclarationPosition(decl))
+    );
+    assert_eq!(
+        doc.move_node(decl, root, 2),
+        Err(EditError::DeclarationPosition(decl))
+    );
+    assert_eq!(doc.to_string(), src);
+    doc.insert_child(root, 1, c).unwrap();
+    doc.set_text(ws, "\n\n").unwrap();
+    doc.move_node(r, root, 1).unwrap();
+    assert_eq!(doc.to_string(), "<?xml version=\"1.0\"?><r/><!-- c -->\n\n");
+    assert!(Document::parse(&doc.to_string()).is_ok());
+
+    // Text before the declaration must stay white space.
+    let src = "\n<?xml version=\"1.0\"?><r/>";
+    let mut doc = parse(src);
+    let top = doc.children(doc.root()).to_vec();
+    assert_eq!(
+        doc.set_text(top[0], "text"),
+        Err(EditError::DeclarationPosition(top[1]))
+    );
+    doc.set_text(top[0], "  ").unwrap();
+    assert_eq!(doc.to_string(), "  <?xml version=\"1.0\"?><r/>");
 }
 
 #[test]
@@ -382,7 +433,10 @@ fn clone_import_and_write_node() {
     assert_eq!(doc.source_offset(a), Some(6));
     let r = doc.document_element().unwrap();
     doc.append_child(r, copy).unwrap();
-    assert_eq!(doc.to_string(), format!("{}{text}</r>", &src[..src.len() - 4]));
+    assert_eq!(
+        doc.to_string(),
+        format!("{}{text}</r>", &src[..src.len() - 4])
+    );
 
     let mut other = Document::new();
     let imported = other.import_subtree(&doc, a).unwrap();
@@ -434,10 +488,7 @@ fn queries() {
     assert_eq!(doc.attribute(root, "a"), Some("<1>"));
     assert_eq!(doc.attributes(root)[0].raw_value(), "&lt;1&gt;");
     assert_eq!(doc.attribute(root, "b"), None);
-    let names: Vec<&str> = doc
-        .descendants(root)
-        .filter_map(|n| doc.name(n))
-        .collect();
+    let names: Vec<&str> = doc.descendants(root).filter_map(|n| doc.name(n)).collect();
     assert_eq!(names, ["root", "x", "y", "z"]);
     let elements: Vec<NodeId> = doc.element_children(root).collect();
     assert_eq!(elements.len(), 2);
@@ -450,7 +501,10 @@ fn queries() {
     assert_eq!(doc.line_col(doc.source_offset(root).unwrap()), (3, 1));
     assert_eq!(doc.children(doc.root()).len(), 6);
     assert_eq!(doc.index_in_parent(y), Some(3));
-    assert_eq!(doc.previous_sibling(y).map(|n| doc.kind(n)), Some(doc.kind(doc.children(root)[2])));
+    assert_eq!(
+        doc.previous_sibling(y).map(|n| doc.kind(n)),
+        Some(doc.kind(doc.children(root)[2]))
+    );
     assert!(doc.is_attached(y));
     let decl = match doc.node(doc.children(doc.root())[0]) {
         Some(Node::Declaration(d)) => d.clone(),

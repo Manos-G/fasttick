@@ -94,8 +94,20 @@ fn insert_into_empty_element_tag() {
 
 #[test]
 fn insert_into_element_with_only_white_space() {
-    check_insert("<a>\n  <b>\n  </b>\n</a>", "b", 0, "<c/>", "<a>\n  <b>\n    <c/>\n  </b>\n</a>");
-    check_insert("<a>\n  <b></b>\n</a>", "b", 0, "<c/>", "<a>\n  <b>\n    <c/>\n  </b>\n</a>");
+    check_insert(
+        "<a>\n  <b>\n  </b>\n</a>",
+        "b",
+        0,
+        "<c/>",
+        "<a>\n  <b>\n    <c/>\n  </b>\n</a>",
+    );
+    check_insert(
+        "<a>\n  <b></b>\n</a>",
+        "b",
+        0,
+        "<c/>",
+        "<a>\n  <b>\n    <c/>\n  </b>\n</a>",
+    );
 }
 
 #[test]
@@ -132,8 +144,20 @@ fn comments_stay_with_the_next_element() {
 
 #[test]
 fn one_line_and_compact_styles_are_kept() {
-    check_insert("<a> <b/> <c/> </a>", "a", 1, "<n/>", "<a> <b/> <n/> <c/> </a>");
-    check_insert("<a> <b/> <c/> </a>", "a", 2, "<n/>", "<a> <b/> <c/> <n/> </a>");
+    check_insert(
+        "<a> <b/> <c/> </a>",
+        "a",
+        1,
+        "<n/>",
+        "<a> <b/> <n/> <c/> </a>",
+    );
+    check_insert(
+        "<a> <b/> <c/> </a>",
+        "a",
+        2,
+        "<n/>",
+        "<a> <b/> <c/> <n/> </a>",
+    );
     check_insert("<a><b/><c/></a>", "a", 1, "<n/>", "<a><b/><n/><c/></a>");
     check_insert("<a><b/><c/></a>", "a", 2, "<n/>", "<a><b/><c/><n/></a>");
 }
@@ -142,8 +166,17 @@ fn one_line_and_compact_styles_are_kept() {
 fn crlf_documents_get_crlf() {
     let src = "<a>\r\n  <b/>\r\n</a>\r\n";
     check_insert(src, "a", 1, "<c/>", "<a>\r\n  <b/>\r\n  <c/>\r\n</a>\r\n");
-    check_insert(src, "b", 0, "<c/>", "<a>\r\n  <b>\r\n    <c/>\r\n  </b>\r\n</a>\r\n");
-    assert_eq!(Document::parse(src).unwrap().line_ending(), LineEnding::CrLf);
+    check_insert(
+        src,
+        "b",
+        0,
+        "<c/>",
+        "<a>\r\n  <b>\r\n    <c/>\r\n  </b>\r\n</a>\r\n",
+    );
+    assert_eq!(
+        Document::parse(src).unwrap().line_ending(),
+        LineEnding::CrLf
+    );
 }
 
 #[test]
@@ -200,7 +233,11 @@ fn remove_pretty_edge_cases() {
         ("<a> <b/> <c/> </a>", "b", "<a> <c/> </a>"),
         ("<a><b/>\n  <c/>\n</a>", "b", "<a><c/>\n</a>"),
         ("<a><b/></a>", "b", "<a></a>"),
-        ("<a>\n  <!-- x -->\n  <b/>\n</a>", "b", "<a>\n  <!-- x -->\n</a>"),
+        (
+            "<a>\n  <!-- x -->\n  <b/>\n</a>",
+            "b",
+            "<a>\n  <!-- x -->\n</a>",
+        ),
         ("<a>text<b/>more</a>", "b", "<a>textmore</a>"),
     ];
     for (src, name, expected) in cases {
@@ -222,8 +259,10 @@ fn move_with_pretty_helpers() {
     let mut undo_insert = doc.insert_element_pretty(tree, 1, a).unwrap();
     assert_eq!(
         doc.to_string(),
-        TREE.replace("            <A/>\n", "")
-            .replace("        </Sequence>\n", "        </Sequence>\n        <A/>\n")
+        TREE.replace("            <A/>\n", "").replace(
+            "        </Sequence>\n",
+            "        </Sequence>\n        <A/>\n"
+        )
     );
     undo_insert.append(&mut undo);
     doc.apply_all(undo_insert).unwrap();
@@ -246,8 +285,14 @@ fn pretty_errors() {
     );
     assert_eq!(doc.remove_element_pretty(c), Err(EditError::NotAttached(c)));
     let root = doc.root();
-    assert_eq!(doc.remove_element_pretty(root), Err(EditError::DocumentNode));
+    assert_eq!(
+        doc.remove_element_pretty(root),
+        Err(EditError::DocumentNode)
+    );
     let text = doc.children(seq)[0];
-    assert_eq!(doc.remove_element_pretty(text), Err(EditError::WrongKind(text)));
+    assert_eq!(
+        doc.remove_element_pretty(text),
+        Err(EditError::WrongKind(text))
+    );
     assert_eq!(doc.to_string(), TREE);
 }

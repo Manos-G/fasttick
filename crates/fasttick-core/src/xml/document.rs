@@ -250,7 +250,11 @@ impl Document {
     pub fn descendants(&self, id: NodeId) -> Descendants<'_> {
         Descendants {
             doc: self,
-            stack: if self.contains(id) { vec![id] } else { Vec::new() },
+            stack: if self.contains(id) {
+                vec![id]
+            } else {
+                Vec::new()
+            },
         }
     }
 

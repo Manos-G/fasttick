@@ -51,9 +51,7 @@ enum Reference {
 /// processing instructions use `entities = false`.
 pub(crate) fn decode(raw: &str, entities: bool) -> Cow<'_, str> {
     let bytes = raw.as_bytes();
-    let needs_work = bytes
-        .iter()
-        .any(|&b| b == b'\r' || (entities && b == b'&'));
+    let needs_work = bytes.iter().any(|&b| b == b'\r' || (entities && b == b'&'));
     if !needs_work {
         return Cow::Borrowed(raw);
     }
@@ -65,7 +63,11 @@ pub(crate) fn decode(raw: &str, entities: bool) -> Cow<'_, str> {
             b'\r' => {
                 out.push_str(&raw[copy_from..i]);
                 out.push('\n');
-                i += if bytes.get(i + 1) == Some(&b'\n') { 2 } else { 1 };
+                i += if bytes.get(i + 1) == Some(&b'\n') {
+                    2
+                } else {
+                    1
+                };
                 copy_from = i;
             }
             b'\n' => {

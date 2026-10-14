@@ -44,6 +44,10 @@ pub enum EditError {
     /// The document node cannot be moved, inserted or removed.
     #[error("the document node cannot be moved, inserted or removed")]
     DocumentNode,
+    /// An XML declaration must come before all other top-level content
+    /// except white space (the rule of tinyxml2).
+    #[error("the XML declaration {0} must come before all other content")]
+    DeclarationPosition(NodeId),
     /// The operation would put a node inside itself.
     #[error("node {0} cannot be put inside itself or one of its descendants")]
     Cycle(NodeId),

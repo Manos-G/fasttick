@@ -2,13 +2,14 @@
 //! checks each tag with the rules of tinyxml2.
 
 use quick_xml::Reader;
+use quick_xml::errors::SyntaxError;
 use quick_xml::events::Event;
 
 use super::document::{DEFAULT_INDENT, Document, line_col_in};
 use super::error::XmlError;
 use super::escape::{is_all_whitespace, is_xml_whitespace, name_len};
 use super::node::{
-    Attribute, CData, Comment, DocType, Declaration, Element, Node, NodeId, ProcessingInstruction,
+    Attribute, CData, Comment, Declaration, DocType, Element, Node, NodeId, ProcessingInstruction,
     Quote, Slot, Text,
 };
 
@@ -220,6 +221,18 @@ impl<'d, 't> Builder<'d, 't> {
                 Ok(event) => event,
                 Err(e) => {
                     let at = usize::try_from(reader.error_position()).unwrap_or(0);
+                    // quick-xml reports an unclosed tag at its `<`. A wrong
+                    // quote is often the real cause; find it.
+                    if let quick_xml::Error::Syntax(
+                        SyntaxError::UnclosedTag
+                        | SyntaxError::UnclosedSingleQuotedAttributeValue
+                        | SyntaxError::UnclosedDoubleQuotedAttributeValue,
+                    ) = e
+                        && let Some((rel, message)) =
+                            self.body.get(at..).and_then(diagnose_unclosed_tag)
+                    {
+                        return Err((self.base + at + rel, message));
+                    }
                     return Err((self.base + at, e.to_string()));
                 }
             };
@@ -386,13 +399,15 @@ impl<'d, 't> Builder<'d, 't> {
                 "a processing instruction must start with a target name".to_owned(),
             ));
         }
-        if let Some(&b) = content.as_bytes().get(target_len) {
-            if !is_xml_whitespace(b) {
-                return Err((
-                    offset + 2 + target_len,
-                    "expected white space after the processing instruction target".to_owned(),
-                ));
-            }
+        if content
+            .as_bytes()
+            .get(target_len)
+            .is_some_and(|&b| !is_xml_whitespace(b))
+        {
+            return Err((
+                offset + 2 + target_len,
+                "expected white space after the processing instruction target".to_owned(),
+            ));
         }
         self.push(
             Node::ProcessingInstruction(ProcessingInstruction {
@@ -414,21 +429,19 @@ impl<'d, 't> Builder<'d, 't> {
                 }) => (e.name.clone(), offset.unwrap_or(0)),
                 _ => (String::new(), 0),
             };
-            return Err((
-                offset,
-                format!("the element <{name}> has no end tag"),
-            ));
+            return Err((offset, format!("the element <{name}> has no end tag")));
         }
         let root = self.doc.root();
         let tops = self.doc.children(root).to_vec();
         if self.mode == Mode::Fragment {
             for id in &tops {
-                if let Some(Node::Text(t)) = self.doc.node(*id) {
-                    if !t.is_whitespace() {
-                        let offset = self.doc.source_offset(*id).unwrap_or(0);
-                        let skip = t.raw.len() - t.raw.trim_start_matches([' ', '\t', '\r', '\n']).len();
-                        return Err((offset + skip, "text outside an element".to_owned()));
-                    }
+                if let Some(Node::Text(t)) = self.doc.node(*id)
+                    && !t.is_whitespace()
+                {
+                    let offset = self.doc.source_offset(*id).unwrap_or(0);
+                    let skip =
+                        t.raw.len() - t.raw.trim_start_matches([' ', '\t', '\r', '\n']).len();
+                    return Err((offset + skip, "text outside an element".to_owned()));
                 }
             }
             if !tops.iter().any(|&id| self.doc.is_element(id)) {
@@ -466,7 +479,11 @@ pub(crate) fn parse_start_tag(raw: &str) -> Result<StartTag<'_>, (usize, String)
         return Err((0, "malformed start tag".to_owned()));
     }
     let self_closing = b.len() >= 3 && b[b.len() - 2] == b'/';
-    let end = if self_closing { b.len() - 2 } else { b.len() - 1 };
+    let end = if self_closing {
+        b.len() - 2
+    } else {
+        b.len() - 1
+    };
     let name_l = name_len(&raw[1..end]);
     if name_l == 0 {
         return Err((1, "expected an element name after '<'".to_owned()));
@@ -545,6 +562,73 @@ pub(crate) fn parse_start_tag(raw: &str) -> Result<StartTag<'_>, (usize, String)
     }
 }
 
+/// Finds the first syntax error in a start tag that has no closing `>`
+/// before the end of the input. `rest` starts with `<`. Returns `None` if
+/// the scan finds no error before the end of the input or before a `>`.
+fn diagnose_unclosed_tag(rest: &str) -> Option<(usize, String)> {
+    let b = rest.as_bytes();
+    if b.first() != Some(&b'<') || matches!(b.get(1), Some(b'/' | b'!' | b'?')) {
+        return None;
+    }
+    let n = name_len(&rest[1..]);
+    if n == 0 {
+        return Some((1, "expected an element name after '<'".to_owned()));
+    }
+    let name = &rest[1..1 + n];
+    let mut i = 1 + n;
+    loop {
+        while i < b.len() && is_xml_whitespace(b[i]) {
+            i += 1;
+        }
+        if i >= b.len() || b[i] == b'>' || (b[i] == b'/' && b.get(i + 1) == Some(&b'>')) {
+            return None;
+        }
+        let n = name_len(&rest[i..]);
+        if n == 0 {
+            let c = rest[i..].chars().next().unwrap_or('?');
+            return Some((
+                i,
+                format!("unexpected character {c:?} in the start tag of <{name}>"),
+            ));
+        }
+        let attr_name = &rest[i..i + n];
+        let mut j = i + n;
+        while j < b.len() && is_xml_whitespace(b[j]) {
+            j += 1;
+        }
+        if j >= b.len() {
+            return None;
+        }
+        if b[j] != b'=' {
+            return Some((
+                j,
+                format!("expected '=' after the attribute name {attr_name:?}"),
+            ));
+        }
+        j += 1;
+        while j < b.len() && is_xml_whitespace(b[j]) {
+            j += 1;
+        }
+        let quote = match b.get(j) {
+            None => return None,
+            Some(&q @ (b'"' | b'\'')) => q,
+            Some(_) => {
+                return Some((
+                    j,
+                    format!("the value of the attribute {attr_name:?} must be in quotes"),
+                ));
+            }
+        };
+        let Some(close) = b[j + 1..].iter().position(|&c| c == quote) else {
+            return Some((
+                j,
+                format!("the value of the attribute {attr_name:?} has no closing quote"),
+            ));
+        };
+        i = j + 1 + close + 1;
+    }
+}
+
 /// Splits an end tag (`</name >`) into the name and the white space before
 /// `>`. The error offset is relative to the start of `raw`.
 pub(crate) fn parse_end_tag(raw: &str) -> Result<(&str, &str), (usize, String)> {
@@ -574,7 +658,9 @@ pub(crate) fn parse_end_tag(raw: &str) -> Result<(&str, &str), (usize, String)> 
 fn infer_indent_unit(doc: &Document) -> String {
     let mut counts: Vec<(String, usize)> = Vec::new();
     for id in doc.descendants(doc.root()) {
-        let Some(parent) = doc.parent(id) else { continue };
+        let Some(parent) = doc.parent(id) else {
+            continue;
+        };
         if !doc.is_element(id) || !doc.is_element(parent) {
             continue;
         }
