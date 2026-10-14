@@ -191,6 +191,21 @@ impl Live {
         counters
     }
 
+    /// Checks for [`QUIET`] that the STATUS reply does not change (for any
+    /// tree). The client sends requests during the check (heartbeat).
+    pub fn assert_frozen(&mut self) {
+        let snapshot = self.client.status().expect("STATUS");
+        let end = Instant::now() + QUIET;
+        while Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(50));
+            assert_eq!(
+                self.client.status().expect("STATUS"),
+                snapshot,
+                "the tree made progress"
+            );
+        }
+    }
+
     /// Waits until at least `count` more runs are complete after the run
     /// that the blackboard shows now. Gives the runs (number and status)
     /// that started after this call.

@@ -233,7 +233,7 @@ fn recording_round_trip_through_a_btlog_file() {
     read_batch(&mut live, &mut transitions);
     assert!(transitions.is_empty(), "the tree is stopped: {transitions:?}");
     // Stay stopped for a moment: a clear gap in the executor log.
-    live.assert_blocked_for_tree();
+    live.assert_frozen();
 
     // One full cycle, until the tree stops at "say_cycle" again.
     let unlocked = started.elapsed();
@@ -254,7 +254,7 @@ fn recording_round_trip_through_a_btlog_file() {
         }
     }
     let stopped_again = started.elapsed();
-    live.assert_blocked_for_tree();
+    live.assert_frozen();
     live.client.stop_recording().unwrap();
     read_batch(&mut live, &mut transitions);
     let last_state = node_states(&live.client.status().unwrap());
