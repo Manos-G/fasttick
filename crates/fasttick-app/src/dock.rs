@@ -146,8 +146,8 @@ pub fn default_dock(mode: Mode) -> DockState<Tab> {
         Mode::Replay => {
             // The tables below, and the timeline between the tree and the
             // tables, so that both are visible at the same time.
-            let [center, _bottom] = surface.split_below(center, 0.64, bottom);
-            surface.split_below(center, 0.8, vec![Tab::Timeline]);
+            let [center, _bottom] = surface.split_below(center, 0.62, bottom);
+            surface.split_below(center, 0.7, vec![Tab::Timeline]);
         }
         Mode::Edit | Mode::Live => {
             surface.split_below(center, 0.74, bottom);

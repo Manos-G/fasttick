@@ -46,6 +46,7 @@ fn light(open: Vec<PathBuf>) -> StartOptions {
         open,
         theme: Some(ThemeChoice::Light),
         mode: Some(Mode::Edit),
+        connect: None,
     }
 }
 
@@ -379,6 +380,7 @@ fn replay_log_shows_statuses() {
         open: vec![fixture("tests/fixtures/harness/main.btlog")],
         theme: Some(ThemeChoice::Dark),
         mode: None,
+        connect: None,
     };
     let mut harness = harness(options);
     assert_eq!(harness.state().mode(), Mode::Replay);

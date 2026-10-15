@@ -1,21 +1,23 @@
 //! FastTick: a tree editor, live debugger and log replayer for
 //! BehaviorTree.CPP 4.
 //!
-//! Usage: `fasttick [--theme light|dark|system] [--mode edit|live|replay] [FILE...]`
+//! Usage: `fasttick [--theme light|dark|system] [--mode edit|live|replay]
+//! [--connect HOST[:PORT]] [FILE...]`
 
-use fasttick_app::app::{FastTickApp, Mode, StartOptions};
+use fasttick_app::app::{FastTickApp, Mode, StartOptions, parse_endpoint};
 use fasttick_app::theme::ThemeChoice;
 
-const USAGE: &str =
-    "Usage: fasttick [--theme light|dark|system] [--mode edit|live|replay] [FILE...]
+const USAGE: &str = "Usage: fasttick [--theme light|dark|system] [--mode edit|live|replay]
+                [--connect HOST[:PORT]] [FILE...]
 
-Opens tree XML files (.xml) and logs (.btlog).
+Opens tree XML files (.xml) and logs (.btlog, or SQLite .db3 and .btdb).
 
 Options:
-  --theme THEME   Use this theme for this session (light, dark or system)
-  --mode MODE     Start in this mode (edit, live or replay)
-  --help          Show this text
-  --version       Show the version";
+  --theme THEME          Use this theme for this session (light, dark or system)
+  --mode MODE            Start in this mode (edit, live or replay)
+  --connect HOST[:PORT]  Connect to an executor (the default port is 1667)
+  --help                 Show this text
+  --version              Show the version";
 
 fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<StartOptions>, String> {
     let mut options = StartOptions::default();
@@ -38,6 +40,11 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<StartOptions>
             "--mode" => {
                 let value = args.next().ok_or("--mode needs a value")?;
                 options.mode = Some(Mode::parse(&value).ok_or(format!("unknown mode {value:?}"))?);
+            }
+            "--connect" => {
+                let value = args.next().ok_or("--connect needs a value")?;
+                options.connect =
+                    Some(parse_endpoint(&value).ok_or(format!("bad address {value:?}"))?);
             }
             other if other.starts_with("--") => return Err(format!("unknown option {other:?}")),
             path => options.open.push(path.into()),
@@ -91,6 +98,10 @@ mod tests {
         assert!(args(&["--theme", "pink"]).is_err());
         assert!(args(&["--mode", "x"]).is_err());
         assert!(args(&["--frobnicate"]).is_err());
+        let options = args(&["--connect", "robot:1700"]).unwrap().unwrap();
+        assert_eq!(options.connect, Some(("robot".to_owned(), 1700)));
+        assert!(args(&["--connect"]).is_err());
+        assert!(args(&["--connect", "robot:99999"]).is_err());
         assert_eq!(args(&["--help"]).unwrap(), None);
         assert_eq!(args(&[]).unwrap(), Some(StartOptions::default()));
     }

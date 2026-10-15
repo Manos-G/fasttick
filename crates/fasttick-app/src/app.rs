@@ -90,6 +90,30 @@ pub struct StartOptions {
     pub theme: Option<ThemeChoice>,
     /// The mode at start.
     pub mode: Option<Mode>,
+    /// An executor to connect to at start (host and port).
+    pub connect: Option<(String, u16)>,
+}
+
+/// Parses `HOST`, `HOST:PORT`, `[IPV6]` or `[IPV6]:PORT`. The default port
+/// is 1667 (the default of the BT.CPP publisher). Returns `None` for an
+/// empty host or a bad port.
+pub fn parse_endpoint(text: &str) -> Option<(String, u16)> {
+    let text = text.trim();
+    let default = crate::settings::DEFAULT_PORT;
+    let (host, port) = if let Some(rest) = text.strip_prefix('[') {
+        let (host, after) = rest.split_once(']')?;
+        match after.strip_prefix(':') {
+            Some(port) => (host, port.parse().ok()?),
+            None if after.is_empty() => (host, default),
+            None => return None,
+        }
+    } else if text.matches(':').count() == 1 {
+        let (host, port) = text.split_once(':')?;
+        (host, port.parse().ok()?)
+    } else {
+        (text, default)
+    };
+    (!host.is_empty() && port != 0).then(|| (host.to_owned(), port))
 }
 
 const MODE_KEY: &str = "fasttick.mode";
@@ -227,6 +251,9 @@ impl FastTickApp {
             if let Err(message) = app.open_path_now(&path) {
                 app.notify(&cc.egui_ctx, NoticeLevel::Error, message);
             }
+        }
+        if let Some((host, port)) = options.connect {
+            app.connect(&cc.egui_ctx, host, port);
         }
         app
     }
@@ -2185,5 +2212,76 @@ impl eframe::App for FastTickApp {
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
         visuals.panel_fill.to_normalized_gamma_f32()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fasttick_core::runtime::RuntimeTree;
+    use fasttick_protocol::breakpoints::Breakpoint;
+
+    #[test]
+    fn endpoints() {
+        assert_eq!(parse_endpoint("robot"), Some(("robot".into(), 1667)));
+        assert_eq!(parse_endpoint(" robot:1700 "), Some(("robot".into(), 1700)));
+        assert_eq!(parse_endpoint("[::1]:1800"), Some(("::1".into(), 1800)));
+        assert_eq!(parse_endpoint("[::1]"), Some(("::1".into(), 1667)));
+        assert_eq!(parse_endpoint("::1"), Some(("::1".into(), 1667)));
+        assert_eq!(parse_endpoint(""), None);
+        assert_eq!(parse_endpoint(":1700"), None);
+        assert_eq!(parse_endpoint("robot:0"), None);
+        assert_eq!(parse_endpoint("robot:x"), None);
+        assert_eq!(parse_endpoint("[::1]x"), None);
+    }
+
+    #[test]
+    fn pending_breakpoints_choose_the_nodes_found_by_path() {
+        let tree = RuntimeTree::parse(
+            r#"<root><BehaviorTree ID="T" _fullpath=""><Sequence name="s" _uid="1"><AlwaysSuccess name="a" _uid="2"/><AlwaysSuccess name="a" _uid="3"/></Sequence></BehaviorTree></root>"#,
+        )
+        .unwrap();
+        let breakpoint = |path: &str, uid: Option<u16>| Breakpoint {
+            node_path: path.into(),
+            uid,
+            position: Default::default(),
+            mode: HookMode::Breakpoint,
+            enabled: true,
+            once: false,
+            desired_status: NodeStatus::Skipped,
+            label: None,
+        };
+        let mut set = BreakpointSet::new();
+        set.breakpoints = vec![
+            breakpoint("s", Some(9)),
+            breakpoint("a", Some(3)),
+            breakpoint("gone", Some(2)),
+            breakpoint("gone", Some(77)),
+        ];
+        let pending = PendingBreakpoints::new("x.ftbp.json".into(), set, &tree);
+        let resolutions: Vec<Resolution> =
+            pending.resolved.iter().map(|r| r.resolution).collect();
+        assert_eq!(
+            resolutions,
+            [
+                Resolution::ByPath,
+                Resolution::AmbiguousPath,
+                Resolution::ByStoredUid,
+                Resolution::Unresolved
+            ]
+        );
+        assert_eq!(pending.chosen, [true, true, false, false]);
+        let uids: Vec<u16> = pending.hooks().iter().map(|h| h.uid).collect();
+        assert_eq!(uids, [1, 3]);
+        for (resolved, stored) in pending.resolved.iter().zip([9, 3, 2, 77]) {
+            let (text, color) = resolution_text(resolved, Some(stored));
+            assert!(!text.is_empty());
+            match resolved.resolution {
+                Resolution::ByPath => assert_eq!(color, ResolutionColor::Good),
+                Resolution::Unresolved => assert_eq!(color, ResolutionColor::Bad),
+                _ => assert_eq!(color, ResolutionColor::Warning),
+            }
+        }
+        assert!(resolution_text(&pending.resolved[2], Some(2)).0.contains("UID 2"));
     }
 }

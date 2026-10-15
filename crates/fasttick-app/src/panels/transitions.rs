@@ -47,6 +47,8 @@ fn replay(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     let follow_id = Id::new("fasttick_transitions_follow");
     let mut follow: bool = ui.data(|d| d.get_temp(follow_id)).unwrap_or(true);
     ui.horizontal(|ui| {
+        time_range_fields(ui, model);
+        ui.separator();
         ui.label(RichText::new(format!("{shown} of {total} transitions")).small());
         if let Some(error) = model.filter_error() {
             ui.label(
@@ -82,6 +84,8 @@ fn replay(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         });
     });
 
+    // The time fields of the second row can have changed.
+    model.rows();
     let model: &ReplayModel = model;
     let rows = model.current_rows();
     let current = model.cursor().current_index();
@@ -164,13 +168,14 @@ fn replay(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     }
 }
 
+/// The first filter row: the patterns and the statuses.
 fn filter_bar(ui: &mut Ui, model: &mut ReplayModel, palette: &CanvasPalette) {
     ui.horizontal_wrapped(|ui| {
         ui.label("Include");
         ui.add(
             egui::TextEdit::singleline(&mut model.filter.include)
                 .hint_text("name, path or type")
-                .desired_width(130.0),
+                .desired_width(140.0),
         )
         .on_hover_text(
             "Show only nodes that match. Separate patterns with commas. * matches any \
@@ -180,44 +185,53 @@ fn filter_bar(ui: &mut Ui, model: &mut ReplayModel, palette: &CanvasPalette) {
         ui.add(
             egui::TextEdit::singleline(&mut model.filter.exclude)
                 .hint_text("patterns")
-                .desired_width(110.0),
+                .desired_width(120.0),
         )
         .on_hover_text("Hide nodes that match. Exclude wins over include.");
         ui.separator();
         for status in NodeStatus::ALL {
             let index = usize::from(status.as_u8());
-            let color = palette.status(status).unwrap_or(ui.visuals().weak_text_color());
+            let color = palette
+                .status(status)
+                .unwrap_or(ui.visuals().weak_text_color());
             let text = RichText::new(status.as_str()).small().color(color);
             ui.checkbox(&mut model.filter.statuses[index], text)
                 .on_hover_text(format!("Show the transitions to {status}."));
         }
-        ui.separator();
-        ui.label("From");
-        ui.add(
-            egui::TextEdit::singleline(&mut model.filter.from_s)
-                .hint_text("start")
-                .desired_width(60.0),
-        );
-        ui.label("to");
-        ui.add(
-            egui::TextEdit::singleline(&mut model.filter.to_s)
-                .hint_text("end")
-                .desired_width(60.0),
-        );
-        ui.label("s");
-        let range = model.cursor().range();
-        if ui
-            .add_enabled(range.is_some(), egui::Button::new("Timeline range"))
-            .on_hover_text("Use the time range of the timeline zoom.")
-            .on_disabled_hover_text("Zoom into a time range on the timeline first.")
-            .clicked()
-        {
-            model.filter.set_time_range(range);
-        }
-        if ui.button("Clear").on_hover_text("Show all transitions.").clicked() {
-            model.filter = crate::replay::FilterForm::default();
-        }
     });
+}
+
+/// The time range fields of the second filter row.
+fn time_range_fields(ui: &mut Ui, model: &mut ReplayModel) {
+    ui.label("From");
+    ui.add(
+        egui::TextEdit::singleline(&mut model.filter.from_s)
+            .hint_text("start")
+            .desired_width(64.0),
+    );
+    ui.label("to");
+    ui.add(
+        egui::TextEdit::singleline(&mut model.filter.to_s)
+            .hint_text("end")
+            .desired_width(64.0),
+    );
+    ui.label("s");
+    let range = model.cursor().range();
+    if ui
+        .add_enabled(range.is_some(), egui::Button::new("Timeline range"))
+        .on_hover_text("Use the time range of the timeline zoom.")
+        .on_disabled_hover_text("Zoom into a time range on the timeline first.")
+        .clicked()
+    {
+        model.filter.set_time_range(range);
+    }
+    if ui
+        .button("Clear filter")
+        .on_hover_text("Show all transitions.")
+        .clicked()
+    {
+        model.filter = crate::replay::FilterForm::default();
+    }
 }
 
 fn live(ui: &mut Ui, cx: &mut PanelContext<'_>) {
