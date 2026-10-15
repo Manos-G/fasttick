@@ -15,6 +15,28 @@ path = "src/lib.rs"
 name = "fasttick"
 path = "src/main.rs"
 
+# Debian package: `cargo deb -p fasttick-app` (see docs/PACKAGING.md).
+[package.metadata.deb]
+name = "fasttick"
+maintainer = "The FastTick contributors"
+copyright = "The FastTick contributors"
+license-file = ["../../LICENSE", "0"]
+extended-description = """\
+FastTick is an editor, live debugger and log replayer for BehaviorTree.CPP 4 \
+trees. It edits tree XML files and projects, connects to a running executor \
+through the BT.CPP publisher protocol, and replays .btlog and SQLite logs."""
+section = "devel"
+priority = "optional"
+depends = "$auto"
+assets = [
+    ["target/release/fasttick", "usr/bin/", "755"],
+    ["../../packaging/fasttick.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/fasttick.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["../../packaging/fasttick-256.png", "usr/share/icons/hicolor/256x256/apps/fasttick.png", "644"],
+    ["../../README.md", "usr/share/doc/fasttick/", "644"],
+    ["../../THIRD_PARTY_LICENSES.md", "usr/share/doc/fasttick/", "644"],
+]
+
 [dependencies]
 fasttick-core.workspace = true
 fasttick-protocol.workspace = true

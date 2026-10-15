@@ -10,7 +10,8 @@ use fasttick_app::theme::ThemeChoice;
 const USAGE: &str = "Usage: fasttick [--theme light|dark|system] [--mode edit|live|replay]
                 [--connect HOST[:PORT]] [FILE...]
 
-Opens tree XML files (.xml) and logs (.btlog, or SQLite .db3 and .btdb).
+Opens tree XML files (.xml), projects (.ftproj) and logs (.btlog, or SQLite
+.db3 and .btdb).
 
 Options:
   --theme THEME          Use this theme for this session (light, dark or system)
@@ -18,6 +19,9 @@ Options:
   --connect HOST[:PORT]  Connect to an executor (the default port is 1667)
   --help                 Show this text
   --version              Show the version";
+
+/// The window icon (the same picture as `packaging/fasttick.svg`).
+static ICON: &[u8] = include_bytes!("../assets/icon-64.png");
 
 fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<StartOptions>, String> {
     let mut options = StartOptions::default();
@@ -62,12 +66,16 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("FastTick")
+        .with_app_id("fasttick")
+        .with_inner_size([1440.0, 900.0])
+        .with_min_inner_size([720.0, 480.0]);
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(ICON) {
+        viewport = viewport.with_icon(icon);
+    }
     let native = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("FastTick")
-            .with_app_id("fasttick")
-            .with_inner_size([1440.0, 900.0])
-            .with_min_inner_size([720.0, 480.0]),
+        viewport,
         persist_window: true,
         ..Default::default()
     };

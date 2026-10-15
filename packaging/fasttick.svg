@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- FastTick application icon. Copyright (c) The FastTick contributors. MIT licence. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect x="8" y="8" width="240" height="240" rx="48" fill="#1e2433"/>
+  <g fill="none" stroke="#8aa4c8" stroke-width="10" stroke-linecap="round">
+    <path d="M128 92 V122 M60 122 H196 M60 122 V146 M128 122 V146 M196 122 V146"/>
+  </g>
+  <rect x="88" y="44" width="80" height="48" rx="12" fill="#4c8dff"/>
+  <rect x="28" y="146" width="64" height="44" rx="11" fill="#3fbf7f"/>
+  <rect x="96" y="146" width="64" height="44" rx="11" fill="#f2b84b"/>
+  <rect x="164" y="146" width="64" height="44" rx="11" fill="#3fbf7f"/>
+  <path d="M112 60 L148 68 L112 76 Z" fill="#ffffff"/>
+</svg>
