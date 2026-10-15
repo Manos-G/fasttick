@@ -2173,11 +2173,20 @@ impl FastTickApp {
                     })
                 }))
             });
-        let Some(candidates) = candidates else {
+        let Some(mut candidates) = candidates else {
             // The view is gone.
             self.add_popup = None;
             return;
         };
+        // A tree cannot contain itself.
+        if let Some(title) = self
+            .workspace
+            .view(view)
+            .map(|v| v.canvas.tree().title.clone())
+        {
+            candidates
+                .retain(|c| !(c.kind == fasttick_core::models::NodeKind::SubTree && c.id == title));
+        }
         match crate::add_popup::show(ctx, popup, &candidates, palette) {
             crate::add_popup::AddChoice::Open => {}
             crate::add_popup::AddChoice::Cancel => self.add_popup = None,

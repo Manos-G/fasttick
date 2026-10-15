@@ -1963,10 +1963,11 @@ fn paint_dots(
             .to_screen(origin, connect::dot_center(rect, state.direction));
         let hot = active == Some(id);
         let r = connect::dot_radius_px(zoom) * if hot { 1.3 } else { 1.0 };
+        let color = palette.category(node.category);
         let (fill, stroke, mark) = if hot {
             (palette.accent, palette.accent, palette.on_color)
         } else {
-            (palette.card, palette.edge, palette.edge)
+            (palette.card, color, color)
         };
         shapes.push(Shape::circle_filled(center, r, fill));
         shapes.push(Shape::circle_stroke(center, r, Stroke::new(1.5, stroke)));

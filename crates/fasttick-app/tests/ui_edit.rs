@@ -1228,3 +1228,28 @@ fn the_key_menu_sets_a_blackboard_key_of_the_tree() {
         xml(&harness)
     );
 }
+
+#[test]
+fn the_search_field_of_the_popup_has_the_focus_at_once() {
+    let mut harness = harness();
+    focus(&mut harness, "fallback");
+    let from = dot_of(&harness, "fallback");
+    drag(&mut harness, from, from + egui::vec2(300.0, 200.0));
+    // No click in the field: the text goes to it.
+    harness.event(Event::Text("alwfail".into()));
+    harness.run();
+    assert_eq!(
+        harness
+            .state()
+            .add_popup()
+            .map(|p| p.query.clone())
+            .as_deref(),
+        Some("alwfail")
+    );
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert_eq!(
+        children(&harness, "fallback"),
+        ["check_blocked", "check_flag", "AlwaysFailure"]
+    );
+}

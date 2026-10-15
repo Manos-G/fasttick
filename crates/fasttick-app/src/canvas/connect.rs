@@ -21,7 +21,7 @@ use super::layout::LayoutDirection;
 use super::model::{CanvasNode, CanvasNodeId, CanvasTree, NodeCategory};
 
 /// The radius of the dot, in world units.
-pub const DOT_RADIUS: f32 = 6.0;
+pub const DOT_RADIUS: f32 = 7.0;
 
 /// The largest distance (screen points) from the centre of a dot at which
 /// the pointer grabs it.
@@ -29,7 +29,7 @@ pub const DOT_GRAB: f32 = 11.0;
 
 /// The radius of the dot on the screen at a zoom.
 pub fn dot_radius_px(zoom: f32) -> f32 {
-    (DOT_RADIUS * zoom).clamp(3.5, 9.0)
+    (DOT_RADIUS * zoom).clamp(4.0, 10.0)
 }
 
 /// The distance (screen points) from the centre of a dot at which the

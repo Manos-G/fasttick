@@ -47,7 +47,10 @@ impl AddCandidate {
             .map(|(model, source)| AddCandidate {
                 id: model.id.clone(),
                 kind: model.kind,
-                description: model.description().map(str::to_owned),
+                description: model.description().map(str::to_owned).or_else(|| {
+                    (model.kind == NodeKind::SubTree)
+                        .then(|| format!("A SubTree node that runs the tree {}.", model.id))
+                }),
                 builtin: source == ModelSource::Builtin,
             })
             .collect()
@@ -179,9 +182,19 @@ pub fn show(
                         .hint_text("Search node types")
                         .desired_width(f32::INFINITY),
                 );
+                // The first frame of a new area is a sizing pass, which does
+                // not take the focus: ask until the field has it.
                 if !popup.focused {
-                    edit.request_focus();
-                    popup.focused = true;
+                    // The stored focus, not `has_focus`: that one is false
+                    // while the window itself has no focus.
+                    if ui.ctx().memory(|m| m.focused()) == Some(edit.id) {
+                        popup.focused = true;
+                    } else {
+                        edit.request_focus();
+                        // The focus shows in the next frame: draw it now,
+                        // not at the next input event.
+                        ui.ctx().request_repaint();
+                    }
                 }
                 if edit.changed() {
                     popup.selected = 0;
