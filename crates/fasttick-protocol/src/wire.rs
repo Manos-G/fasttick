@@ -336,7 +336,7 @@ impl FromStr for TreeUuid {
             let digit = char::from(byte).to_digit(16).ok_or_else(error)?;
             digits.push(digit as u8);
         }
-        for (slot, pair) in out.iter_mut().zip(digits.chunks_exact(2)) {
+        for (slot, pair) in out.iter_mut().zip(digits.as_chunks::<2>().0) {
             *slot = (pair[0] << 4) | pair[1];
         }
         Ok(TreeUuid(out))

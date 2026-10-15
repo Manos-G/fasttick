@@ -366,7 +366,9 @@ impl StatusSnapshot {
             });
         }
         let entries = bytes
-            .chunks_exact(STATUS_RECORD_SIZE)
+            .as_chunks::<STATUS_RECORD_SIZE>()
+            .0
+            .iter()
             .map(|record| {
                 let uid = u16::from_le_bytes([record[0], record[1]]);
                 let raw = RawStatus(record[2]);
@@ -448,7 +450,9 @@ pub fn decode_transitions(bytes: &[u8]) -> Result<Vec<RecordedTransition>, Decod
         });
     }
     bytes
-        .chunks_exact(TRANSITION_RECORD_SIZE)
+        .as_chunks::<TRANSITION_RECORD_SIZE>()
+        .0
+        .iter()
         .map(|record| {
             let mut time = [0u8; 8];
             time[..6].copy_from_slice(&record[..6]);

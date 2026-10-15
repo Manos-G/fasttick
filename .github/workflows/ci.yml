@@ -39,7 +39,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: cargo test
-        run: FASTTICK_BTCPP_PREFIX="$HOME/btcpp-install" cargo test --workspace
+        # The real-executor tests must run, not skip.
+        run: FASTTICK_BTCPP_PREFIX="$HOME/btcpp-install" FASTTICK_REQUIRE_HARNESS=1 cargo test --workspace
 
   deny:
     name: cargo deny

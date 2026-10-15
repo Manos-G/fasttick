@@ -510,7 +510,7 @@ fn clone_import_and_write_node() {
         other.import_subtree(&doc, doc.root()),
         Err(EditError::DocumentNode)
     );
-    assert_eq!(doc.write_node(NodeId::clone(&doc.root())), doc.to_string());
+    assert_eq!(doc.write_node(doc.root()), doc.to_string());
 }
 
 #[test]

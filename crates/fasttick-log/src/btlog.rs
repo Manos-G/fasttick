@@ -222,12 +222,10 @@ pub fn decode_records(bytes: &[u8]) -> DecodedRecords {
         transitions: Vec::with_capacity(bytes.len() / RECORD_SIZE),
         ..DecodedRecords::default()
     };
-    let chunks = bytes.chunks_exact(RECORD_SIZE);
-    out.trailing_bytes = chunks.remainder().len();
-    for chunk in chunks {
-        let mut record = [0u8; RECORD_SIZE];
-        record.copy_from_slice(chunk);
-        match RawRecord::decode(&record).transition() {
+    let (records, rest) = bytes.as_chunks::<RECORD_SIZE>();
+    out.trailing_bytes = rest.len();
+    for record in records {
+        match RawRecord::decode(record).transition() {
             Some(transition) => out.transitions.push(transition),
             None => out.invalid_records += 1,
         }
@@ -564,13 +562,10 @@ impl BtLogReader {
             self.pending.clear();
             self.add_record(&record);
         }
-        let chunks = bytes.chunks_exact(RECORD_SIZE);
-        let rest = chunks.remainder();
-        self.transitions.reserve(bytes.len() / RECORD_SIZE);
-        for chunk in chunks {
-            let mut record = [0u8; RECORD_SIZE];
-            record.copy_from_slice(chunk);
-            self.add_record(&record);
+        let (records, rest) = bytes.as_chunks::<RECORD_SIZE>();
+        self.transitions.reserve(records.len());
+        for record in records {
+            self.add_record(record);
         }
         self.pending.extend_from_slice(rest);
     }

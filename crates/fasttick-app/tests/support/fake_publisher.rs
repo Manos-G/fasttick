@@ -162,8 +162,8 @@ pub struct FakeState {
 
 pub fn random_uuid() -> TreeUuid {
     let mut bytes = [0u8; 16];
-    for chunk in bytes.chunks_exact_mut(4) {
-        chunk.copy_from_slice(&wire::random_request_id().to_le_bytes());
+    for chunk in bytes.as_chunks_mut::<4>().0 {
+        *chunk = wire::random_request_id().to_le_bytes();
     }
     // Version 4 and variant bits, as `CreateRandomUUID` sets them.
     bytes[6] = (bytes[6] & 0x4f) | 0x40;

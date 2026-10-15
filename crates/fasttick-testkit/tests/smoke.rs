@@ -352,7 +352,7 @@ fn fixtures_are_valid_samples() {
     assert_eq!(uids, (1..=43).collect::<Vec<u16>>());
     // Each record has a known UID and a status code of BT.CPP NodeStatus
     // (0 IDLE, 1 RUNNING, 2 SUCCESS, 3 FAILURE, 4 SKIPPED).
-    for record in btlog[records_at..].chunks_exact(9) {
+    for record in btlog[records_at..].as_chunks::<9>().0 {
         let uid = u16::from_le_bytes([record[6], record[7]]);
         assert!((1..=43).contains(&uid), "uid {uid}");
         assert!(record[8] <= 4, "status {}", record[8]);

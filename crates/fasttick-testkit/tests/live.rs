@@ -248,7 +248,9 @@ fn publisher_answers_fulltree_and_status() {
     assert_eq!(reply.len(), 1);
     assert_eq!(reply[0].len(), 3 * node_count);
     let uids: Vec<u16> = reply[0]
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|entry| u16::from_le_bytes([entry[0], entry[1]]))
         .collect();
     let mut sorted = uids.clone();
