@@ -39,6 +39,7 @@
 
 pub mod card;
 pub mod categories;
+pub mod drop;
 pub mod hit;
 pub mod layout;
 pub mod model;
@@ -49,6 +50,7 @@ pub mod widget;
 pub mod xml_build;
 
 pub use categories::{BuiltinCategories, CategoryLookup, TableCategories};
+pub use drop::{DropPlacement, DropSpot, NewNodePayload};
 pub use layout::{LayoutDirection, TreeLayout, layout};
 pub use model::{
     BreakpointMarker, CanvasNode, CanvasNodeId, CanvasTree, CanvasTreeBuilder, Decorations,

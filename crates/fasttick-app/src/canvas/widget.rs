@@ -17,6 +17,12 @@
 //! (toggle) to select; drag on the background to select with a rubber
 //! band; double-click a SubTree to expand or collapse it; arrow keys to
 //! move the selection to the parent, a child or a sibling.
+//!
+//! An editable canvas ([`TreeCanvas::editable`]) also moves nodes: drag a
+//! node (with the selected nodes) onto another node, or onto an empty place
+//! to disconnect it. A drag of a [`NewNodePayload`] (from the palette) adds
+//! a node. Escape cancels a move. The canvas only reports the gesture as a
+//! [`CanvasEvent`]; the owner changes the document.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,6 +36,7 @@ use egui::{
 use fasttick_core::status::NodeStatus;
 
 use super::card::{self, CardGeometry, TextKind, TextMeasure};
+use super::drop::{self, DropPlacement, DropSpot, NewNodePayload};
 use super::hit;
 use super::layout::{self, LayoutDirection, TreeLayout};
 use super::model::{
@@ -93,6 +100,23 @@ pub enum CanvasEvent {
     SetAllSubtrees(bool),
     /// The user double-clicked a node that is not a SubTree.
     Activated(CanvasNodeId),
+    /// The user dragged nodes to a new place (editable canvas only). The
+    /// spot is never [`DropSpot::Invalid`].
+    MoveNodes {
+        /// The moved nodes, in tree order. A node with a moved ancestor is
+        /// not in the list.
+        nodes: Vec<CanvasNodeId>,
+        /// Where the nodes go.
+        spot: DropSpot,
+    },
+    /// The user dropped a node type from the palette (editable canvas
+    /// only). The spot is never [`DropSpot::Invalid`].
+    DropNew {
+        /// The type ID.
+        type_id: String,
+        /// Where the node goes.
+        spot: DropSpot,
+    },
 }
 
 /// The result of [`TreeCanvas::show`].
@@ -143,6 +167,11 @@ enum DragMode {
     Band {
         start: Pos2,
         additive: bool,
+    },
+    /// A move of the nodes in [`CanvasState::moving`]. `start` is the world
+    /// position of the press.
+    Move {
+        start: Pos2,
     },
 }
 
@@ -216,6 +245,10 @@ pub struct CanvasState {
     hover_start: f64,
     drag: DragMode,
     band_end: Option<Pos2>,
+    editable: bool,
+    moving: Vec<CanvasNodeId>,
+    drop: Option<DropSpot>,
+    drop_new: bool,
     galleys: GalleyCache,
     visible: Vec<u32>,
     shapes: Vec<Shape>,
@@ -258,6 +291,10 @@ impl CanvasState {
             hover_start: 0.0,
             drag: DragMode::None,
             band_end: None,
+            editable: false,
+            moving: Vec::new(),
+            drop: None,
+            drop_new: false,
             galleys: GalleyCache::default(),
             visible: Vec::new(),
             shapes: Vec::new(),
@@ -303,6 +340,11 @@ impl CanvasState {
         self.primary = primary_source.and_then(|source| tree.find_source(source));
         self.hovered = None;
         self.context_target = None;
+        if matches!(self.drag, DragMode::Move { .. }) {
+            self.drag = DragMode::None;
+        }
+        self.moving.clear();
+        self.drop = None;
         self.stats.total_nodes = tree.len();
         self.tree = tree;
         self.needs_layout = true;
@@ -683,9 +725,12 @@ impl TextMeasure for EguiMeasure<'_, '_> {
     }
 }
 
-/// Extra entries for the context menu of a node. The owner of the canvas
-/// adds mode-specific actions (for example breakpoints in live mode).
-pub type NodeMenu<'a> = dyn FnMut(&mut Ui, &CanvasNode) + 'a;
+/// Extra entries at the top of the context menu. The owner of the canvas
+/// adds mode-specific actions (for example breakpoints in live mode, or
+/// edit commands). The function gets the node under the pointer at the
+/// right-click (`None` on an empty place) and returns true if it added
+/// entries.
+pub type NodeMenu<'a> = dyn FnMut(&mut Ui, Option<&CanvasNode>) -> bool + 'a;
 
 /// The tree canvas widget. See the module documentation.
 pub struct TreeCanvas<'a> {
@@ -693,6 +738,7 @@ pub struct TreeCanvas<'a> {
     palette: &'a CanvasPalette,
     id_salt: Id,
     node_menu: Option<&'a mut NodeMenu<'a>>,
+    editable: bool,
 }
 
 impl std::fmt::Debug for TreeCanvas<'_> {
@@ -712,7 +758,15 @@ impl<'a> TreeCanvas<'a> {
             palette,
             id_salt: Id::new("tree_canvas"),
             node_menu: None,
+            editable: false,
         }
+    }
+
+    /// Lets the user move nodes and drop new nodes (edit mode). See the
+    /// module documentation.
+    pub fn editable(mut self, editable: bool) -> Self {
+        self.editable = editable;
+        self
     }
 
     /// Adds entries at the top of the context menu of a node. The function
@@ -735,6 +789,7 @@ impl<'a> TreeCanvas<'a> {
             palette,
             id_salt,
             node_menu,
+            editable,
         } = self;
         let id = ui.make_persistent_id(id_salt);
         let available = ui.available_rect_before_wrap();
@@ -766,8 +821,18 @@ impl<'a> TreeCanvas<'a> {
         }
         state.apply_pending(rect.size());
 
+        state.editable = editable;
+        if !editable && !state.moving.is_empty() {
+            state.moving.clear();
+            state.drag = DragMode::None;
+        }
         let mut events = Vec::new();
         handle_input(state, ui, &response, rect, &mut events);
+        if editable {
+            handle_palette_drop(state, ui, &response, rect, &mut events);
+        } else {
+            state.drop_new = false;
+        }
 
         let now = ui.input(|i| i.time);
         if state.step_animation(now) {
@@ -858,10 +923,24 @@ fn handle_input(
     // Drags.
     if response.drag_started() {
         let press = ui.input(|i| i.pointer.press_origin()).or(pointer);
-        let on_node = press
-            .map(|p| state.viewport.to_world(origin, p))
-            .and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
-        state.drag = if response.dragged_by(PointerButton::Middle)
+        let press_world = press.map(|p| state.viewport.to_world(origin, p));
+        let on_node = press_world.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
+        let moving = match on_node {
+            Some(id) if state.editable && !space && response.dragged_by(PointerButton::Primary) => {
+                drop::moving_nodes(&state.tree, id)
+            }
+            _ => Vec::new(),
+        };
+        state.drag = if let (Some(id), false) = (on_node, moving.is_empty()) {
+            // Grabbing a node that is not selected selects it.
+            if !state.tree.is_selected(id) && click_select(state, Some(id), SelectMode::Replace) {
+                events.push(CanvasEvent::SelectionChanged);
+            }
+            state.moving = moving;
+            DragMode::Move {
+                start: press_world.unwrap_or(Pos2::ZERO),
+            }
+        } else if response.dragged_by(PointerButton::Middle)
             || (response.dragged_by(PointerButton::Primary) && (space || on_node.is_some()))
         {
             DragMode::Pan
@@ -875,6 +954,13 @@ fn handle_input(
         };
         state.animation = None;
     }
+    if matches!(state.drag, DragMode::Move { .. }) && ui.input(|i| i.key_pressed(Key::Escape)) {
+        // Escape cancels a move.
+        state.drag = DragMode::None;
+        state.moving.clear();
+        state.drop = None;
+        state.band_end = None;
+    }
     match state.drag {
         DragMode::Pan if response.dragged() => {
             state.viewport.pan_by(response.drag_delta());
@@ -882,9 +968,36 @@ fn handle_input(
         DragMode::Band { .. } if response.dragged() => {
             state.band_end = world_pointer;
         }
+        DragMode::Move { .. } if response.dragged() => {
+            state.band_end = world_pointer;
+            state.drop = world_pointer.map(|p| {
+                drop::drop_spot(
+                    &state.tree,
+                    &state.layout.rects,
+                    state.direction,
+                    p,
+                    &state.moving,
+                )
+            });
+            if let Some(p) = pointer {
+                edge_pan(state, ui, rect, p);
+            }
+        }
         _ => {}
     }
     if response.drag_stopped() {
+        if let DragMode::Move { .. } = state.drag
+            && let Some(spot) = state.drop
+            && spot != DropSpot::Invalid
+            && !state.moving.is_empty()
+        {
+            events.push(CanvasEvent::MoveNodes {
+                nodes: std::mem::take(&mut state.moving),
+                spot,
+            });
+        }
+        state.moving.clear();
+        state.drop = None;
         if let DragMode::Band { start, additive } = state.drag
             && let Some(end) = state.band_end.or(world_pointer)
         {
@@ -1063,6 +1176,77 @@ fn click_select(state: &mut CanvasState, target: Option<CanvasNodeId>, mode: Sel
     }
 }
 
+/// Shows where a palette drag would add a node, and reports the drop.
+fn handle_palette_drop(
+    state: &mut CanvasState,
+    ui: &Ui,
+    response: &Response,
+    rect: Rect,
+    events: &mut Vec<CanvasEvent>,
+) {
+    let pointer = ui.input(|i| i.pointer.hover_pos());
+    let world = pointer.map(|p| state.viewport.to_world(rect.min, p));
+    let spot_at = |state: &CanvasState, p: Pos2| {
+        drop::drop_spot(&state.tree, &state.layout.rects, state.direction, p, &[])
+    };
+    if let Some(payload) = response.dnd_release_payload::<NewNodePayload>() {
+        if let Some(p) = world {
+            let spot = spot_at(state, p);
+            if spot != DropSpot::Invalid {
+                events.push(CanvasEvent::DropNew {
+                    type_id: payload.type_id.clone(),
+                    spot,
+                });
+            }
+        }
+        state.drop_new = false;
+        state.drop = None;
+        state.band_end = None;
+        return;
+    }
+    let hovering = response.dnd_hover_payload::<NewNodePayload>().is_some();
+    if hovering && let Some(p) = world {
+        state.drop_new = true;
+        state.drop = Some(spot_at(state, p));
+        state.band_end = Some(p);
+        if let Some(screen) = pointer {
+            edge_pan(state, ui, rect, screen);
+        }
+    } else if state.drop_new {
+        state.drop_new = false;
+        state.drop = None;
+        state.band_end = None;
+    }
+}
+
+/// The width of the border zone that pans the view during a drag, in
+/// points.
+const EDGE_PAN_ZONE: f32 = 28.0;
+/// The pan speed at the border, in points per second.
+const EDGE_PAN_SPEED: f32 = 600.0;
+
+/// Pans the view when the pointer is near a border during a drag.
+fn edge_pan(state: &mut CanvasState, ui: &Ui, rect: Rect, pointer: Pos2) {
+    let inner = rect.shrink(EDGE_PAN_ZONE);
+    let mut direction = Vec2::ZERO;
+    if pointer.x < inner.min.x {
+        direction.x = 1.0;
+    } else if pointer.x > inner.max.x {
+        direction.x = -1.0;
+    }
+    if pointer.y < inner.min.y {
+        direction.y = 1.0;
+    } else if pointer.y > inner.max.y {
+        direction.y = -1.0;
+    }
+    if direction != Vec2::ZERO {
+        let dt = ui.input(|i| i.stable_dt).min(0.05);
+        state.animation = None;
+        state.viewport.pan_by(direction * EDGE_PAN_SPEED * dt);
+        ui.ctx().request_repaint();
+    }
+}
+
 /// The ID of the accessibility item of a node.
 fn node_item_id(canvas: Id, node: CanvasNodeId) -> Id {
     canvas.with(("node", node.0))
@@ -1075,8 +1259,9 @@ fn context_menu(
     events: &mut Vec<CanvasEvent>,
     node_menu: Option<&mut NodeMenu<'_>>,
 ) {
-    if let (Some(node), Some(menu)) = (target.and_then(|id| state.tree.get(id)), node_menu) {
-        menu(ui, node);
+    if let Some(menu) = node_menu
+        && menu(ui, target.and_then(|id| state.tree.get(id)))
+    {
         ui.separator();
     }
     if let Some(node) = target.and_then(|id| state.tree.get(id)) {
@@ -1213,6 +1398,8 @@ fn paint_canvas(
     }
     state.visible = visible;
 
+    paint_drop(state, ui, &mut shapes, origin, palette);
+
     // Rubber band.
     if let (DragMode::Band { start, .. }, Some(end)) = (state.drag, state.band_end) {
         let band = state
@@ -1246,6 +1433,115 @@ fn paint_canvas(
     state.stats.visible_nodes = state.visible.len();
     state.stats.detail = detail;
     state.stats.cached_galleys = state.galleys.map.len();
+}
+
+/// The feedback of a move or a palette drag: ghosts of the moved cards,
+/// the drop marker and a short hint next to the pointer.
+fn paint_drop(
+    state: &CanvasState,
+    ui: &Ui,
+    shapes: &mut Vec<Shape>,
+    origin: Pos2,
+    palette: &CanvasPalette,
+) {
+    let moving = matches!(state.drag, DragMode::Move { .. });
+    if !moving && !state.drop_new {
+        return;
+    }
+    let zoom = state.viewport.zoom;
+    let corner = radius(6.0 * zoom);
+    if let (DragMode::Move { start }, Some(end)) = (state.drag, state.band_end) {
+        let delta = end - start;
+        for id in &state.moving {
+            if let Some(r) = state.layout.rect(*id) {
+                let screen = state.viewport.rect_to_screen(origin, r.translate(delta));
+                shapes.push(Shape::rect_filled(screen, corner, palette.band_fill));
+                shapes.push(Shape::rect_stroke(
+                    screen,
+                    corner,
+                    Stroke::new(1.5, palette.accent),
+                    StrokeKind::Inside,
+                ));
+            }
+        }
+    }
+    let Some(spot) = state.drop else {
+        return;
+    };
+    let target_label = |id: CanvasNodeId| {
+        state
+            .tree
+            .get(id)
+            .map(|n| n.label.clone())
+            .unwrap_or_default()
+    };
+    let (hint, color) = match spot {
+        DropSpot::Background if moving => ("Disconnect".to_owned(), palette.accent),
+        DropSpot::Background => ("Add as unconnected node".to_owned(), palette.accent),
+        DropSpot::Invalid => ("Cannot drop here".to_owned(), palette.error),
+        DropSpot::Node { target, placement } => {
+            if let Some(r) = state.layout.rect(target) {
+                let screen = state.viewport.rect_to_screen(origin, r);
+                let gap = 6.0 * zoom.max(0.5);
+                let width = 4.0;
+                let bar = match (placement, state.direction) {
+                    (DropPlacement::Inside, _) => None,
+                    (DropPlacement::Before, LayoutDirection::TopDown) => Some(Rect::from_min_max(
+                        pos2(screen.min.x - gap - width, screen.min.y),
+                        pos2(screen.min.x - gap, screen.max.y),
+                    )),
+                    (DropPlacement::After, LayoutDirection::TopDown) => Some(Rect::from_min_max(
+                        pos2(screen.max.x + gap, screen.min.y),
+                        pos2(screen.max.x + gap + width, screen.max.y),
+                    )),
+                    (DropPlacement::Before, LayoutDirection::LeftRight) => {
+                        Some(Rect::from_min_max(
+                            pos2(screen.min.x, screen.min.y - gap - width),
+                            pos2(screen.max.x, screen.min.y - gap),
+                        ))
+                    }
+                    (DropPlacement::After, LayoutDirection::LeftRight) => Some(Rect::from_min_max(
+                        pos2(screen.min.x, screen.max.y + gap),
+                        pos2(screen.max.x, screen.max.y + gap + width),
+                    )),
+                };
+                match bar {
+                    Some(bar) => {
+                        shapes.push(Shape::rect_filled(
+                            bar,
+                            CornerRadius::same(2),
+                            palette.accent,
+                        ));
+                    }
+                    None => {
+                        shapes.push(Shape::rect_filled(screen, corner, palette.band_fill));
+                        shapes.push(Shape::rect_stroke(
+                            screen.expand(2.0),
+                            corner,
+                            Stroke::new(2.5, palette.accent),
+                            StrokeKind::Outside,
+                        ));
+                    }
+                }
+            }
+            let label = target_label(target);
+            let text = match placement {
+                DropPlacement::Inside => format!("Into {label}"),
+                DropPlacement::Before => format!("Before {label}"),
+                DropPlacement::After => format!("After {label}"),
+            };
+            (text, palette.accent)
+        }
+    };
+    if let Some(end) = state.band_end {
+        let at = state.viewport.to_screen(origin, end) + vec2(14.0, 14.0);
+        let galley =
+            ui.painter()
+                .layout_no_wrap(hint, FontId::proportional(12.0), palette.on_color);
+        let frame = Rect::from_min_size(at, galley.size()).expand2(vec2(6.0, 3.0));
+        shapes.push(Shape::rect_filled(frame, CornerRadius::same(4), color));
+        shapes.push(Shape::galley(at, galley, palette.on_color));
+    }
 }
 
 /// Dots on a world grid. The spacing grows when the zoom is small, so that

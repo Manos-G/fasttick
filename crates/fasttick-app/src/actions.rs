@@ -45,6 +45,13 @@ pub enum AppAction {
     /// Change the edit document of a view (see [`crate::edit_ops`]).
     Edit(ViewId, EditOp),
     /// Select an element of the edit document of a view and show it.
+    /// Asks for a name, then runs the edit that needs it.
+    PromptName {
+        /// The edit view.
+        view: ViewId,
+        /// What the name is for.
+        purpose: NamePurpose,
+    },
     RevealXml {
         /// The view.
         view: ViewId,
@@ -53,4 +60,50 @@ pub enum AppAction {
         /// The element.
         node: fasttick_core::xml::NodeId,
     },
+}
+
+/// What a name prompt is for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NamePurpose {
+    /// The ID of a new tree made from the selected nodes.
+    CreateSubTree,
+    /// The ID of a new empty tree.
+    AddTree,
+    /// The new ID of a tree.
+    RenameTree {
+        /// The old ID.
+        old: String,
+    },
+}
+
+impl NamePurpose {
+    /// The title of the prompt.
+    pub fn title(&self) -> String {
+        match self {
+            NamePurpose::CreateSubTree => "Create SubTree from selection".to_owned(),
+            NamePurpose::AddTree => "Add tree".to_owned(),
+            NamePurpose::RenameTree { old } => format!("Rename tree {old}"),
+        }
+    }
+
+    /// The text of the OK button.
+    pub fn ok_text(&self) -> &'static str {
+        match self {
+            NamePurpose::CreateSubTree => "Create",
+            NamePurpose::AddTree => "Add",
+            NamePurpose::RenameTree { .. } => "Rename",
+        }
+    }
+
+    /// The edit operation for a name.
+    pub fn op(&self, name: String) -> EditOp {
+        match self {
+            NamePurpose::CreateSubTree => EditOp::CreateSubTree { tree_id: name },
+            NamePurpose::AddTree => EditOp::AddTree { id: name },
+            NamePurpose::RenameTree { old } => EditOp::RenameTree {
+                old: old.clone(),
+                new: name,
+            },
+        }
+    }
 }

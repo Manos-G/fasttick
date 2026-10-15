@@ -26,12 +26,18 @@ use fasttick_protocol::messages::{Hook, HookMode};
 use fasttick_protocol::session::ConnectionState;
 use serde::{Deserialize, Serialize};
 
-use crate::actions::AppAction;
-use crate::canvas::{CanvasEvent, CanvasNode, LayoutDirection, NodeSource, TreeCanvas};
-use crate::dialogs::{self, ConnectChoice, ConnectForm, Notice, NoticeLevel};
+use crate::actions::{AppAction, NamePurpose};
+use crate::canvas::{
+    CanvasEvent, CanvasNode, CanvasNodeId, DropPlacement, DropSpot, LayoutDirection, NodeSource,
+    TreeCanvas,
+};
+use crate::dialogs::{
+    self, ConnectChoice, ConnectForm, NamePrompt, Notice, NoticeLevel, PromptChoice,
+};
 use crate::dock::{self, Tab};
 use crate::documents::{DocId, DocKind, ViewId, ViewOptions, Workspace};
-use crate::edit_ops::EditOp;
+use crate::edit_menu::{EditMenuContext, edit_menu};
+use crate::edit_ops::{EditOp, Placement};
 use crate::jobs::{DialogPurpose, ExportFormat, JobResult, Jobs, LoadingFile};
 use crate::live::{AFTER_BREAKPOINT_UNAVAILABLE, LiveController, LiveUpdate, ResumeAction};
 use crate::panels::{self, PanelContext, live_bar};
@@ -195,6 +201,7 @@ pub struct FastTickApp {
     show_about: bool,
     show_shortcuts: bool,
     connect_form: Option<ConnectForm>,
+    name_prompt: Option<NamePrompt>,
     notices: Vec<Notice>,
     actions: Vec<AppAction>,
     save_as_view: Option<ViewId>,
@@ -244,6 +251,7 @@ impl FastTickApp {
             show_about: false,
             show_shortcuts: false,
             connect_form: None,
+            name_prompt: None,
             notices: Vec::new(),
             actions: Vec::new(),
             save_as_view: None,
@@ -1230,6 +1238,25 @@ impl FastTickApp {
                     self.workspace.reveal_xml(view, file, node, true);
                     self.workspace.active_view = Some(view);
                 }
+                AppAction::PromptName { view, purpose } => {
+                    let taken = self
+                        .workspace
+                        .doc_of_view(view)
+                        .and_then(|d| d.editor.as_deref())
+                        .map(|e| e.trees().into_iter().map(|(_, id)| id).collect())
+                        .unwrap_or_default();
+                    let value = match &purpose {
+                        NamePurpose::RenameTree { old } => old.clone(),
+                        _ => String::new(),
+                    };
+                    self.name_prompt = Some(NamePrompt {
+                        view,
+                        purpose,
+                        value,
+                        taken,
+                        focused: false,
+                    });
+                }
             }
         }
     }
@@ -1815,6 +1842,7 @@ impl FastTickApp {
             keymap: &self.keymap,
             palette,
             actions: &mut self.actions,
+            has_clipboard: self.clipboard.is_some(),
         };
         DockArea::new(dock)
             .id(Id::new(("fasttick_dock", mode.index())))
@@ -1841,6 +1869,18 @@ impl FastTickApp {
         }
         self.breakpoint_dialog(ctx);
         self.sqlite_dialog(ctx);
+        if let Some(prompt) = &mut self.name_prompt {
+            match dialogs::name_prompt(ctx, prompt) {
+                (PromptChoice::Open, _) => {}
+                (PromptChoice::Cancel, _) => self.name_prompt = None,
+                (PromptChoice::Accept, name) => {
+                    if let Some(prompt) = self.name_prompt.take() {
+                        let op = prompt.purpose.op(name);
+                        self.run_edit(ctx, prompt.view, op);
+                    }
+                }
+            }
+        }
         if let Some(form) = &mut self.connect_form {
             match dialogs::connect(ctx, form) {
                 ConnectChoice::Open => {}
@@ -2103,6 +2143,7 @@ struct Viewer<'a> {
     keymap: &'a KeyMap,
     palette: &'a CanvasPalette,
     actions: &'a mut Vec<AppAction>,
+    has_clipboard: bool,
 }
 
 impl Viewer<'_> {
@@ -2113,6 +2154,12 @@ impl Viewer<'_> {
         };
         let doc_id = doc.id;
         let is_live = self.live_doc == Some(doc_id);
+        let edit_context = doc
+            .editor
+            .as_deref()
+            .filter(|_| doc.mode() == self.mode)
+            .map(|editor| EditMenuContext::new(view_id, editor, self.has_clipboard));
+        let editable = edit_context.is_some();
         // Statuses and markers of this frame, before the canvas draws.
         self.workspace.refresh_decorations(self.live, self.live_doc);
 
@@ -2120,13 +2167,21 @@ impl Viewer<'_> {
             return;
         };
         let live = &mut *self.live;
-        let mut menu = |ui: &mut Ui, node: &CanvasNode| live_node_menu(ui, live, node);
-        let mut canvas =
-            TreeCanvas::new(&mut view.canvas, self.palette).id_salt(("canvas", view_id.0));
-        if is_live {
-            canvas = canvas.node_menu(&mut menu);
-        }
-        let output = canvas.show(ui);
+        let mut menu_actions = Vec::new();
+        let mut menu = |ui: &mut Ui, node: Option<&CanvasNode>| match (&edit_context, node) {
+            (Some(context), node) => edit_menu(ui, context, node, &mut menu_actions),
+            (None, Some(node)) if is_live => {
+                live_node_menu(ui, live, node);
+                true
+            }
+            _ => false,
+        };
+        let output = TreeCanvas::new(&mut view.canvas, self.palette)
+            .id_salt(("canvas", view_id.0))
+            .editable(editable)
+            .node_menu(&mut menu)
+            .show(ui);
+        self.actions.append(&mut menu_actions);
         if output.response.clicked()
             || output.response.drag_started()
             || output.response.secondary_clicked()
@@ -2144,8 +2199,70 @@ impl Viewer<'_> {
                 CanvasEvent::SelectionChanged | CanvasEvent::Activated(_) => {
                     self.workspace.active_view = Some(view_id);
                 }
+                CanvasEvent::MoveNodes { nodes, spot } => {
+                    self.workspace.active_view = Some(view_id);
+                    if let Some(op) = self.move_op(view_id, &nodes, spot) {
+                        self.actions.push(AppAction::Edit(view_id, op));
+                    }
+                }
+                CanvasEvent::DropNew { type_id, spot } => {
+                    self.workspace.active_view = Some(view_id);
+                    let op = match spot {
+                        DropSpot::Node { target, placement } => {
+                            self.xml_node(view_id, target).map(|node| EditOp::AddNode {
+                                type_id,
+                                target: Some((node, placement_of(placement))),
+                            })
+                        }
+                        _ => Some(EditOp::AddUnconnected { type_id }),
+                    };
+                    if let Some(op) = op {
+                        self.actions.push(AppAction::Edit(view_id, op));
+                    }
+                }
             }
         }
+    }
+}
+
+impl Viewer<'_> {
+    /// The XML node of a canvas node of an edit view (not for inline
+    /// nodes).
+    fn xml_node(&self, view: ViewId, id: CanvasNodeId) -> Option<fasttick_core::xml::NodeId> {
+        let node = self.workspace.view(view)?.canvas.tree().get(id)?;
+        match node.source {
+            NodeSource::Xml(_, xml) if !node.inline => Some(xml),
+            _ => None,
+        }
+    }
+
+    /// The edit operation for a move gesture.
+    fn move_op(&self, view: ViewId, nodes: &[CanvasNodeId], spot: DropSpot) -> Option<EditOp> {
+        let nodes: Vec<_> = nodes
+            .iter()
+            .filter_map(|id| self.xml_node(view, *id))
+            .collect();
+        if nodes.is_empty() {
+            return None;
+        }
+        match spot {
+            DropSpot::Background => Some(EditOp::DisconnectNodes { nodes }),
+            DropSpot::Node { target, placement } => Some(EditOp::MoveNodes {
+                nodes,
+                target: self.xml_node(view, target)?,
+                placement: placement_of(placement),
+            }),
+            DropSpot::Invalid => None,
+        }
+    }
+}
+
+/// The edit placement for a canvas drop placement.
+fn placement_of(placement: DropPlacement) -> Placement {
+    match placement {
+        DropPlacement::Inside => Placement::Inside,
+        DropPlacement::Before => Placement::Before,
+        DropPlacement::After => Placement::After,
     }
 }
 

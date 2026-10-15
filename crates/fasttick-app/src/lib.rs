@@ -25,6 +25,7 @@ pub mod canvas;
 pub mod dialogs;
 pub mod dock;
 pub mod documents;
+pub mod edit_menu;
 pub mod edit_ops;
 pub mod editor;
 pub mod fonts;

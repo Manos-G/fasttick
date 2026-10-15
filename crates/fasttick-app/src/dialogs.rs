@@ -1,4 +1,5 @@
-//! Dialogs: About, keyboard shortcuts, connect; and short notices.
+//! Dialogs: About, keyboard shortcuts, connect, name prompts; and short
+//! notices.
 
 use std::collections::BTreeMap;
 
@@ -205,6 +206,99 @@ pub fn connect(ctx: &egui::Context, form: &mut ConnectForm) -> ConnectChoice {
         choice = ConnectChoice::Cancel;
     }
     choice
+}
+
+/// What the user did in a prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptChoice {
+    /// The prompt stays open.
+    Open,
+    /// The user accepted the value.
+    Accept,
+    /// The user cancelled.
+    Cancel,
+}
+
+/// The state of a name prompt (a new tree ID, for example).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamePrompt {
+    /// The edit view.
+    pub view: crate::documents::ViewId,
+    /// What the name is for.
+    pub purpose: crate::actions::NamePurpose,
+    /// The text.
+    pub value: String,
+    /// The tree IDs that the name cannot have.
+    pub taken: Vec<String>,
+    /// True after the first frame (the text field has the focus).
+    pub focused: bool,
+}
+
+impl NamePrompt {
+    /// The problem with the current text, if any.
+    pub fn problem(&self) -> Option<String> {
+        let name = self.value.trim();
+        if let Err(err) = fasttick_core::bt::names::validate_model_name(name) {
+            return Some(format!("Not a valid tree ID: {err}."));
+        }
+        if self.taken.iter().any(|t| t == name) {
+            return Some(format!("A tree with the ID {name} exists."));
+        }
+        None
+    }
+}
+
+/// Draws a name prompt. Returns the name when the user accepts it.
+pub fn name_prompt(ctx: &egui::Context, prompt: &mut NamePrompt) -> (PromptChoice, String) {
+    let mut choice = PromptChoice::Open;
+    let mut open = true;
+    let problem = prompt.problem();
+    egui::Window::new(prompt.purpose.title())
+        .collapsible(false)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, [0.0, -60.0])
+        .open(&mut open)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Tree ID");
+                let edit =
+                    ui.add(egui::TextEdit::singleline(&mut prompt.value).desired_width(220.0));
+                if !prompt.focused {
+                    edit.request_focus();
+                    prompt.focused = true;
+                }
+                if edit.lost_focus()
+                    && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                    && problem.is_none()
+                {
+                    choice = PromptChoice::Accept;
+                }
+            });
+            if let Some(problem) = &problem
+                && !prompt.value.is_empty()
+            {
+                ui.colored_label(ui.visuals().warn_fg_color, problem);
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        problem.is_none(),
+                        egui::Button::new(RichText::new(prompt.purpose.ok_text()).strong()),
+                    )
+                    .clicked()
+                {
+                    choice = PromptChoice::Accept;
+                }
+                if ui.button("Cancel").clicked() {
+                    choice = PromptChoice::Cancel;
+                }
+            });
+        });
+    if !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        choice = PromptChoice::Cancel;
+    }
+    (choice, prompt.value.trim().to_owned())
 }
 
 /// The level of a notice.

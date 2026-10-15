@@ -40,6 +40,12 @@ pub enum EditOp {
         /// The target node and the placement.
         target: Option<(NodeId, Placement)>,
     },
+    /// Adds a node of a type as an unconnected node, or as the root of an
+    /// empty tree (a drop on an empty place).
+    AddUnconnected {
+        /// The type ID.
+        type_id: String,
+    },
     /// Deletes the selected nodes (with their subtrees).
     Delete,
     /// Copies the selected nodes to the clipboard.
@@ -49,6 +55,8 @@ pub enum EditOp {
     /// Pastes the clipboard as the last children of the selected node, or
     /// as unconnected nodes.
     Paste,
+    /// Pastes the clipboard as unconnected nodes.
+    PasteUnconnected,
     /// Duplicates the selected nodes next to themselves.
     Duplicate,
     /// Moves the selected nodes to the unconnected area.
@@ -251,6 +259,65 @@ fn place(
     }
 }
 
+/// Adds a node at a target place; without a target, as the root of an
+/// empty tree or as an unconnected node of the tree `tree_id`.
+fn add_node(
+    editor: &mut EditorDoc,
+    tree_id: Option<String>,
+    type_id: &str,
+    target: Option<(NodeId, Placement)>,
+) -> Result<NodeId, String> {
+    let file = editor.file_id();
+    let model = editor
+        .project()
+        .lookup_model(file, type_id)
+        .map(|(model, _)| model.clone());
+    match target {
+        Some((target, placement)) => {
+            let (parent, index) = place(editor, target, placement)?;
+            editor.edit(|ed| ed.add_node(file, parent, index, type_id, model.as_ref()))
+        }
+        None => {
+            let tree_id = tree_id.ok_or("the view shows no tree")?;
+            let tree_element = editor
+                .file()
+                .and_then(|f| f.index().tree(&tree_id).map(|t| (t.element, t.root)));
+            match tree_element {
+                Some((element, None)) => {
+                    editor.edit(|ed| ed.add_node(file, element, 0, type_id, model.as_ref()))
+                }
+                _ => editor.edit(|ed| {
+                    ed.add_unconnected_node(file, &tree_id, type_id, model.as_ref(), [0.0, 0.0])
+                }),
+            }
+        }
+    }
+}
+
+/// Pastes clipboard text as the last children of `parent`, or as
+/// unconnected nodes of the tree `tree_id`.
+fn paste(
+    editor: &mut EditorDoc,
+    tree_id: Option<String>,
+    text: &str,
+    parent: Option<NodeId>,
+) -> Result<Vec<NodeId>, String> {
+    let file = editor.file_id();
+    match parent {
+        Some(parent) => {
+            let index = editor
+                .file()
+                .map(|f| f.doc().element_children(parent).count())
+                .unwrap_or(0);
+            editor.edit(|ed| ed.paste(file, text, parent, index))
+        }
+        None => {
+            let tree_id = tree_id.ok_or("the view shows no tree")?;
+            editor.edit(|ed| ed.paste_unconnected(file, &tree_id, text, [0.0, 0.0]))
+        }
+    }
+}
+
 /// The tree ID that a view shows.
 fn view_tree_id(workspace: &Workspace, view: ViewId) -> Option<String> {
     let view_ref = workspace.view(view)?;
@@ -280,37 +347,11 @@ pub fn run(
     let mut outcome = EditOutcome::default();
     match op {
         EditOp::AddNode { type_id, target } => {
-            let model = editor
-                .project()
-                .lookup_model(file, &type_id)
-                .map(|(model, _)| model.clone());
             let target = target.or(primary.map(|node| (node, Placement::Inside)));
-            let new = match target {
-                Some((target, placement)) => {
-                    let (parent, index) = place(editor, target, placement)?;
-                    editor.edit(|ed| ed.add_node(file, parent, index, &type_id, model.as_ref()))?
-                }
-                None => {
-                    let tree_id = tree_id.ok_or("the view shows no tree")?;
-                    let tree_element = editor
-                        .file()
-                        .and_then(|f| f.index().tree(&tree_id).map(|t| (t.element, t.root)));
-                    match tree_element {
-                        Some((element, None)) => editor
-                            .edit(|ed| ed.add_node(file, element, 0, &type_id, model.as_ref()))?,
-                        _ => editor.edit(|ed| {
-                            ed.add_unconnected_node(
-                                file,
-                                &tree_id,
-                                &type_id,
-                                model.as_ref(),
-                                [0.0, 0.0],
-                            )
-                        })?,
-                    }
-                }
-            };
-            outcome.select = vec![new];
+            outcome.select = vec![add_node(editor, tree_id, &type_id, target)?];
+        }
+        EditOp::AddUnconnected { type_id } => {
+            outcome.select = vec![add_node(editor, tree_id, &type_id, None)?];
         }
         EditOp::Delete => {
             if selected.is_empty() {
@@ -330,20 +371,11 @@ pub fn run(
         }
         EditOp::Paste => {
             let text = clipboard.clone().ok_or("The clipboard is empty.")?;
-            let new = match primary {
-                Some(parent) => {
-                    let index = editor
-                        .file()
-                        .map(|f| f.doc().element_children(parent).count())
-                        .unwrap_or(0);
-                    editor.edit(|ed| ed.paste(file, &text, parent, index))?
-                }
-                None => {
-                    let tree_id = tree_id.ok_or("the view shows no tree")?;
-                    editor.edit(|ed| ed.paste_unconnected(file, &tree_id, &text, [0.0, 0.0]))?
-                }
-            };
-            outcome.select = new;
+            outcome.select = paste(editor, tree_id, &text, primary)?;
+        }
+        EditOp::PasteUnconnected => {
+            let text = clipboard.clone().ok_or("The clipboard is empty.")?;
+            outcome.select = paste(editor, tree_id, &text, None)?;
         }
         EditOp::Duplicate => {
             if selected.is_empty() {
@@ -371,8 +403,15 @@ pub fn run(
             if nodes.contains(&target) {
                 return Ok(outcome);
             }
+            // Each node goes next to the target, so the nodes keep their
+            // order if they go after it in reverse order.
+            let ordered: Vec<NodeId> = if placement == Placement::After {
+                nodes.iter().rev().copied().collect()
+            } else {
+                nodes.clone()
+            };
             editor.edit(|ed| {
-                for node in &nodes {
+                for node in &ordered {
                     let (parent, mut index) = place_in(ed.project(), file, target, placement)?;
                     // The index counts the children after the node leaves its
                     // old place.
