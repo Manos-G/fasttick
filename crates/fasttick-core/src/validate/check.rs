@@ -9,7 +9,7 @@ use crate::bt::names::{
 };
 use crate::bt::{AttributeClass, BtFile, MAX_NESTING_DEPTH, NodeView, PortValue, TreeEntry};
 use crate::builtin::{self, ChildRule};
-use crate::models::{ModelIssueKind, ModelSource, NodeKind, NodeModel, PortDirection, PortModel};
+use crate::models::{ModelIssueKind, NodeKind, NodeModel, PortDirection, PortModel};
 use crate::project::{FileId, FileRole, IncludeProblem};
 use crate::xml::{Attribute, Document, NodeId};
 
@@ -567,8 +567,9 @@ impl<'c, 'p> FileChecker<'c, 'p> {
                     root,
                     Some("main_tree_to_execute"),
                     format!(
-                        "main_tree_to_execute names the tree \"{id}\", but no tree has this ID. \
-                         BT.CPP cannot create the main tree. Correct the name or add the tree."
+                        "The attribute main_tree_to_execute names the tree \"{id}\", but no tree \
+                         has this ID. BT.CPP cannot create the main tree. Correct the name or add \
+                         the tree."
                     ),
                 ),
             },
@@ -1302,8 +1303,8 @@ impl<'c, 'p> FileChecker<'c, 'p> {
                     Some(tree),
                     node,
                     Some(name),
-                    "_autoremap has an effect only on a <SubTree> node. BT.CPP ignores it \
-                     here. Remove the attribute."
+                    "The attribute _autoremap has an effect only on a <SubTree> node. BT.CPP \
+                     ignores it here. Remove the attribute."
                         .to_owned(),
                 ),
                 AttributeClass::AutoRemap => {
