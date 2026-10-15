@@ -295,6 +295,12 @@ pub const CANVAS_HELP: &[(&str, &str)] = &[
     ("Shift + click", "Add a node to the selection"),
     ("Ctrl + click", "Add or remove a node"),
     ("Drag on the background", "Select with a rectangle"),
+    (
+        "Drag a node (edit mode)",
+        "Move it: onto a node, or onto an empty place to disconnect it",
+    ),
+    ("Escape during a drag", "Cancel the move"),
+    ("Drag a node (live, replay)", "Pan"),
     ("Double-click a SubTree", "Expand or collapse it"),
     ("Middle drag, Space + drag", "Pan"),
     ("Mouse wheel, touchpad", "Pan"),
