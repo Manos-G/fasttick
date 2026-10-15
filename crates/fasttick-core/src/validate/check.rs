@@ -7,7 +7,9 @@ use crate::bt::names::{
     NameError, is_allowed_port_name, validate_instance_name, validate_model_name,
     validate_port_name,
 };
-use crate::bt::{AttributeClass, BtFile, MAX_NESTING_DEPTH, NodeView, PortValue, TreeEntry};
+use crate::bt::{
+    AttributeClass, BtFile, MAX_NESTING_DEPTH, NodeView, PortValue, TreeEntry, blackboard_pointer,
+};
 use crate::builtin::{self, ChildRule};
 use crate::models::{ModelIssueKind, NodeKind, NodeModel, PortDirection, PortModel};
 use crate::project::{FileId, FileRole, IncludeProblem};
@@ -1344,6 +1346,24 @@ impl<'c, 'p> FileChecker<'c, 'p> {
                     }
                 }
                 AttributeClass::PreCondition(_) | AttributeClass::PostCondition(_) => {
+                    let syntax = crate::script::check_script(value);
+                    if let Err(error) = &syntax
+                        && error.message != crate::script::EMPTY_SCRIPT
+                    {
+                        // instantiateTreeNode: AssignConditions.
+                        self.push(
+                            Severity::Error,
+                            ProblemCode::ScriptSyntax,
+                            Some(tree),
+                            node,
+                            Some(name),
+                            format!(
+                                "The script of {name} has an error: {}. BT.CPP stops when it \
+                                 creates the tree. Correct the script.",
+                                error.message
+                            ),
+                        );
+                    }
                     if value.trim_matches([' ', '\t', '\n', '\r']).is_empty() {
                         self.push(
                             Severity::Error,
@@ -1416,6 +1436,31 @@ impl<'c, 'p> FileChecker<'c, 'p> {
         let NodeType::Known(model) = node_type else {
             return;
         };
+        // The constructors of these built-in nodes parse their script
+        // (loadExecutor), so a script with an error stops the creation of
+        // the tree. A blackboard reference is read later.
+        let script_port = matches!(
+            (model.id.as_str(), name),
+            ("Script" | "ScriptCondition", "code") | ("Precondition", "if")
+        );
+        if script_port
+            && builtin::is_builtin(&model.id)
+            && blackboard_pointer(value).is_none()
+            && let Err(error) = crate::script::check_script(value)
+        {
+            self.push(
+                Severity::Error,
+                ProblemCode::ScriptSyntax,
+                Some(tree),
+                node,
+                Some(name),
+                format!(
+                    "The script in the port {name} has an error: {}. BT.CPP stops when it \
+                     creates the node. Correct the script.",
+                    error.message
+                ),
+            );
+        }
         let Some(port) = model.port(name) else {
             // createNodeFromXML: "a port with name [..] is found in the XML
             // but not in the providedPorts() of its registered node type".

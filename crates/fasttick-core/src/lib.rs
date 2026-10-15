@@ -21,6 +21,7 @@ pub mod layout;
 pub mod models;
 pub mod project;
 pub mod runtime;
+pub mod script;
 pub mod search;
 pub mod status;
 pub mod validate;

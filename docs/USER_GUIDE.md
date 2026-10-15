@@ -135,11 +135,22 @@ Select a node. The **Inspector** shows its properties:
   does not have.
 - **Remapping** (SubTree nodes): **Automatic (_autoremap)**.
 - **Pre- and post-conditions**: one script for each condition. An empty
-  script removes the condition.
+  script removes the condition. FastTick checks each script with the
+  grammar of BT.CPP 4.9.0. If BT.CPP cannot parse a script, the message of
+  BT.CPP shows below the field and in the problems list, and the node gets
+  an error marker. (BT.CPP does not load a tree with such a script.)
 - **Problems**: the problems of the node.
 
 Each change is one undo step. The keystrokes in one field become one step.
 Use **Edit** > **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z).
+
+The node cards show the pre- and post-conditions below the ports, with
+the name of the condition in purple, in all three modes. In live and replay
+mode, the Inspector shows them read-only.
+
+FastTick also checks the scripts in the `code` port of `Script` and
+`ScriptCondition` nodes and in the `if` port of `Precondition` nodes,
+because BT.CPP parses them when it creates these nodes.
 
 ### 3.5 SubTrees
 

@@ -804,3 +804,53 @@ fn a_model_file_removes_the_unknown_type_problems() {
             .any(|n| n.accesskit_node().role() != Role::TreeItem)
     );
 }
+
+#[test]
+fn a_condition_script_with_an_error_shows_the_bt_cpp_message() {
+    let mut harness = harness();
+    select(&mut harness, "say_default");
+    harness
+        .get_by_label_contains("Pre- and post-conditions")
+        .click();
+    harness.run();
+    type_into(&mut harness, Field::Label("_skipIf"), "x == (1", false);
+    // The message of BT.CPP shows below the field and in the problems list.
+    assert_eq!(
+        harness
+            .query_all_by_label_contains("expected ')' (got '')")
+            .count(),
+        2
+    );
+    let script_errors = |h: &Harness<'static, FastTickApp>| {
+        let app = h.state();
+        let view = app.workspace().active().unwrap();
+        let doc = app.workspace().doc(view.doc).unwrap();
+        doc.editor
+            .as_ref()
+            .unwrap()
+            .problems()
+            .iter()
+            .filter(|p| p.code == fasttick_core::validate::ProblemCode::ScriptSyntax)
+            .count()
+    };
+    assert_eq!(script_errors(&harness), 1);
+    // The card has an error marker.
+    {
+        let app = harness.state();
+        let tree = app.workspace().active().unwrap().canvas.tree();
+        let node = tree
+            .nodes()
+            .iter()
+            .find(|n| n.label == "say_default")
+            .unwrap();
+        assert_eq!(
+            node.deco.problem,
+            Some(fasttick_app::canvas::ProblemMarker::Error)
+        );
+    }
+    // Correct the script: the problem goes away.
+    input(&harness, "_skipIf").type_text(")");
+    harness.run();
+    assert_eq!(script_errors(&harness), 0);
+    assert!(harness.query_by_label_contains("expected ')'").is_none());
+}

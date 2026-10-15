@@ -255,6 +255,11 @@ problem_codes! {
     /// A pre-condition or post-condition script is empty
     /// (`BehaviorTreeFactory::instantiateTreeNode`: "Empty Script").
     EmptyCondition => "A condition script is empty.",
+    /// A pre-condition or post-condition script, or the script port of a
+    /// `Script`, `ScriptCondition` or `Precondition` node, has a syntax
+    /// error (`BT::ParseScript`; see [`crate::script`]). BT.CPP stops when
+    /// it creates the tree.
+    ScriptSyntax => "A script has a syntax error.",
     /// A raw attribute value contains an `&` that does not start a valid
     /// reference. tinyxml2 can change the value (Warning).
     SuspiciousAmpersand => "An attribute value contains a bare &.",
@@ -431,7 +436,7 @@ mod tests {
             assert!(code.summary().ends_with('.'), "{code}");
         }
         assert_eq!(ProblemCode::from_name("Nope"), None);
-        assert_eq!(ProblemCode::ALL.len(), 33);
+        assert_eq!(ProblemCode::ALL.len(), 34);
     }
 
     #[test]

@@ -12,7 +12,7 @@ use fasttick_core::edit::Condition;
 use fasttick_core::models::{ModelSource, NodeKind, NodeModel, PortDirection};
 use fasttick_core::project::FileId;
 use fasttick_core::runtime::InstanceIndex;
-use fasttick_core::validate::Severity;
+use fasttick_core::validate::{Problem, Severity};
 use fasttick_core::xml::NodeId;
 
 use crate::actions::AppAction;
@@ -39,6 +39,11 @@ pub fn show(
     };
     let type_id = element.type_id().unwrap_or("").to_owned();
     let model = editor.project().lookup_model(file_id, &type_id);
+    let node_problems: Vec<&Problem> = editor
+        .problems()
+        .iter()
+        .filter(|p| p.file == file_id && p.node == Some(node))
+        .collect();
     let mut edit = |op: EditOp| actions.push(AppAction::Edit(view, op));
 
     // Header.
@@ -85,6 +90,7 @@ pub fn show(
                 });
             }
             ui.end_row();
+            inline_problems(ui, &node_problems, "name");
 
             ui.label("Type");
             if let Some(new_type) =
@@ -140,7 +146,14 @@ pub fn show(
         })
         .strong(),
     );
-    ports(ui, &element, model.map(|(m, _)| m), node, &mut edit);
+    ports(
+        ui,
+        &element,
+        model.map(|(m, _)| m),
+        node,
+        &node_problems,
+        &mut edit,
+    );
 
     // Conditions.
     ui.add_space(8.0);
@@ -154,40 +167,61 @@ pub fn show(
                 .num_columns(2)
                 .spacing([10.0, 4.0])
                 .show(ui, |ui| {
-                    let rows = PreCondition::ALL
+                    let pre = PreCondition::ALL
                         .into_iter()
-                        .map(|c| (Condition::Pre(c), element.pre_condition(c), pre_help(c)))
-                        .chain(PostCondition::ALL.into_iter().map(|c| {
-                            (Condition::Post(c), element.post_condition(c), post_help(c))
-                        }));
-                    for (condition, script, help) in rows {
-                        let label = ui
-                            .label(RichText::new(condition.attribute_name()).monospace())
-                            .on_hover_text(help)
-                            .id;
-                        if let Some(text) = text_field(
-                            ui,
-                            label,
-                            ("cond", node, condition.attribute_name()),
-                            script.unwrap_or(""),
-                            "script",
-                        ) {
-                            edit(EditOp::SetCondition {
-                                node,
-                                condition,
-                                script: (!text.is_empty()).then_some(text),
-                            });
-                        }
+                        .map(|c| (Condition::Pre(c), element.pre_condition(c), pre_help(c)));
+                    let post = PostCondition::ALL
+                        .into_iter()
+                        .map(|c| (Condition::Post(c), element.post_condition(c), post_help(c)));
+                    for (heading, rows) in [
+                        (
+                            "Pre-conditions: checked before each tick",
+                            pre.collect::<Vec<_>>(),
+                        ),
+                        (
+                            "Post-conditions: run after the node has a result",
+                            post.collect::<Vec<_>>(),
+                        ),
+                    ] {
+                        ui.label("");
+                        ui.label(RichText::new(heading).small().weak());
                         ui.end_row();
+                        for (condition, script, help) in rows {
+                            let name = condition.attribute_name();
+                            let label = ui
+                                .label(RichText::new(name).monospace())
+                                .on_hover_text(help)
+                                .id;
+                            if let Some(text) = text_field(
+                                ui,
+                                label,
+                                ("cond", node, name),
+                                script.unwrap_or(""),
+                                "script",
+                            ) {
+                                edit(EditOp::SetCondition {
+                                    node,
+                                    condition,
+                                    script: (!text.is_empty()).then_some(text),
+                                });
+                            }
+                            ui.end_row();
+                            inline_problems(ui, &node_problems, name);
+                        }
                     }
                 });
         });
 
-    // Problems of the node.
-    let problems: Vec<_> = editor
-        .problems()
+    // The other problems of the node (the problems of a field show below
+    // the field).
+    let problems: Vec<&Problem> = node_problems
         .iter()
-        .filter(|p| p.file == file_id && p.node == Some(node))
+        .copied()
+        .filter(|p| {
+            p.attribute
+                .as_deref()
+                .is_none_or(|a| !has_field(&element, model.map(|(m, _)| m), a))
+        })
         .collect();
     if !problems.is_empty() {
         ui.add_space(8.0);
@@ -200,6 +234,44 @@ pub fn show(
             });
         }
     }
+}
+
+/// True if the inspector has a field for this attribute: the name, a
+/// condition, a port of the model or a port attribute of the element.
+fn has_field(element: &NodeView<'_>, model: Option<&NodeModel>, attribute: &str) -> bool {
+    match AttributeClass::of(attribute) {
+        AttributeClass::Name
+        | AttributeClass::PreCondition(_)
+        | AttributeClass::PostCondition(_) => true,
+        AttributeClass::Port => {
+            element.attribute(attribute).is_some()
+                || model.is_some_and(|m| m.port(attribute).is_some())
+        }
+        _ => false,
+    }
+}
+
+/// A grid row below a field with the problems of its attribute, if any.
+fn inline_problems(ui: &mut Ui, problems: &[&Problem], attribute: &str) {
+    let mut found = problems
+        .iter()
+        .filter(|p| p.attribute.as_deref() == Some(attribute))
+        .peekable();
+    if found.peek().is_none() {
+        return;
+    }
+    ui.label("");
+    ui.vertical(|ui| {
+        ui.set_max_width(ui.available_width().max(160.0));
+        for problem in found {
+            let color = severity_color(ui, problem.severity);
+            ui.horizontal_wrapped(|ui| {
+                severity_badge(ui, problem.severity, color);
+                ui.label(RichText::new(&problem.message).small().color(color));
+            });
+        }
+    });
+    ui.end_row();
 }
 
 /// A single-line text field. Returns the new text if the user changed it.
@@ -265,6 +337,7 @@ fn ports(
     element: &NodeView<'_>,
     model: Option<&NodeModel>,
     node: NodeId,
+    problems: &[&Problem],
     edit: &mut dyn FnMut(EditOp),
 ) {
     let model_ports = model.map(|m| m.ports.as_slice()).unwrap_or_default();
@@ -322,6 +395,7 @@ fn ports(
                 };
                 port_row(ui, label_id, node, &port.name, value, &hint, edit);
                 ui.end_row();
+                inline_problems(ui, problems, &port.name);
             }
             for (name, value) in &extra {
                 let label_id = ui
@@ -338,6 +412,7 @@ fn ports(
                     .inner;
                 port_row(ui, label_id, node, name, Some(value), "", edit);
                 ui.end_row();
+                inline_problems(ui, problems, name);
             }
         });
     add_port_row(ui, node, edit);
