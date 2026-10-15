@@ -112,6 +112,7 @@ fn light_visuals() -> Visuals {
     v.extreme_bg_color = rgb(0xFFFFFF);
     v.faint_bg_color = rgb(0xEEF0F3);
     v.code_bg_color = rgb(0xEEF0F3);
+    v.text_edit_bg_color = Some(rgb(0xEEF0F3));
     v.window_stroke = Stroke::new(1.0, rgb(0xD5D9E0));
     v.window_corner_radius = CornerRadius::same(8);
     v.menu_corner_radius = CornerRadius::same(6);
@@ -164,6 +165,7 @@ fn dark_visuals() -> Visuals {
     v.extreme_bg_color = rgb(0x15171A);
     v.faint_bg_color = rgb(0x24272C);
     v.code_bg_color = rgb(0x2A2D33);
+    v.text_edit_bg_color = Some(rgb(0x17191C));
     v.window_stroke = Stroke::new(1.0, rgb(0x383C44));
     v.window_corner_radius = CornerRadius::same(8);
     v.menu_corner_radius = CornerRadius::same(6);

@@ -1702,11 +1702,12 @@ fn paint_card(
         );
     }
 
-    // Breakpoint marker (left of the card, at the header).
+    // Breakpoint marker: on the category band, at the header, like a
+    // breakpoint in the gutter of a code editor.
     if let Some(marker) = deco.breakpoint {
-        let radius = (5.5 * zoom).clamp(3.0, 8.0);
+        let radius = (5.5 * zoom).clamp(3.5, 8.0);
         let center = pos2(
-            screen.min.x - radius - 3.0 * zoom,
+            screen.min.x + card::BAND * zoom * 0.5,
             screen.min.y + geometry.header_height * 0.5 * zoom,
         );
         paint::breakpoint_marker(shapes, center, radius, marker, palette);
