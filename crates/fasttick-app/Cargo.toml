@@ -31,6 +31,11 @@ rfd.workspace = true
 [dev-dependencies]
 egui_kittest = { workspace = true, features = ["eframe"] }
 tempfile.workspace = true
+# For the fake executor of the live UI tests (tests/support) and the
+# end-to-end test with the real BT.CPP executor.
+zmq.workspace = true
+rmpv.workspace = true
+fasttick-testkit.workspace = true
 
 [lints]
 workspace = true

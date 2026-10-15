@@ -327,6 +327,12 @@ impl FastTickApp {
         &self.jobs
     }
 
+    /// Shows a panel in the dock of the current mode (adds it if it is not
+    /// there, else makes its tab active).
+    pub fn show_panel(&mut self, tab: Tab) {
+        dock::show_panel(&mut self.docks[self.mode.index()], tab);
+    }
+
     /// The breakpoint file that waits for confirmation, if any.
     pub fn pending_breakpoints(&self) -> Option<&PendingBreakpoints> {
         self.pending_breakpoints.as_ref()

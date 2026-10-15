@@ -1215,10 +1215,13 @@ dependencies = [
  "fasttick-core",
  "fasttick-log",
  "fasttick-protocol",
+ "fasttick-testkit",
  "rfd",
+ "rmpv",
  "serde",
  "serde_json",
  "tempfile",
+ "zmq",
 ]
 
 [[package]]
