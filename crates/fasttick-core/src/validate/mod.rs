@@ -44,9 +44,9 @@
 //!
 //! The result is deterministic. The files come in project order. In a file,
 //! the problems of the file come first (root element, format, includes,
-//! models, main tree), then the problems of each tree in document order
-//! (the tree itself, then its nodes in depth-first order), then the problems
-//! of the unconnected nodes. [`validate_project`] gives the same problems as
+//! models, other elements in `<root>`, main tree), then the problems of
+//! each tree in document order (the tree itself, then its nodes in
+//! depth-first order), then the problems of the unconnected nodes. [`validate_project`] gives the same problems as
 //! [`validate_file`] for each file, in project order.
 //!
 //! # Example
