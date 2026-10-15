@@ -118,9 +118,12 @@ impl<'c, 'p> FileChecker<'c, 'p> {
         });
     }
 
+    fn is_models_file(&self) -> bool {
+        self.ctx.project().role(self.file) == Some(FileRole::Models)
+    }
+
     pub(super) fn run(mut self) {
-        let role = self.ctx.project().role(self.file);
-        let is_models_file = role == Some(FileRole::Models);
+        let is_models_file = self.is_models_file();
         if !self.check_root(is_models_file) {
             self.check_unconnected();
             return;
@@ -388,6 +391,12 @@ impl<'c, 'p> FileChecker<'c, 'p> {
     }
 
     fn check_model_names(&mut self, element: NodeId, model: &NodeModel) {
+        // A model with a built-in ID describes the built-in node (the output
+        // of writeTreeNodesModelXML has them). The built-in "SubTree"
+        // manifest has the port "_autoremap"; it is not the model of a tree.
+        if builtin::is_builtin(&model.id) {
+            return;
+        }
         let is_subtree = model.kind == NodeKind::SubTree;
         if !is_subtree {
             // BT.CPP does not read these models, but validateModelName
@@ -422,17 +431,24 @@ impl<'c, 'p> FileChecker<'c, 'p> {
         }
         for port in &model.ports {
             if is_subtree {
-                // parseSubtreeModelPorts calls validatePortName.
+                // parseSubtreeModelPorts calls validatePortName when BT.CPP
+                // loads the file. BT.CPP does not load a project model file
+                // unless the executor registers it.
                 if let Err(error) = validate_port_name(&port.name) {
+                    let (severity, when) = if self.is_models_file() {
+                        (Severity::Warning, "BT.CPP stops if it loads this file")
+                    } else {
+                        (Severity::Error, "BT.CPP stops when it loads the file")
+                    };
                     self.push(
-                        Severity::Error,
+                        severity,
                         ProblemCode::InvalidName,
                         None,
                         Some(element),
                         None,
                         format!(
                             "The port name \"{}\" of the SubTree model \"{}\" is not valid: \
-                             {error}. BT.CPP stops when it loads the file. Rename the port.",
+                             {error}. {when}. Rename the port.",
                             port.name, model.id
                         ),
                     );
@@ -1151,17 +1167,13 @@ impl<'c, 'p> FileChecker<'c, 'p> {
         let (rule, label) = match node_type {
             // VerifyXML: "<SubTree> ... should not have any child".
             NodeType::SubTree(_) => (ChildRule::Exactly(0), "SubTree"),
-            NodeType::Known(model) => {
-                let rule = if model.source == ModelSource::Builtin {
-                    builtin::child_rule(&model.id, Some(model.kind))
-                } else {
-                    Some(builtin::kind_child_rule(model.kind))
-                };
-                match rule {
-                    Some(rule) => (rule, model.id.as_str()),
-                    None => return,
-                }
-            }
+            // BT.CPP keys the special rules on the registered ID (a
+            // second registration of a built-in ID is not possible), so
+            // they apply also when a project model re-declares the type.
+            NodeType::Known(model) => match builtin::child_rule(&model.id, Some(model.kind)) {
+                Some(rule) => (rule, model.id.as_str()),
+                None => return,
+            },
             NodeType::Unknown => return,
         };
         let count = view.child_count();
@@ -1199,9 +1211,9 @@ impl<'c, 'p> FileChecker<'c, 'p> {
                 format!("\"{label}\" must have {rule}, but {has}. {fix}"),
             );
         }
+        // VerifyXML: `registered_name == "ReactiveSequence"`.
         if let NodeType::Known(model) = node_type
             && model.id == "ReactiveSequence"
-            && model.source == ModelSource::Builtin
         {
             self.check_reactive_children(view, tree);
         }
