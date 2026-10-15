@@ -84,7 +84,10 @@ pub fn shortcut_list(ui: &mut Ui, keymap: &KeyMap) {
         let text = crate::shortcuts::format_shortcut(ui.ctx(), &binding.shortcut);
         let entries = &mut groups.entry(rank).or_insert_with(|| (group, Vec::new())).1;
         // Several bindings of one command share a row.
-        match entries.iter_mut().find(|(command, _)| *command == binding.command) {
+        match entries
+            .iter_mut()
+            .find(|(command, _)| *command == binding.command)
+        {
             Some((_, existing)) => {
                 existing.push_str(", ");
                 existing.push_str(&text);
