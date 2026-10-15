@@ -1372,3 +1372,35 @@ fn the_command_search_runs_a_command() {
     assert!(harness.state().command_search().is_none());
     assert_eq!(harness.state().theme(), ThemeChoice::CatppuccinMocha);
 }
+
+#[test]
+fn the_tree_exports_as_an_svg_image() {
+    let mut harness = harness();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.svg");
+    let ctx = harness.ctx.clone();
+    let view = harness.state().workspace().active_view.unwrap();
+    assert!(harness.state_mut().export_svg_to(&ctx, view, path.clone()));
+    // The file is written on a worker thread.
+    for _ in 0..100 {
+        if path.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        harness.run();
+    }
+    let svg = std::fs::read_to_string(&path).expect("the SVG file");
+    assert!(svg.starts_with("<svg "), "{svg}");
+    assert!(svg.contains("<title>MainTree</title>"));
+    // The labels, types and ports of the cards.
+    for text in [
+        ">main_sequence<",
+        ">Sequence<",
+        ">navigate<",
+        ">goal: <",
+        ">{a_pose}<",
+    ] {
+        assert!(svg.contains(text), "{text} is not in the image");
+    }
+    fasttick_core::xml::Document::parse(&svg).expect("valid XML");
+}

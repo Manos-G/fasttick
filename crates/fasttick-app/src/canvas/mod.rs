@@ -7,6 +7,7 @@
 //! - [`viewport`]: pan and zoom maths.
 //! - [`hit`]: hit testing and culling.
 //! - [`paint`]: glyphs, badges, markers and edges.
+//! - [`svg`]: the export of a tree as an SVG image.
 //! - [`widget`]: the [`TreeCanvas`] widget and its [`CanvasState`].
 //!
 //! Typical use:
@@ -45,6 +46,7 @@ pub mod hit;
 pub mod layout;
 pub mod model;
 pub mod paint;
+pub mod svg;
 pub mod synthetic;
 pub mod viewport;
 pub mod widget;

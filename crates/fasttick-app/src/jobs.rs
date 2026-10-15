@@ -66,6 +66,8 @@ pub enum DialogPurpose {
     AddModelFile,
     /// Choose the path of the project file (`.ftproj`).
     SaveProject,
+    /// Choose a file for an SVG image of the shown tree.
+    ExportSvg,
 }
 
 /// The file extension of breakpoint files.
@@ -412,6 +414,12 @@ impl Jobs {
                     .add_filter("FastTick projects", &["ftproj"])
                     .save_file()
                     .map(|p| with_extension(p, "ftproj")),
+                DialogPurpose::ExportSvg => dialog
+                    .set_title("Export the tree as an SVG image")
+                    .set_file_name("tree.svg")
+                    .add_filter("SVG images", &["svg"])
+                    .save_file()
+                    .map(|p| with_extension(p, "svg")),
                 DialogPurpose::ExportTransitions(format) => {
                     let extension = format.extension();
                     dialog

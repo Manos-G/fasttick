@@ -435,6 +435,33 @@ impl CanvasState {
         }
     }
 
+    /// The tree as an SVG image (see [`super::svg`]), with the cards and
+    /// edges as the canvas draws them at zoom 1.
+    pub fn to_svg(&mut self, ctx: &egui::Context, palette: &CanvasPalette) -> String {
+        let ids = [
+            TextKind::Label,
+            TextKind::Type,
+            TextKind::PortName,
+            TextKind::PortValue,
+            TextKind::Note,
+        ]
+        .map(|kind| self.fonts.font(kind, kind.size()));
+        ctx.fonts_mut(|fonts| {
+            let mut measure = EguiMeasure { fonts, ids };
+            if self.needs_layout {
+                card::measure_missing(&mut self.tree, &mut measure);
+                self.relayout();
+            }
+            super::svg::tree_svg(
+                &self.tree,
+                &self.layout,
+                self.edge_style,
+                palette,
+                &mut measure,
+            )
+        })
+    }
+
     /// The layout of the last frame.
     pub fn layout(&self) -> &TreeLayout {
         &self.layout

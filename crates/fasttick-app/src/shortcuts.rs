@@ -107,6 +107,8 @@ pub enum Command {
     CloseTab,
     /// Restore the default panel arrangement.
     ResetLayout,
+    /// Write the shown tree as an SVG image.
+    ExportSvg,
     /// Find a command, a tree, a recent file or a theme by its name.
     SearchCommands,
     /// Find a tree of the active document by its name.
@@ -119,12 +121,13 @@ pub enum Command {
 
 impl Command {
     /// All commands, in help-dialog order.
-    pub const ALL: [Command; 52] = [
+    pub const ALL: [Command; 53] = [
         Command::NewProject,
         Command::OpenFile,
         Command::OpenLog,
         Command::Save,
         Command::SaveAs,
+        Command::ExportSvg,
         Command::Quit,
         Command::Undo,
         Command::Redo,
@@ -225,6 +228,7 @@ impl Command {
             Command::SplitView => "Split view",
             Command::CloseTab => "Close tab",
             Command::ResetLayout => "Reset panel layout",
+            Command::ExportSvg => "Export tree as SVG\u{2026}",
             Command::SearchCommands => "Search commands\u{2026}",
             Command::GoToTree => "Go to tree\u{2026}",
             Command::ShowShortcuts => "Keyboard shortcuts",
@@ -240,6 +244,7 @@ impl Command {
             | Command::OpenLog
             | Command::Save
             | Command::SaveAs
+            | Command::ExportSvg
             | Command::Quit => "File",
             Command::Undo
             | Command::Redo

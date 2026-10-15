@@ -31,6 +31,11 @@ pub const WHATS_NEW: &[(&str, &str)] = &[
          its name. Ctrl+P goes to a tree of the document.",
     ),
     (
+        "Export an image",
+        "File > Export tree as SVG writes the tree of the tab as an SVG image, \
+         with the statuses in live and replay mode.",
+    ),
+    (
         "Fold large trees",
         "Double-click a node to hide or show the nodes below it.",
     ),

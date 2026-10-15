@@ -116,6 +116,17 @@ Push Ctrl+P (**View** > **Go to tree…**) to see only the trees of the
 active document. For example, type `nav` and push Enter to show the tree
 `Navigate`.
 
+### 2.3 Export an image of a tree
+
+Select **File** > **Export tree as SVG…** and give a file name. FastTick
+writes the tree of the active tab as an SVG image, in the colours of the
+current theme. The image shows all nodes of the tree in the tab (also the
+nodes outside the view), as they show at 100 % zoom. In live and replay
+mode, the image also shows the statuses of the nodes.
+
+The image does not show the selection, the search results, the
+breakpoints or the problem markers.
+
 ## 3. Edit mode
 
 ### 3.1 Open, make and save files

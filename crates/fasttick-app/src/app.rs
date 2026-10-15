@@ -226,6 +226,7 @@ pub struct FastTickApp {
     notices: Vec<Notice>,
     actions: Vec<AppAction>,
     save_as_view: Option<ViewId>,
+    svg_view: Option<ViewId>,
     project_view: Option<ViewId>,
     /// The clipboard of the tree editor (XML text of copied nodes).
     clipboard: Option<String>,
@@ -282,6 +283,7 @@ impl FastTickApp {
             notices: Vec::new(),
             actions: Vec::new(),
             save_as_view: None,
+            svg_view: None,
             project_view: None,
             clipboard: None,
             window_title: String::new(),
@@ -658,6 +660,7 @@ impl FastTickApp {
             Command::Paste => self.active_edit_view().is_some() && self.clipboard.is_some(),
             Command::AddNode => self.active_edit_view().is_some() && self.add_popup.is_none(),
             Command::SearchCommands => self.command_search.is_none(),
+            Command::ExportSvg => active.is_some() && !self.jobs.dialog_open(),
             Command::GoToTree => active.is_some() && self.command_search.is_none(),
             Command::SaveAs => active.is_some_and(|v| {
                 self.workspace
@@ -761,6 +764,10 @@ impl FastTickApp {
                     .and_then(|v| self.workspace.doc_of_view(v))
                     .and_then(|d| d.kind.path().map(Path::to_owned));
                 self.jobs.pick_file(ctx, DialogPurpose::SaveAs, start);
+            }
+            Command::ExportSvg => {
+                self.svg_view = active;
+                self.pick_file(ctx, DialogPurpose::ExportSvg);
             }
             Command::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Command::SelectAll => {
@@ -965,6 +972,19 @@ impl FastTickApp {
                 false
             }
         }
+    }
+
+    /// Writes the tree of a view as an SVG image (on a worker thread), in
+    /// the colours of the current theme. Returns false if the view is gone.
+    pub fn export_svg_to(&mut self, ctx: &egui::Context, view: ViewId, path: PathBuf) -> bool {
+        let palette = theme::canvas_palette(self.theme(), ctx.theme());
+        let Some(view) = self.workspace.view_mut(view) else {
+            self.notify(ctx, NoticeLevel::Warning, "The tree is no longer open.");
+            return false;
+        };
+        let svg = view.canvas.to_svg(ctx, &palette);
+        self.jobs.save_text(ctx, path, svg);
+        true
     }
 
     /// Writes the breakpoints and forced results to a file (on a worker
@@ -1308,6 +1328,11 @@ impl FastTickApp {
                         DialogPurpose::LoadBreakpoints => self.jobs.load_breakpoints(ctx, path),
                         DialogPurpose::ExportTransitions(format) => {
                             self.export_transitions_to(ctx, path, format);
+                        }
+                        DialogPurpose::ExportSvg => {
+                            if let Some(view) = self.svg_view.take() {
+                                self.export_svg_to(ctx, view, path);
+                            }
                         }
                     }
                 }
@@ -2028,6 +2053,8 @@ impl FastTickApp {
             ui.separator();
             self.menu_item(ui, Command::Save);
             self.menu_item(ui, Command::SaveAs);
+            ui.separator();
+            self.menu_item(ui, Command::ExportSvg);
             ui.separator();
             self.menu_item(ui, Command::Quit);
         });
