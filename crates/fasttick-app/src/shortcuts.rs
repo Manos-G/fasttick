@@ -397,7 +397,8 @@ impl KeyMap {
     /// disabled command does not block the key for other widgets.
     ///
     /// Shortcuts without Ctrl or Alt (for example `F` for "Fit to view")
-    /// are ignored while a text field has the keyboard focus.
+    /// are ignored while a text field has the keyboard focus, and so are
+    /// the clipboard and select-all commands: the text field uses them.
     pub fn consume(&self, ctx: &egui::Context, enabled: impl Fn(Command) -> bool) -> Vec<Command> {
         let typing = ctx.text_edit_focused();
         // A binding with more modifiers goes first: egui matches Ctrl+S
@@ -411,7 +412,11 @@ impl KeyMap {
                     && !binding.shortcut.modifiers.ctrl
                     && !binding.shortcut.modifiers.alt
                     && !is_function_key(binding.shortcut.logical_key);
-                if (plain && typing) || !enabled(binding.command) {
+                let text_command = matches!(
+                    binding.command,
+                    Command::SelectAll | Command::Cut | Command::Copy | Command::Paste
+                );
+                if ((plain || text_command) && typing) || !enabled(binding.command) {
                     continue;
                 }
                 if input.consume_shortcut(&binding.shortcut) && !commands.contains(&binding.command)

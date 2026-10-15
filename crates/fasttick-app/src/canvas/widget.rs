@@ -249,6 +249,7 @@ pub struct CanvasState {
     moving: Vec<CanvasNodeId>,
     drop: Option<DropSpot>,
     drop_new: bool,
+    edge_since: Option<f64>,
     galleys: GalleyCache,
     visible: Vec<u32>,
     shapes: Vec<Shape>,
@@ -295,6 +296,7 @@ impl CanvasState {
             moving: Vec::new(),
             drop: None,
             drop_new: false,
+            edge_since: None,
             galleys: GalleyCache::default(),
             visible: Vec::new(),
             shapes: Vec::new(),
@@ -959,6 +961,7 @@ fn handle_input(
         state.drag = DragMode::None;
         state.moving.clear();
         state.drop = None;
+        state.edge_since = None;
         state.band_end = None;
     }
     match state.drag {
@@ -998,6 +1001,7 @@ fn handle_input(
         }
         state.moving.clear();
         state.drop = None;
+        state.edge_since = None;
         if let DragMode::Band { start, additive } = state.drag
             && let Some(end) = state.band_end.or(world_pointer)
         {
@@ -1201,6 +1205,7 @@ fn handle_palette_drop(
         }
         state.drop_new = false;
         state.drop = None;
+        state.edge_since = None;
         state.band_end = None;
         return;
     }
@@ -1215,6 +1220,7 @@ fn handle_palette_drop(
     } else if state.drop_new {
         state.drop_new = false;
         state.drop = None;
+        state.edge_since = None;
         state.band_end = None;
     }
 }
@@ -1224,8 +1230,11 @@ fn handle_palette_drop(
 const EDGE_PAN_ZONE: f32 = 28.0;
 /// The pan speed at the border, in points per second.
 const EDGE_PAN_SPEED: f32 = 600.0;
+/// The time that the pointer stays in the border zone before the view
+/// pans, in seconds. A drag that only crosses the border does not pan.
+const EDGE_PAN_DELAY: f64 = 0.3;
 
-/// Pans the view when the pointer is near a border during a drag.
+/// Pans the view when the pointer stays near a border during a drag.
 fn edge_pan(state: &mut CanvasState, ui: &Ui, rect: Rect, pointer: Pos2) {
     let inner = rect.shrink(EDGE_PAN_ZONE);
     let mut direction = Vec2::ZERO;
@@ -1239,7 +1248,14 @@ fn edge_pan(state: &mut CanvasState, ui: &Ui, rect: Rect, pointer: Pos2) {
     } else if pointer.y > inner.max.y {
         direction.y = -1.0;
     }
-    if direction != Vec2::ZERO {
+    if direction == Vec2::ZERO {
+        state.edge_since = None;
+        return;
+    }
+    let now = ui.input(|i| i.time);
+    let since = *state.edge_since.get_or_insert(now);
+    ui.ctx().request_repaint();
+    if now - since >= EDGE_PAN_DELAY {
         let dt = ui.input(|i| i.stable_dt).min(0.05);
         state.animation = None;
         state.viewport.pan_by(direction * EDGE_PAN_SPEED * dt);

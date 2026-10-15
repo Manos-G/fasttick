@@ -260,9 +260,14 @@ pub fn name_prompt(ctx: &egui::Context, prompt: &mut NamePrompt) -> (PromptChoic
         .open(&mut open)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Tree ID");
-                let edit =
-                    ui.add(egui::TextEdit::singleline(&mut prompt.value).desired_width(220.0));
+                let label = ui.label("Tree ID").id;
+                let edit = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut prompt.value)
+                            .hint_text("TreeId")
+                            .desired_width(220.0),
+                    )
+                    .labelled_by(label);
                 if !prompt.focused {
                     edit.request_focus();
                     prompt.focused = true;

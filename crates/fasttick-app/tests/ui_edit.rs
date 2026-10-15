@@ -7,8 +7,9 @@ use std::path::PathBuf;
 use egui::accesskit::Role;
 use egui::{Event, Modifiers, PointerButton, Pos2, pos2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use fasttick_app::app::{FastTickApp, Mode, StartOptions};
+use fasttick_app::dock::Tab;
 use fasttick_app::shortcuts::Command;
 use fasttick_app::theme::ThemeChoice;
 
@@ -254,6 +255,66 @@ fn context_menu_adds_a_child_node() {
     );
 }
 
+/// The text field with an accessible label.
+fn input<'a>(harness: &'a Harness<'static, FastTickApp>, label: &'a str) -> egui_kittest::Node<'a> {
+    harness.get_by_role_and_label(Role::TextInput, label)
+}
+
+/// The text field with this hint text.
+fn input_with_hint<'a>(
+    harness: &'a Harness<'static, FastTickApp>,
+    hint: &str,
+) -> egui_kittest::Node<'a> {
+    harness
+        .query_all_by_role(Role::TextInput)
+        .find(|n| n.accesskit_node().placeholder() == Some(hint))
+        .unwrap_or_else(|| panic!("a text field with the hint {hint:?}"))
+}
+
+/// How a test finds a text field.
+#[derive(Clone, Copy)]
+enum Field<'s> {
+    /// By its accessible label.
+    Label(&'s str),
+    /// By its hint text.
+    Hint(&'s str),
+}
+
+impl<'s> Field<'s> {
+    fn find<'a>(self, harness: &'a Harness<'static, FastTickApp>) -> egui_kittest::Node<'a>
+    where
+        's: 'a,
+    {
+        match self {
+            Field::Label(label) => input(harness, label),
+            Field::Hint(hint) => input_with_hint(harness, hint),
+        }
+    }
+}
+
+/// Focuses a text field, optionally selects all its text, and types.
+fn type_into(
+    harness: &mut Harness<'static, FastTickApp>,
+    field: Field<'_>,
+    text: &str,
+    replace: bool,
+) {
+    field.find(harness).focus();
+    harness.run();
+    if replace {
+        harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::A);
+        harness.run();
+    }
+    field.find(harness).type_text(text);
+    harness.run();
+}
+
+/// Selects a node by a click on its card.
+fn select(harness: &mut Harness<'static, FastTickApp>, label: &str) {
+    harness.get_by_role_and_label(Role::TreeItem, label).click();
+    harness.run();
+}
+
 #[test]
 fn create_subtree_from_selection_asks_for_a_name() {
     let mut harness = harness();
@@ -262,17 +323,12 @@ fn create_subtree_from_selection_asks_for_a_name() {
         .get_by_label("Create SubTree from selection…")
         .click();
     harness.run();
-    // A taken ID cannot be used.
-    harness.get_by_role(Role::TextInput).type_text("Navigate");
+    // The prompt has the focus. A taken ID cannot be used.
+    assert!(input(&harness, "Tree ID").is_focused());
+    input(&harness, "Tree ID").type_text("Navigate");
     harness.run();
     harness.get_by_label_contains("A tree with the ID Navigate exists.");
-    harness.get_by_role(Role::TextInput).focus();
-    for _ in 0.."Navigate".len() {
-        harness.key_press(egui::Key::Backspace);
-    }
-    harness.run();
-    harness.get_by_role(Role::TextInput).type_text("Checks");
-    harness.run();
+    type_into(&mut harness, Field::Label("Tree ID"), "Checks", true);
     harness
         .get_by_role_and_label(Role::Button, "Create")
         .click();
@@ -293,4 +349,135 @@ fn create_subtree_from_selection_asks_for_a_name() {
     let text = doc.editor.as_ref().unwrap().file().unwrap().to_xml_string();
     assert!(text.contains("<SubTree ID=\"Checks\""), "{text}");
     assert!(text.contains("<BehaviorTree ID=\"Checks\">"), "{text}");
+}
+
+#[test]
+fn inspector_edits_a_port_and_undo_joins_the_keystrokes() {
+    let mut harness = harness();
+    select(&mut harness, "say_text");
+    assert_eq!(
+        input(&harness, "message").value().as_deref(),
+        Some("Hello & welcome")
+    );
+    type_into(&mut harness, Field::Label("message"), "B", true);
+    for text in ["y", "e"] {
+        input(&harness, "message").type_text(text);
+        harness.run();
+    }
+    let text = xml(&harness);
+    assert!(text.contains("message=\"Bye\""), "{text}");
+    // The card shows the new value.
+    assert_eq!(input(&harness, "message").value().as_deref(), Some("Bye"));
+    // One undo step for the whole text.
+    command(&mut harness, Command::Undo);
+    let text = xml(&harness);
+    assert!(text.contains("message=\"Hello &amp; welcome\""), "{text}");
+}
+
+#[test]
+fn inspector_sets_the_name_and_a_condition() {
+    let mut harness = harness();
+    select(&mut harness, "say_default");
+    type_into(&mut harness, Field::Label("Name"), "greet", true);
+    assert!(xml(&harness).contains("name=\"greet\""));
+    // The card shows the new name.
+    harness.get_by_role_and_label(Role::TreeItem, "greet");
+
+    harness
+        .get_by_label_contains("Pre- and post-conditions")
+        .click();
+    harness.run();
+    type_into(&mut harness, Field::Label("_skipIf"), "x == 1", false);
+    let text = xml(&harness);
+    assert!(
+        text.contains("<SayMessage name=\"greet\" _skipIf=\"x == 1\"/>"),
+        "{text}"
+    );
+    // An empty script removes the attribute.
+    type_into(&mut harness, Field::Label("_skipIf"), "", true);
+    harness.key_press(egui::Key::Backspace);
+    harness.run();
+    assert!(
+        xml(&harness).contains("<SayMessage name=\"greet\"/>"),
+        "{}",
+        xml(&harness)
+    );
+}
+
+#[test]
+fn palette_drag_adds_a_node_and_double_click_adds_to_the_selection() {
+    let mut harness = harness();
+    harness.state_mut().show_panel(Tab::Palette);
+    harness.run();
+    type_into(
+        &mut harness,
+        Field::Hint("Search node types"),
+        "AlwaysSucc",
+        false,
+    );
+    // The search hides other types.
+    assert!(harness.query_by_label("Sequence").is_none());
+
+    let from = harness.get_by_label("AlwaysSuccess").rect().center();
+    let to = item_rect(&harness, "fallback").center();
+    drag(&mut harness, from, to);
+    assert_eq!(
+        children(&harness, "fallback"),
+        ["check_blocked", "check_flag", "AlwaysSuccess"]
+    );
+
+    select(&mut harness, "reactive");
+    // The palette entry (the canvas has a node with the same label now).
+    let item = harness
+        .query_all_by_label("AlwaysSuccess")
+        .find(|n| n.accesskit_node().role() != Role::TreeItem)
+        .expect("the palette entry")
+        .rect()
+        .center();
+    harness.event(Event::PointerMoved(item));
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            harness.event(Event::PointerButton {
+                pos: item,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+        }
+    }
+    harness.run();
+    assert_eq!(
+        children(&harness, "reactive"),
+        ["CheckFlag", "wait_three", "AlwaysSuccess"]
+    );
+}
+
+#[test]
+fn model_dialog_adds_a_model_to_the_file() {
+    let mut harness = harness();
+    harness.state_mut().show_panel(Tab::Palette);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "New…").click();
+    harness.run();
+    type_into(&mut harness, Field::Label("ID"), "MoveArm", false);
+    harness
+        .get_by_role_and_label(Role::Button, "Add port")
+        .click();
+    harness.run();
+    // The new port has no name yet, so OK is disabled.
+    assert!(
+        harness
+            .get_by_role_and_label(Role::Button, "OK")
+            .accesskit_node()
+            .is_disabled()
+    );
+    type_into(&mut harness, Field::Hint("port name"), "speed", false);
+    harness.get_by_role_and_label(Role::Button, "OK").click();
+    harness.run();
+
+    let text = xml(&harness);
+    assert!(text.contains("<Action ID=\"MoveArm\""), "{text}");
+    assert!(text.contains("<input_port name=\"speed\""), "{text}");
+    // The palette lists the new type.
+    harness.get_by_label("MoveArm");
 }

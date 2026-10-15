@@ -243,8 +243,14 @@ fn selection_and_keyboard_navigation() {
             "main_sequence"
         );
     }
-    // The inspector shows the selected node.
-    harness.get_by_label("Read-only. Editing comes with the tree editor.");
+    // The inspector edits the selected node.
+    assert_eq!(
+        harness
+            .get_by_role_and_label(Role::TextInput, "Name")
+            .value()
+            .as_deref(),
+        Some("main_sequence")
+    );
 
     // Arrow down: the first child.
     harness.key_press(egui::Key::ArrowDown);

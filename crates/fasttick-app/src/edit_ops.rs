@@ -109,6 +109,13 @@ pub enum EditOp {
         /// The script, or `None` to remove it.
         script: Option<String>,
     },
+    /// Sets (`Some`) or removes (`None`) `_autoremap` of a SubTree node.
+    SetAutoremap {
+        /// The node.
+        node: NodeId,
+        /// The value.
+        value: Option<bool>,
+    },
     /// Changes the type of a node and keeps its attributes.
     ChangeType {
         /// The node.
@@ -479,6 +486,17 @@ pub fn run(
             let key = CoalesceKey::attribute(file, node, condition.attribute_name());
             editor.edit_coalesced(key, |ed| {
                 ed.set_condition(file, node, condition, script.as_deref())
+            })?;
+        }
+        EditOp::SetAutoremap { node, value } => {
+            editor.edit(|ed| match value {
+                Some(value) => ed.set_attribute(
+                    file,
+                    node,
+                    "_autoremap",
+                    if value { "true" } else { "false" },
+                ),
+                None => ed.remove_attribute(file, node, "_autoremap"),
             })?;
         }
         EditOp::ChangeType { node, type_id } => {

@@ -31,6 +31,7 @@ pub mod editor;
 pub mod fonts;
 pub mod jobs;
 pub mod live;
+pub mod model_dialog;
 pub mod panels;
 pub mod replay;
 pub mod settings;

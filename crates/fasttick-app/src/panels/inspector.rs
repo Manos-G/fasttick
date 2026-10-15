@@ -1,10 +1,12 @@
-//! The inspector. For now it shows the selected node read-only; editing
-//! comes with the tree editor.
+//! The inspector. In an edit view it edits the selected node (see
+//! [`super::node_editor`]); in live and replay views it shows the node
+//! read-only.
 
 use egui::{RichText, Ui};
 use fasttick_core::status::NodeStatus;
 
-use super::PanelContext;
+use super::{PanelContext, node_editor};
+use crate::canvas::NodeSource;
 
 /// Draws the inspector.
 pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
@@ -34,6 +36,30 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     let Some(node) = tree.get(id) else {
         return;
     };
+    let view_id = view.id;
+    if let Some(editor) = cx.workspace.doc(view.doc).and_then(|d| d.editor.as_deref()) {
+        let source = node.source;
+        let inline = node.inline;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| match source {
+                NodeSource::Xml(file, xml) if !inline && file == editor.file_id() => {
+                    node_editor::show(ui, view_id, editor, xml, count, cx.actions);
+                }
+                _ => {
+                    ui.label(RichText::new(&node.label).strong().size(15.0));
+                    ui.label(RichText::new(&node.type_id).weak());
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(
+                            "This node is part of another tree. Open that tree to edit it.",
+                        )
+                        .weak(),
+                    );
+                }
+            });
+        return;
+    }
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -93,7 +119,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
             }
             ui.add_space(10.0);
             ui.label(
-                RichText::new("Read-only. Editing comes with the tree editor.")
+                RichText::new("Read-only. Open the tree file in edit mode to change it.")
                     .small()
                     .weak(),
             );

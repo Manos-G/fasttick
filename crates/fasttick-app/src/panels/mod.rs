@@ -7,6 +7,8 @@ pub mod blackboard;
 pub mod breakpoints;
 pub mod inspector;
 pub mod live_bar;
+pub mod node_editor;
+pub mod palette;
 pub mod start;
 pub mod statistics;
 pub mod timeline;
@@ -54,6 +56,7 @@ pub fn show_panel(tab: Tab, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         Tab::Start => start::show(ui, cx),
         Tab::Trees => tree_list::show(ui, cx),
         Tab::Inspector => inspector::show(ui, cx),
+        Tab::Palette => palette::show(ui, cx),
         Tab::Blackboard => blackboard::show(ui, cx),
         Tab::Breakpoints => breakpoints::show(ui, cx),
         Tab::Timeline => timeline::show(ui, cx),
@@ -67,11 +70,11 @@ pub fn show_panel(tab: Tab, ui: &mut Ui, cx: &mut PanelContext<'_>) {
 /// The placeholder text of a panel that is not built yet.
 pub fn placeholder_text(tab: Tab) -> &'static str {
     match tab {
-        Tab::Palette => "The node palette comes with the tree editor.",
         Tab::Problems => "The problems list comes with validation.",
         Tab::Xml => "The XML view comes with the tree editor.",
         Tab::Search => "Search comes in a later version.",
         Tab::Start
+        | Tab::Palette
         | Tab::Document(_)
         | Tab::Trees
         | Tab::Inspector
@@ -128,6 +131,20 @@ pub(crate) fn status_cell(
     });
 }
 
+/// The active view and its editor document, if the active view is an edit
+/// view of `mode`.
+pub(crate) fn active_edit(
+    workspace: &Workspace,
+    mode: Mode,
+) -> Option<(crate::documents::ViewId, &crate::editor::EditorDoc)> {
+    let view = workspace.active()?;
+    let doc = workspace.doc(view.doc)?;
+    if doc.mode() != mode {
+        return None;
+    }
+    Some((view.id, doc.editor.as_deref()?))
+}
+
 /// A short weak text at the top of an empty panel.
 pub(crate) fn empty(ui: &mut Ui, text: &str) {
     ui.add_space(8.0);
@@ -142,6 +159,7 @@ mod tests {
     fn every_unbuilt_panel_has_a_placeholder() {
         let built = [
             Tab::Trees,
+            Tab::Palette,
             Tab::Inspector,
             Tab::Blackboard,
             Tab::Breakpoints,

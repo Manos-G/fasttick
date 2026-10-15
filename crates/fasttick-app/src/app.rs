@@ -202,6 +202,7 @@ pub struct FastTickApp {
     show_shortcuts: bool,
     connect_form: Option<ConnectForm>,
     name_prompt: Option<NamePrompt>,
+    model_form: Option<crate::model_dialog::ModelForm>,
     notices: Vec<Notice>,
     actions: Vec<AppAction>,
     save_as_view: Option<ViewId>,
@@ -252,6 +253,7 @@ impl FastTickApp {
             show_shortcuts: false,
             connect_form: None,
             name_prompt: None,
+            model_form: None,
             notices: Vec::new(),
             actions: Vec::new(),
             save_as_view: None,
@@ -1238,6 +1240,31 @@ impl FastTickApp {
                     self.workspace.reveal_xml(view, file, node, true);
                     self.workspace.active_view = Some(view);
                 }
+                AppAction::EditModel { view, model } => {
+                    self.model_form = self
+                        .workspace
+                        .doc_of_view(view)
+                        .and_then(|d| d.editor.as_deref())
+                        .map(|editor| {
+                            let file = editor.file_id();
+                            let registry = editor.project().registry();
+                            let taken: Vec<String> = registry
+                                .all_models(file)
+                                .values()
+                                .flatten()
+                                .map(|m| m.id.clone())
+                                .collect();
+                            let existing = model
+                                .as_deref()
+                                .and_then(|id| editor.project().lookup_model(file, id));
+                            match existing {
+                                Some((m, _)) => {
+                                    crate::model_dialog::ModelForm::edit_model(view, m, taken)
+                                }
+                                None => crate::model_dialog::ModelForm::new_model(view, taken),
+                            }
+                        });
+                }
                 AppAction::PromptName { view, purpose } => {
                     let taken = self
                         .workspace
@@ -1869,6 +1896,18 @@ impl FastTickApp {
         }
         self.breakpoint_dialog(ctx);
         self.sqlite_dialog(ctx);
+        if let Some(form) = &mut self.model_form {
+            match crate::model_dialog::show(ctx, form) {
+                PromptChoice::Open => {}
+                PromptChoice::Cancel => self.model_form = None,
+                PromptChoice::Accept => {
+                    if let Some(form) = self.model_form.take() {
+                        let op = form.op();
+                        self.run_edit(ctx, form.view, op);
+                    }
+                }
+            }
+        }
         if let Some(prompt) = &mut self.name_prompt {
             match dialogs::name_prompt(ctx, prompt) {
                 (PromptChoice::Open, _) => {}

@@ -45,6 +45,14 @@ pub enum AppAction {
     /// Change the edit document of a view (see [`crate::edit_ops`]).
     Edit(ViewId, EditOp),
     /// Select an element of the edit document of a view and show it.
+    /// Opens the model dialog for a new model (`None`) or for the model with
+    /// this ID.
+    EditModel {
+        /// The edit view.
+        view: ViewId,
+        /// The model ID.
+        model: Option<String>,
+    },
     /// Asks for a name, then runs the edit that needs it.
     PromptName {
         /// The edit view.
