@@ -12,6 +12,8 @@
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
+use std::net::{Ipv4Addr, TcpListener};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use fasttick_core::runtime::{RuntimeTree, Uid};
@@ -19,7 +21,7 @@ use fasttick_core::status::NodeStatus;
 use fasttick_protocol::client::{Client, ClientConfig};
 use fasttick_protocol::messages::{Hook, HookPosition, StatusSnapshot};
 use fasttick_protocol::wire::TreeUuid;
-use fasttick_testkit::{Executor, ExecutorOptions, Harness, PREFIX_ENV, free_port_pair};
+use fasttick_testkit::{Executor, ExecutorOptions, Harness, PREFIX_ENV};
 use serde_json::Value;
 
 /// Gets the test harness, or gives `None` when the test must skip.
@@ -65,10 +67,63 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// The blackboard name of the root tree of `probe.xml`.
 pub const PROBE_BLACKBOARD: &str = "Probe";
 
+/// Gives a port `p` such that `p` and `p + 1` are free, for an executor.
+///
+/// The ports are even ports from 10000 to 19998, spread by process ID, and
+/// never the same twice in one process. The range is below the ephemeral
+/// ports of Linux (32768 and up) on purpose. The kernel gives ephemeral
+/// ports to outgoing connections, and the tests open many of them (each
+/// client has two sockets, and ZeroMQ opens a new connection on each
+/// reconnect attempt). With a port from that range, an outgoing connection
+/// can take the port between the check and the bind of the executor
+/// ("Address already in use"), or a client that reconnects to a stopped
+/// executor can connect to itself and hold the port. The fake publisher
+/// of the other tests uses 20000 to 31998.
+pub fn port_pair() -> u16 {
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let process = std::process::id();
+    for _ in 0..500 {
+        let candidate = NEXT.fetch_add(1, Ordering::Relaxed);
+        let slot = process.wrapping_mul(7919).wrapping_add(candidate) % 5000;
+        let port = 10000 + (slot * 2) as u16;
+        if is_free(port) && is_free(port + 1) {
+            return port;
+        }
+    }
+    panic!("no free port pair from 10000 to 19999");
+}
+
+/// True if a listener can bind the port on 127.0.0.1 and on all
+/// interfaces (the publisher binds `tcp://*:<port>`).
+fn is_free(port: u16) -> bool {
+    [Ipv4Addr::LOCALHOST, Ipv4Addr::UNSPECIFIED]
+        .into_iter()
+        .all(|address| TcpListener::bind((address, port)).is_ok())
+}
+
+/// Starts an executor. Another process can still take a free port before
+/// the executor binds it. In that case the function tries again with a new
+/// pair of ports. Use [`Executor::port`] for the port that it got.
+pub fn spawn_executor(options: ExecutorOptions) -> Executor {
+    let mut options = options;
+    let mut last_error = None;
+    for _ in 0..5 {
+        match Executor::spawn(options.clone()) {
+            Ok(executor) => return executor,
+            Err(err) if err.to_string().contains("Address already in use") => {
+                last_error = Some(err);
+                options.port = port_pair();
+            }
+            Err(err) => panic!("the executor does not start: {err}"),
+        }
+    }
+    panic!("the executor does not start: {last_error:?}");
+}
+
 /// Executor options for a test tree. The port is a new free pair.
 pub fn options(harness: &Harness, tree_file: &str) -> ExecutorOptions {
     let mut options = ExecutorOptions::new(harness.tree(tree_file));
-    options.port = free_port_pair();
+    options.port = port_pair();
     options.heartbeat_ms = Some(NO_HEARTBEAT_MS);
     options.tick_ms = 20;
     options
@@ -117,8 +172,8 @@ pub struct Live {
 impl Live {
     /// Starts the executor and gets the tree.
     pub fn start(options: ExecutorOptions) -> Live {
-        let port = options.port;
-        let executor = Executor::spawn(options).expect("the executor starts");
+        let executor = spawn_executor(options);
+        let port = executor.port();
         let mut client = client(port);
         let (uuid, xml) = client.full_tree().expect("FULLTREE");
         let tree = RuntimeTree::parse(&xml).expect("the FULLTREE XML is a runtime tree");

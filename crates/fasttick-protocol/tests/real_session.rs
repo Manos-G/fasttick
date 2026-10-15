@@ -475,8 +475,11 @@ fn executor_restart_is_detected_and_the_hooks_come_back() {
         return;
     };
     let options_a = options(harness, "probe.xml");
-    let port = options_a.port;
     let mut live = Live::start(options_a.clone());
+    // The port of the first executor (`Live::start` can change it).
+    let port = live.port;
+    let mut options_b = options_a;
+    options_b.port = port;
     let probe = live.uid("probe");
     let count_done = live.uid("count_done");
     let mut config = fast_config();
@@ -505,7 +508,7 @@ fn executor_restart_is_detected_and_the_hooks_come_back() {
         )
         .then_some(())
     });
-    let executor_b = Executor::spawn(options_a).expect("the second executor starts");
+    let executor_b = Executor::spawn(options_b).expect("the second executor starts");
     let mut client_b = client(port);
     let (uuid_b, xml_b) = client_b.full_tree().unwrap();
     assert_ne!(uuid_b, old_uuid);
