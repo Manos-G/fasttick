@@ -1078,6 +1078,40 @@ impl FastTickApp {
         }
     }
 
+    /// Opens the files that the user drops on the window (trees, projects
+    /// and logs, by extension), and shows a hint while files are over it.
+    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+        let (hovered, dropped) = ctx.input(|i| {
+            (
+                !i.raw.hovered_files.is_empty(),
+                i.raw
+                    .dropped_files
+                    .iter()
+                    .map(|f| f.path().to_path_buf())
+                    .filter(|p| p.is_absolute())
+                    .collect::<Vec<_>>(),
+            )
+        });
+        for path in dropped {
+            self.start_open(ctx, path);
+        }
+        if hovered {
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                Id::new("fasttick_file_drop"),
+            ));
+            let rect = ctx.content_rect();
+            painter.rect_filled(rect, 0.0, egui::Color32::from_black_alpha(140));
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Drop the files to open them",
+                egui::FontId::proportional(22.0),
+                egui::Color32::WHITE,
+            );
+        }
+    }
+
     /// The question about unsaved changes before a close.
     fn unsaved_dialog(&mut self, ctx: &egui::Context) {
         let Some(pending) = self.pending_close else {
@@ -1749,6 +1783,8 @@ impl FastTickApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.pending_close = Some(PendingClose::Window);
         }
+
+        self.handle_dropped_files(&ctx);
 
         let commands = self.keymap.consume(&ctx, |c| self.is_enabled(c));
         for command in commands {

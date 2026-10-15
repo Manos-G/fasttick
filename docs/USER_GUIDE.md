@@ -110,6 +110,9 @@ FastTick keeps the theme in its settings.
   a name.
 - **File** > **Save as…** (Ctrl+Shift+S) saves the main file with a new name.
 
+You can also drag files from the file manager onto the FastTick window:
+tree files and projects open in edit mode, logs in replay mode.
+
 A tab with changes that are not saved has a dot (•) after its name. When
 you close such a tab, or close FastTick, FastTick asks if it must save the
 changes: **Save** (or **Save all**), **Do not save** or **Cancel**.
