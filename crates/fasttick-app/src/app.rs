@@ -793,15 +793,17 @@ impl FastTickApp {
                 .max_rect(switcher)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
             |ui| {
-                let mut mode = self.mode;
-                if widgets::segmented(
-                    ui,
-                    &mut mode,
-                    &[(Mode::Edit, "Edit"), (Mode::Live, "Live"), (Mode::Replay, "Replay")],
-                    palette.accent,
-                ) {
-                    self.set_mode(mode);
-                }
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    let mut mode = self.mode;
+                    if widgets::segmented(
+                        ui,
+                        &mut mode,
+                        &[(Mode::Edit, "Edit"), (Mode::Live, "Live"), (Mode::Replay, "Replay")],
+                        palette.accent,
+                    ) {
+                        self.set_mode(mode);
+                    }
+                });
             },
         );
         let right = egui::Rect::from_min_max(egui::pos2(switcher.max.x + 8.0, full.min.y), full.max);

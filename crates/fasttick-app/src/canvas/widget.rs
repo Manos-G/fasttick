@@ -104,6 +104,9 @@ pub struct CanvasOutput {
 /// A view change that waits for the canvas size.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PendingView {
+    /// The first view of a tree: fit if the cards stay readable, else
+    /// show the root at a readable zoom.
+    Initial,
     Fit { animate: bool },
     Focus { id: CanvasNodeId, animate: bool },
     Reveal { id: CanvasNodeId },
@@ -224,7 +227,7 @@ impl CanvasState {
             edge_style: EdgeStyle::default(),
             viewport: Viewport::default(),
             needs_layout: true,
-            pending: Some(PendingView::Fit { animate: false }),
+            pending: Some(PendingView::Initial),
             animation: None,
             primary: None,
             hovered: None,
@@ -290,7 +293,7 @@ impl CanvasState {
         if direction != self.direction {
             self.direction = direction;
             self.needs_layout = true;
-            self.pending = Some(PendingView::Fit { animate: false });
+            self.pending = Some(PendingView::Initial);
         }
     }
 
@@ -440,6 +443,11 @@ impl CanvasState {
             return;
         };
         let target = match pending {
+            PendingView::Initial => {
+                self.viewport = initial_view(&self.layout, self.direction, size);
+                self.animation = None;
+                return;
+            }
             PendingView::Fit { animate } => {
                 let target = Viewport::fit(
                     self.layout.bounds,
@@ -519,6 +527,35 @@ impl CanvasState {
             .rect(id)
             .map(|rect| self.viewport.rect_to_screen(origin, rect))
     }
+}
+
+/// The zoom of the first view of a large tree.
+const READABLE_ZOOM: f32 = 0.85;
+
+/// The first view of a tree: the whole tree if it fits at a zoom where the
+/// labels are readable; else the root at [`READABLE_ZOOM`], at the top
+/// (top-down) or at the left (left-right) of the canvas.
+fn initial_view(layout: &TreeLayout, direction: LayoutDirection, size: Vec2) -> Viewport {
+    let fit = Viewport::fit(layout.bounds, size, viewport::FIT_MARGIN, viewport::FIT_MAX_ZOOM);
+    if Detail::for_zoom(fit.zoom) == Detail::Full {
+        return fit;
+    }
+    let Some(root) = layout.rects.first() else {
+        return fit;
+    };
+    let zoom = READABLE_ZOOM;
+    let margin = viewport::FIT_MARGIN;
+    let pan = match direction {
+        LayoutDirection::TopDown => vec2(
+            size.x * 0.5 - root.center().x * zoom,
+            margin - root.min.y * zoom,
+        ),
+        LayoutDirection::LeftRight => vec2(
+            margin - root.min.x * zoom,
+            size.y * 0.5 - root.center().y * zoom,
+        ),
+    };
+    Viewport::new(pan, zoom)
 }
 
 /// Measures text with the egui fonts (sum of glyph advances).
