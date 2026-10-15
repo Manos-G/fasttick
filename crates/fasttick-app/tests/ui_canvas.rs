@@ -428,3 +428,27 @@ fn large_tree_culls_and_the_minimap_moves_the_view() {
     );
     assert_eq!(after.zoom, before.zoom);
 }
+
+#[test]
+fn context_menu_acts_on_the_right_clicked_node() {
+    let mut harness = harness();
+    // Select another node first: the menu must still act on "recover".
+    click_at(&harness, item_center(&harness, "battery"), Modifiers::NONE);
+    harness.run();
+    let center = item_center(&harness, "recover");
+    harness.event(Event::PointerMoved(center));
+    for pressed in [true, false] {
+        harness.event(Event::PointerButton {
+            pos: center,
+            button: PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    harness.run();
+    assert_eq!(selected_labels(&harness), ["recover"]);
+    harness.get_by_label("Collapse SubTree").click();
+    harness.run();
+    assert_eq!(harness.state().canvas.tree().len(), 6);
+    assert!(harness.query_by_label("Collapse SubTree").is_none());
+}

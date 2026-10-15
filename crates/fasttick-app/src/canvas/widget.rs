@@ -208,6 +208,7 @@ pub struct CanvasState {
     animation: Option<ViewAnimation>,
     primary: Option<CanvasNodeId>,
     hovered: Option<CanvasNodeId>,
+    context_target: Option<CanvasNodeId>,
     hover_start: f64,
     drag: DragMode,
     band_end: Option<Pos2>,
@@ -249,6 +250,7 @@ impl CanvasState {
             animation: None,
             primary: None,
             hovered: None,
+            context_target: None,
             hover_start: 0.0,
             drag: DragMode::None,
             band_end: None,
@@ -296,6 +298,7 @@ impl CanvasState {
         }
         self.primary = primary_source.and_then(|source| tree.find_source(source));
         self.hovered = None;
+        self.context_target = None;
         self.stats.total_nodes = tree.len();
         self.tree = tree;
         self.needs_layout = true;
@@ -755,9 +758,9 @@ impl<'a> TreeCanvas<'a> {
         describe_for_accesskit(state, ui, rect, id);
         show_tooltip(state, ui, &response, id, now);
 
-        // Context menu.
-        let hovered = state.hovered;
-        response.context_menu(|ui| context_menu(state, ui, hovered, &mut events));
+        // Context menu, for the node under the pointer at the right-click.
+        let target = state.context_target;
+        response.context_menu(|ui| context_menu(state, ui, target, &mut events));
 
         CanvasOutput { response, events }
     }
@@ -893,6 +896,7 @@ fn handle_input(
         // Right-click selects the node under the pointer (if it is not
         // selected), so that the context menu acts on it.
         let target = world_pointer.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
+        state.context_target = target;
         if let Some(id) = target
             && !state.tree.is_selected(id)
             && click_select(state, Some(id), SelectMode::Replace)
@@ -1039,10 +1043,9 @@ fn node_item_id(canvas: Id, node: CanvasNodeId) -> Id {
 fn context_menu(
     state: &mut CanvasState,
     ui: &mut Ui,
-    hovered: Option<CanvasNodeId>,
+    target: Option<CanvasNodeId>,
     events: &mut Vec<CanvasEvent>,
 ) {
-    let target = state.primary.or(hovered);
     if let Some(node) = target.and_then(|id| state.tree.get(id)) {
         let source = node.source;
         let label = node.label.clone();

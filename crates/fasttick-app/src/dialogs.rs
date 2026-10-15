@@ -82,39 +82,48 @@ pub fn shortcut_list(ui: &mut Ui, keymap: &KeyMap) {
             .position(|g| *g == group)
             .unwrap_or(order.len());
         let text = crate::shortcuts::format_shortcut(ui.ctx(), &binding.shortcut);
-        groups
-            .entry(rank)
-            .or_insert_with(|| (group, Vec::new()))
-            .1
-            .push((binding.command, text));
+        let entries = &mut groups.entry(rank).or_insert_with(|| (group, Vec::new())).1;
+        // Several bindings of one command share a row.
+        match entries.iter_mut().find(|(command, _)| *command == binding.command) {
+            Some((_, existing)) => {
+                existing.push_str(", ");
+                existing.push_str(&text);
+            }
+            None => entries.push((binding.command, text)),
+        }
     }
-    for (_, (group, entries)) in groups {
-        ui.label(RichText::new(group).strong());
-        egui::Grid::new(("shortcuts", group))
-            .num_columns(2)
-            .spacing([24.0, 3.0])
-            .striped(true)
-            .show(ui, |ui| {
+    // One grid for all groups, so that the columns line up.
+    egui::Grid::new("shortcuts")
+        .num_columns(2)
+        .spacing([32.0, 4.0])
+        .min_col_width(200.0)
+        .show(ui, |ui| {
+            for (index, (_, (group, entries))) in groups.into_iter().enumerate() {
+                group_header(ui, group, index > 0);
                 for (command, text) in entries {
                     ui.label(command.label());
                     ui.label(RichText::new(text).monospace());
                     ui.end_row();
                 }
-            });
-        ui.add_space(8.0);
-    }
-    ui.label(RichText::new("Canvas").strong());
-    egui::Grid::new("shortcuts_canvas")
-        .num_columns(2)
-        .spacing([24.0, 3.0])
-        .striped(true)
-        .show(ui, |ui| {
+            }
+            group_header(ui, "Canvas", true);
             for (keys, action) in CANVAS_HELP {
                 ui.label(*action);
                 ui.label(RichText::new(*keys).monospace());
                 ui.end_row();
             }
         });
+}
+
+/// A group title row in the shortcut grid, after an empty row (a grid
+/// does not accept `add_space`).
+fn group_header(ui: &mut Ui, group: &str, gap: bool) {
+    if gap {
+        ui.label("");
+        ui.end_row();
+    }
+    ui.label(RichText::new(group).strong());
+    ui.end_row();
 }
 
 /// The state of the connect dialog.
