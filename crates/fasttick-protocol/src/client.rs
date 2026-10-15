@@ -145,9 +145,19 @@ impl ClientError {
 
 /// The events that the client reads from the monitor of the notification
 /// socket (`zmq_socket_monitor`).
-const MONITOR_EVENTS: i32 = zmq::SocketEvent::HANDSHAKE_SUCCEEDED as i32
-    | zmq::SocketEvent::DISCONNECTED as i32
-    | zmq::SocketEvent::CLOSED as i32;
+///
+/// The set is small on purpose. libzmq sends each monitor event from its
+/// I/O thread with a blocking send (`socket_base_t::monitor_event`). When
+/// about 2000 events wait in the monitor queue, the I/O thread stops, and
+/// no socket of the context works any more: all requests time out. The
+/// client therefore reads the queue on each call (see
+/// [`NotificationSocket::update`]). It does not ask for `CLOSED`, because
+/// libzmq gives one `CLOSED` event for each failed connect attempt, that
+/// is every 100 ms while the executor is not there
+/// (`stream_connecter_base_t::close`). A connection that ends gives
+/// `DISCONNECTED`.
+const MONITOR_EVENTS: i32 =
+    zmq::SocketEvent::HANDSHAKE_SUCCEEDED as i32 | zmq::SocketEvent::DISCONNECTED as i32;
 
 /// The SUB socket for notifications, with a socket monitor that tells if it
 /// is connected.
@@ -165,6 +175,10 @@ impl NotificationSocket {
     /// Each event has two parts. Part 1 has the event number (`u16`) and a
     /// value (`u32`), in the byte order of the host. Part 2 is the
     /// endpoint (see `zmq_socket_monitor`).
+    ///
+    /// The client calls this function on each request, on each poll of
+    /// the notification socket and before it closes the socket, so that
+    /// the monitor queue cannot fill up (see [`MONITOR_EVENTS`]).
     fn update(&mut self) {
         // A SUB socket sends its subscription again after a reconnect only
         // when the thread that uses it handles its pending commands
@@ -186,12 +200,19 @@ impl NotificationSocket {
             };
             if event == zmq::SocketEvent::HANDSHAKE_SUCCEEDED.to_raw() {
                 self.connected = true;
-            } else if event == zmq::SocketEvent::DISCONNECTED.to_raw()
-                || event == zmq::SocketEvent::CLOSED.to_raw()
-            {
+            } else if event == zmq::SocketEvent::DISCONNECTED.to_raw() {
                 self.connected = false;
             }
         }
+    }
+}
+
+impl Drop for NotificationSocket {
+    fn drop(&mut self) {
+        // A full monitor queue blocks the I/O thread of libzmq in a send.
+        // That send waits for a reader, and after the monitor socket closes
+        // there is no reader any more. Read the queue before the close.
+        self.update();
     }
 }
 
@@ -290,12 +311,16 @@ impl Client {
     /// so after a restart of the executor the REQ socket can be connected
     /// some time before the SUB socket.
     pub fn notifications_connected(&mut self) -> bool {
-        match self.notification_socket.as_mut() {
-            Some(notifications) => {
-                notifications.update();
-                notifications.connected
-            }
-            None => false,
+        self.update_notifications();
+        self.notification_socket
+            .as_ref()
+            .is_some_and(|notifications| notifications.connected)
+    }
+
+    /// Reads the monitor events of the notification socket, if it is open.
+    fn update_notifications(&mut self) {
+        if let Some(notifications) = self.notification_socket.as_mut() {
+            notifications.update();
         }
     }
 
@@ -421,6 +446,7 @@ impl Client {
         if self.notification_socket.is_none() {
             self.notification_socket = Some(self.open_notification_socket()?);
         }
+        self.update_notifications();
         let Some(socket) = self.notification_socket.as_ref().map(|n| &n.socket) else {
             return Ok(None);
         };
@@ -447,6 +473,9 @@ impl Client {
         payload: Option<&[u8]>,
         payload_parts: usize,
     ) -> Result<(TreeUuid, Vec<Vec<u8>>), ClientError> {
+        // Keep the monitor queue short also for a client that never polls
+        // its notifications (see `MONITOR_EVENTS`).
+        self.update_notifications();
         let header = RequestHeader::new(request_type);
         let result = self.exchange(&header, payload);
         let parts = match result {
@@ -707,5 +736,91 @@ mod tests {
         );
         assert!(ClientError::Zmq(zmq::Error::ETERM).is_connection_error());
         assert!(!ClientError::Server("x".to_owned()).is_connection_error());
+    }
+
+    /// Reads and counts the events in the monitor queue of the
+    /// notification socket, without a call of the client.
+    fn queued_monitor_events(client: &Client) -> usize {
+        let monitor = &client
+            .notification_socket
+            .as_ref()
+            .expect("the notification socket is open")
+            .monitor;
+        let mut count = 0;
+        while monitor.recv_multipart(zmq::DONTWAIT).is_ok() {
+            count += 1;
+        }
+        count
+    }
+
+    #[test]
+    fn failed_connect_attempts_do_not_fill_the_monitor_queue() {
+        // Regression test: libzmq stops its I/O thread when the monitor
+        // queue is full (see MONITOR_EVENTS). Nothing listens on the
+        // notification port, so libzmq tries to connect every 100 ms to
+        // 200 ms. A failed attempt must not add a monitor event.
+        let config = ClientConfig {
+            request_timeout: Duration::from_millis(20),
+            ..ClientConfig::new("127.0.0.1", 9)
+        };
+        let client = Client::connect(config).unwrap();
+        std::thread::sleep(Duration::from_millis(700));
+        assert_eq!(queued_monitor_events(&client), 0);
+    }
+
+    #[test]
+    fn requests_and_polls_read_the_monitor_queue() {
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+
+        // A TCP server on the notification port that closes each
+        // connection. Each connect attempt of the SUB socket then fails
+        // in the handshake and gives a DISCONNECTED event.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let notification_port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let server = {
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    match listener.accept() {
+                        Ok((stream, _)) => drop(stream),
+                        Err(_) => std::thread::sleep(Duration::from_millis(1)),
+                    }
+                }
+            })
+        };
+        let config = ClientConfig {
+            request_timeout: Duration::from_millis(20),
+            ..ClientConfig::new("127.0.0.1", notification_port - 1)
+        };
+        let mut client = Client::connect(config).unwrap();
+
+        // Without calls of the client, the events stay in the queue.
+        std::thread::sleep(Duration::from_millis(700));
+        let without_calls = queued_monitor_events(&client);
+        assert!(without_calls >= 2, "{without_calls} events");
+
+        // Polls of the notification socket read the queue. One event can
+        // arrive during the last poll.
+        let end = Instant::now() + Duration::from_millis(700);
+        while Instant::now() < end {
+            client.poll_notification(Duration::from_millis(20)).unwrap();
+        }
+        assert!(queued_monitor_events(&client) <= 1);
+
+        // Requests read the queue too (the requests time out: nothing
+        // replies on the server port).
+        let end = Instant::now() + Duration::from_millis(700);
+        while Instant::now() < end {
+            let _ = client.status();
+        }
+        assert!(queued_monitor_events(&client) <= 1);
+        assert!(!client.notifications_connected());
+
+        stop.store(true, Ordering::SeqCst);
+        server.join().unwrap();
     }
 }
