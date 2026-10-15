@@ -30,11 +30,13 @@ priority = "optional"
 depends = "$auto"
 assets = [
     ["target/release/fasttick", "usr/bin/", "755"],
-    ["../../packaging/fasttick.desktop", "usr/share/applications/", "644"],
-    ["../../packaging/fasttick.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
-    ["../../packaging/fasttick-256.png", "usr/share/icons/hicolor/256x256/apps/fasttick.png", "644"],
-    ["../../README.md", "usr/share/doc/fasttick/", "644"],
-    ["../../THIRD_PARTY_LICENSES.md", "usr/share/doc/fasttick/", "644"],
+    ["packaging/fasttick.desktop", "usr/share/applications/", "644"],
+    ["packaging/fasttick.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["packaging/fasttick-256.png", "usr/share/icons/hicolor/256x256/apps/fasttick.png", "644"],
+    # Symbolic links to the files at the root of the repository (cargo-deb
+    # cannot match paths with "..").
+    ["packaging/README.md", "usr/share/doc/fasttick/", "644"],
+    ["packaging/THIRD_PARTY_LICENSES.md", "usr/share/doc/fasttick/", "644"],
 ]
 
 [dependencies]

@@ -13,6 +13,8 @@ accepted = [
     "Unicode-DFS-2016",
     "MPL-2.0",
 ]
+# The same targets as deny.toml: FastTick ships Linux packages.
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
 ignore-dev-dependencies = true
 ignore-build-dependencies = false
 private = { ignore = true }

@@ -30,11 +30,11 @@ mkdir -p "$APPDIR/usr/bin" \
     "$APPDIR/usr/share/icons/hicolor/scalable/apps" \
     "$APPDIR/usr/share/doc/fasttick"
 install -m 755 target/release/fasttick "$APPDIR/usr/bin/fasttick"
-install -m 644 packaging/fasttick.desktop "$APPDIR/fasttick.desktop"
-install -m 644 packaging/fasttick.desktop "$APPDIR/usr/share/applications/fasttick.desktop"
-install -m 644 packaging/fasttick-256.png "$APPDIR/fasttick.png"
-install -m 644 packaging/fasttick-256.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/fasttick.png"
-install -m 644 packaging/fasttick.svg "$APPDIR/usr/share/icons/hicolor/scalable/apps/fasttick.svg"
+install -m 644 crates/fasttick-app/packaging/fasttick.desktop "$APPDIR/fasttick.desktop"
+install -m 644 crates/fasttick-app/packaging/fasttick.desktop "$APPDIR/usr/share/applications/fasttick.desktop"
+install -m 644 crates/fasttick-app/packaging/fasttick-256.png "$APPDIR/fasttick.png"
+install -m 644 crates/fasttick-app/packaging/fasttick-256.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/fasttick.png"
+install -m 644 crates/fasttick-app/packaging/fasttick.svg "$APPDIR/usr/share/icons/hicolor/scalable/apps/fasttick.svg"
 install -m 644 LICENSE README.md THIRD_PARTY_LICENSES.md "$APPDIR/usr/share/doc/fasttick/"
 cat > "$APPDIR/AppRun" <<'APPRUN'
 #!/bin/sh

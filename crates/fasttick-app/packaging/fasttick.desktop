@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=FastTick
+GenericName=Behavior tree editor
+Comment=Edit, debug and replay BehaviorTree.CPP trees
+Exec=fasttick %F
+Icon=fasttick
+Terminal=false
+Categories=Development;
+Keywords=behavior;tree;robotics;BehaviorTree.CPP;
