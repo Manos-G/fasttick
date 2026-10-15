@@ -8,6 +8,8 @@
 //!  │d│ port: value                      │
 //!  │ │ port: value                      │
 //!  │ │ +2 more                          │
+//!  │ ├──────────────────────────────────┤
+//!  │ │ _skipIf: script                  │   pre- and post-conditions
 //!  └─┴──────────────────────────────────┘
 //! ```
 //!
@@ -194,6 +196,20 @@ pub fn measure_node(node: &CanvasNode, measure: &mut dyn TextMeasure) -> CardTex
         ports_w = ports_w.max(measure.width(&text, TextKind::Note));
         text
     });
+    // All conditions show: a node has 8 at most, and they change how the
+    // node runs.
+    let mut conditions = Vec::with_capacity(node.conditions.len());
+    for line in &node.conditions {
+        let (name, name_w) = elide(measure, &line.name, TextKind::PortName, max_port * 0.45);
+        let (value, value_w) = elide(
+            measure,
+            &line.value,
+            TextKind::PortValue,
+            max_port - name_w - separator_w,
+        );
+        ports_w = ports_w.max(name_w + separator_w + value_w);
+        conditions.push((name, value));
+    }
     let ports_needed = BAND + 2.0 * PAD_X + ports_w;
 
     let width = header_w.max(ports_needed).clamp(MIN_WIDTH, MAX_WIDTH);
@@ -202,6 +218,7 @@ pub fn measure_node(node: &CanvasNode, measure: &mut dyn TextMeasure) -> CardTex
         type_line,
         ports,
         more,
+        conditions,
         size: Vec2::ZERO,
     };
     card.size = vec2(width.round(), CardGeometry::height_of(&card));
@@ -233,6 +250,8 @@ pub struct CardGeometry {
     pub header_height: f32,
     /// The number of lines in the port section (ports and "+N more").
     pub port_lines: usize,
+    /// The number of condition lines.
+    pub condition_lines: usize,
 }
 
 impl CardGeometry {
@@ -242,6 +261,7 @@ impl CardGeometry {
         CardGeometry {
             header_height: PAD_TOP + LABEL_LINE + lines * TYPE_LINE + PAD_BOTTOM,
             port_lines: card.ports.len() + usize::from(card.more.is_some()),
+            condition_lines: card.conditions.len(),
         }
     }
 
@@ -253,11 +273,37 @@ impl CardGeometry {
 
     /// The height of the card.
     pub fn height(&self) -> f32 {
-        if self.port_lines == 0 {
+        if self.condition_lines > 0 {
+            self.condition_top() + self.condition_lines as f32 * PORT_LINE + PAD_BOTTOM - 2.0
+        } else if self.port_lines == 0 {
             self.header_height
         } else {
             self.header_height + PORT_GAP + self.port_lines as f32 * PORT_LINE + PAD_BOTTOM - 2.0
         }
+    }
+
+    /// The y position of the first condition line.
+    fn condition_top(&self) -> f32 {
+        let ports = if self.port_lines == 0 {
+            0.0
+        } else {
+            // The same space as between the header and the first port.
+            self.port_lines as f32 * PORT_LINE + PORT_GAP - 1.0
+        };
+        self.header_height + ports + PORT_GAP - 1.0
+    }
+
+    /// The y position of the separator above the conditions.
+    pub fn condition_separator_y(&self) -> f32 {
+        self.condition_top() - PORT_GAP * 0.65 + 1.0
+    }
+
+    /// The top-left corner of condition line `index`.
+    pub fn condition_pos(&self, index: usize) -> Pos2 {
+        pos2(
+            BAND + PAD_X,
+            self.condition_top() + index as f32 * PORT_LINE,
+        )
     }
 
     /// The centre of the glyph box.
@@ -319,6 +365,38 @@ mod tests {
             })
             .collect();
         node
+    }
+
+    #[test]
+    fn conditions_make_the_card_taller() {
+        let mut m = FixedMeasure(7.0);
+        let plain = measure_node(&node("n", "T", 1), &mut m);
+        let mut with = node("n", "T", 1);
+        with.conditions = vec![
+            PortLine {
+                name: "_skipIf".into(),
+                value: "x == 1".into(),
+            },
+            PortLine {
+                name: "_post".into(),
+                value: "a := a + 1".into(),
+            },
+        ];
+        let card = measure_node(&with, &mut m);
+        assert_eq!(card.conditions.len(), 2);
+        assert_eq!(card.size.y - plain.size.y, 2.0 * PORT_LINE + PORT_GAP - 2.0);
+        let geometry = CardGeometry::of(&card);
+        // The conditions are below the ports and inside the card.
+        assert!(geometry.condition_pos(0).y > geometry.port_pos(0).y + PORT_LINE - 0.5);
+        assert!(geometry.condition_separator_y() > geometry.port_pos(0).y + PORT_LINE - 0.5);
+        assert!(geometry.condition_pos(1).y + PORT_LINE <= card.size.y);
+        // Without ports, the conditions take the place of the ports.
+        let mut only = node("n", "T", 0);
+        only.conditions = with.conditions.clone();
+        let card = measure_node(&only, &mut m);
+        let geometry = CardGeometry::of(&card);
+        assert_eq!(geometry.condition_pos(0), geometry.port_pos(0));
+        assert_eq!(geometry.condition_separator_y(), geometry.separator_y());
     }
 
     #[test]

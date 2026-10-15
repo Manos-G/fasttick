@@ -235,6 +235,8 @@ pub struct CanvasPalette {
     pub text_value: Color32,
     /// Port values that are blackboard references (`{key}`).
     pub text_reference: Color32,
+    /// The names of pre-conditions and post-conditions on the cards.
+    pub condition: Color32,
     /// Separator between header and ports.
     pub separator: Color32,
     /// Edges.
@@ -284,6 +286,7 @@ impl CanvasPalette {
             text_weak: rgb(0x6A7380),
             text_value: rgb(0x2E3640),
             text_reference: rgb(0x1F6FC9),
+            condition: rgb(0x7445C2),
             separator: rgb(0xE6E9ED),
             edge: rgb(0x9DA5B1),
             accent: ACCENT_LIGHT,
@@ -324,6 +327,7 @@ impl CanvasPalette {
             text_weak: rgb(0x9AA3AF),
             text_value: rgb(0xCDD3DA),
             text_reference: rgb(0x7FB2F5),
+            condition: rgb(0xB89CF0),
             separator: rgb(0x33373F),
             edge: rgb(0x5D6570),
             accent: ACCENT_DARK,
@@ -428,6 +432,7 @@ mod tests {
             assert!(contrast(palette.text, palette.card) >= 7.0);
             assert!(contrast(palette.text_weak, palette.card) >= 3.5);
             assert!(contrast(palette.text_value, palette.card) >= 7.0);
+            assert!(contrast(palette.condition, palette.card) >= 4.5);
         }
     }
 

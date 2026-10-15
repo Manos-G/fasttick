@@ -23,7 +23,7 @@ use fasttick_core::xml::NodeId;
 use super::categories::CategoryLookup;
 use super::model::{
     CanvasNode, CanvasNodeId, CanvasTree, CanvasTreeBuilder, Expansion, NodeCategory, NodeSource,
-    PortLine, ProblemMarker, SubtreeInfo,
+    PortLine, ProblemMarker, SubtreeInfo, condition_lines,
 };
 
 /// The deepest SubTree nesting that the builder expands.
@@ -136,6 +136,14 @@ impl CanvasTree {
                     value: value.to_owned(),
                 })
                 .collect();
+            canvas_node.conditions = condition_lines(
+                view.pre_conditions()
+                    .map(|(c, script)| (c.attribute_name(), script))
+                    .chain(
+                        view.post_conditions()
+                            .map(|(c, script)| (c.attribute_name(), script)),
+                    ),
+            );
             let children: Vec<NodeId> = view.children().map(|child| child.id()).collect();
             let (category, inferred) = categorize(project, node_file, &view, children.len());
             canvas_node.category = category;
@@ -357,6 +365,24 @@ mod tests {
         let last = tree.nodes().last().unwrap();
         assert_eq!(last.type_id, "Sleep");
         assert!(last.parent.is_none());
+    }
+
+    #[test]
+    fn conditions_are_in_bt_cpp_order() {
+        let xml = r#"<root BTCPP_format="4"><BehaviorTree ID="Main">
+            <Sleep msec="1" _post="a:=1" _skipIf="x == 1" _onSuccess="b:=2" _failureIf="y"/>
+        </BehaviorTree></root>"#;
+        let (project, file) = Project::with_file("t", BtFile::parse(xml, None).unwrap());
+        let tree = CanvasTree::from_project(&project, file, 0, &Expansion::none());
+        let names: Vec<&str> = tree.nodes()[0]
+            .conditions
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(names, ["_failureIf", "_skipIf", "_onSuccess", "_post"]);
+        assert_eq!(tree.nodes()[0].conditions[1].value, "x == 1");
+        // Conditions are not ports.
+        assert_eq!(tree.nodes()[0].ports.len(), 1);
     }
 
     #[test]

@@ -393,6 +393,17 @@ fn inspector_sets_the_name_and_a_condition() {
         text.contains("<SayMessage name=\"greet\" _skipIf=\"x == 1\"/>"),
         "{text}"
     );
+    // The card shows the condition.
+    {
+        let app = harness.state();
+        let tree = app.workspace().active().unwrap().canvas.tree();
+        let node = tree.nodes().iter().find(|n| n.label == "greet").unwrap();
+        assert_eq!(node.conditions.len(), 1);
+        assert_eq!(
+            node.card.conditions,
+            [("_skipIf".to_owned(), "x == 1".to_owned())]
+        );
+    }
     // An empty script removes the attribute.
     type_into(&mut harness, Field::Label("_skipIf"), "", true);
     harness.key_press(egui::Key::Backspace);

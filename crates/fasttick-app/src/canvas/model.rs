@@ -107,6 +107,40 @@ pub enum NodeSource {
     Xml(FileId, NodeId),
 }
 
+/// The position of a condition attribute in the order of BT.CPP: the
+/// pre-conditions (`_failureIf`, `_successIf`, `_skipIf`, `_while`), then
+/// the post-conditions (`_onHalted`, `_onFailure`, `_onSuccess`, `_post`).
+/// Other names come last.
+pub fn condition_rank(name: &str) -> usize {
+    use fasttick_core::bt::{PostCondition, PreCondition};
+    if let Some(pre) = PreCondition::from_attribute_name(name) {
+        PreCondition::ALL
+            .iter()
+            .position(|c| *c == pre)
+            .unwrap_or(0)
+    } else if let Some(post) = PostCondition::from_attribute_name(name) {
+        PreCondition::ALL.len()
+            + PostCondition::ALL
+                .iter()
+                .position(|c| *c == post)
+                .unwrap_or(0)
+    } else {
+        usize::MAX
+    }
+}
+
+/// The condition lines of a node, in the order of [`condition_rank`].
+pub fn condition_lines<'a>(attributes: impl Iterator<Item = (&'a str, &'a str)>) -> Vec<PortLine> {
+    let mut lines: Vec<PortLine> = attributes
+        .map(|(name, value)| PortLine {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        })
+        .collect();
+    lines.sort_by_key(|line| condition_rank(&line.name));
+    lines
+}
+
 /// One line of the port summary: a port name and its value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PortLine {
@@ -194,6 +228,8 @@ pub struct CardText {
     pub ports: Vec<(String, String)>,
     /// Text such as "+3 more", if not all ports fit.
     pub more: Option<String>,
+    /// The condition lines (attribute name and script), shortened to fit.
+    pub conditions: Vec<(String, String)>,
     /// The card size in world units.
     pub size: egui::Vec2,
 }
@@ -221,6 +257,10 @@ pub struct CanvasNode {
     pub depth: u32,
     /// The ports and remappings, in document order.
     pub ports: Vec<PortLine>,
+    /// The pre-conditions and post-conditions (the name is the attribute,
+    /// for example `_skipIf`; the value is the script), in the order of
+    /// BT.CPP (see [`condition_rank`]).
+    pub conditions: Vec<PortLine>,
     /// SubTree data, for `<SubTree>` nodes.
     pub subtree: Option<SubtreeInfo>,
     /// The full path (for example `sub_a/fb`), if the source has one.
@@ -249,6 +289,7 @@ impl CanvasNode {
             children: Vec::new(),
             depth: 0,
             ports: Vec::new(),
+            conditions: Vec::new(),
             subtree: None,
             path: String::new(),
             inline: false,
@@ -496,6 +537,7 @@ impl CanvasTree {
                     value: value.to_owned(),
                 })
                 .collect();
+            node.conditions = condition_lines(runtime_node.condition_attributes());
 
             let target = if runtime_node.is_subtree() {
                 linker.target(index)
@@ -763,6 +805,7 @@ impl CanvasTree {
                     && previous.label == node.label
                     && previous.type_id == node.type_id
                     && previous.ports == node.ports
+                    && previous.conditions == node.conditions
                 {
                     node.card = previous.card.clone();
                 }

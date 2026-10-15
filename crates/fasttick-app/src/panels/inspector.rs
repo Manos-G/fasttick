@@ -117,6 +117,22 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                         }
                     });
             }
+            if !node.conditions.is_empty() {
+                ui.add_space(8.0);
+                ui.label(RichText::new("Pre- and post-conditions").strong());
+                egui::Grid::new("inspector_conditions")
+                    .num_columns(2)
+                    .spacing([12.0, 4.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for line in &node.conditions {
+                            ui.label(RichText::new(&line.name).color(cx.palette.condition))
+                                .on_hover_text(super::node_editor::condition_help(&line.name));
+                            ui.label(RichText::new(&line.value).monospace());
+                            ui.end_row();
+                        }
+                    });
+            }
             ui.add_space(10.0);
             ui.label(
                 RichText::new("Read-only. Open the tree file in edit mode to change it.")

@@ -201,6 +201,7 @@ const SLOT_CHIP: u64 = 9;
 const SLOT_TAG: u64 = 10;
 const SLOT_LABEL_SMALL: u64 = 11;
 const SLOT_TAG_FAILURE: u64 = 12;
+const SLOT_CONDITION: u64 = 16; // .. 16 + 8
 
 /// The smallest label size (screen points) at [`Detail::Labels`].
 const LABEL_MIN_PX: f32 = 9.5;
@@ -1978,6 +1979,45 @@ fn paint_card(
                 shapes.push(Shape::galley(snap(pos, ppp), galley, weak));
             }
         }
+        if geometry.condition_lines > 0 {
+            let y = local(pos2(0.0, geometry.condition_separator_y())).y;
+            shapes.push(Shape::hline(
+                (screen.min.x + card::BAND * zoom)..=(screen.max.x - 1.0),
+                y,
+                Stroke::new(1.0, palette.separator.gamma_multiply(alpha)),
+            ));
+            let name_color = palette.condition.gamma_multiply(alpha);
+            let value_color = palette.text_value.gamma_multiply(alpha);
+            for (line, (name, script)) in node.card.conditions.iter().enumerate() {
+                let galley = state.galleys.get(index, SLOT_CONDITION + line as u64, || {
+                    let mut job = LayoutJob::default();
+                    let name_format = TextFormat {
+                        font_id: state
+                            .fonts
+                            .font(TextKind::PortName, card::PORT_SIZE * text_zoom),
+                        color: name_color,
+                        ..TextFormat::default()
+                    };
+                    job.append(name, 0.0, name_format.clone());
+                    job.append(card::PORT_SEPARATOR, 0.0, name_format);
+                    job.append(
+                        script,
+                        0.0,
+                        TextFormat {
+                            font_id: state
+                                .fonts
+                                .font(TextKind::PortValue, card::PORT_SIZE * text_zoom),
+                            color: value_color,
+                            ..TextFormat::default()
+                        },
+                    );
+                    painter.layout_job(job)
+                });
+                let mut pos = local(geometry.condition_pos(line));
+                pos.y += (card::PORT_LINE * zoom - galley.size().y) * 0.5;
+                shapes.push(Shape::galley(snap(pos, ppp), galley, value_color));
+            }
+        }
     }
 
     // Small cards: grey bars stand for the port lines.
@@ -1996,6 +2036,27 @@ fn paint_card(
             });
             let width = (chars as f32 * 6.0 * zoom).min(max_bar);
             let top = local(geometry.port_pos(line));
+            let bar = Rect::from_min_size(
+                pos2(top.x, top.y + card::PORT_LINE * zoom * 0.3),
+                vec2(width, (card::PORT_LINE * zoom * 0.4).max(1.0)),
+            );
+            shapes.push(Shape::rect_filled(bar, radius(2.0), bar_color));
+        }
+    }
+    // Small cards: coloured bars stand for the condition lines.
+    if detail == Detail::Labels && geometry.condition_lines > 0 {
+        let y = local(pos2(0.0, geometry.condition_separator_y())).y;
+        shapes.push(Shape::hline(
+            (screen.min.x + card::BAND * zoom)..=(screen.max.x - 1.0),
+            y,
+            Stroke::new(1.0, palette.separator.gamma_multiply(alpha)),
+        ));
+        let bar_color = palette.condition.gamma_multiply(alpha * 0.45);
+        let max_bar = (node.card.size.x - card::BAND - 2.0 * card::PAD_X) * zoom;
+        for (line, (name, script)) in node.card.conditions.iter().enumerate() {
+            let chars = name.chars().count() + script.chars().count() + 2;
+            let width = (chars as f32 * 6.0 * zoom).min(max_bar);
+            let top = local(geometry.condition_pos(line));
             let bar = Rect::from_min_size(
                 pos2(top.x, top.y + card::PORT_LINE * zoom * 0.3),
                 vec2(width, (card::PORT_LINE * zoom * 0.4).max(1.0)),
@@ -2373,6 +2434,19 @@ fn show_tooltip(state: &CanvasState, ui: &Ui, response: &Response, canvas: Id, n
             if node.ports.len() > 16 {
                 ui.label(egui::RichText::new(format!("+{} more", node.ports.len() - 16)).weak());
             }
+        }
+        if !node.conditions.is_empty() {
+            ui.separator();
+            egui::Grid::new(canvas.with("tooltip_conditions"))
+                .num_columns(2)
+                .spacing([12.0, 2.0])
+                .show(ui, |ui| {
+                    for line in &node.conditions {
+                        ui.label(egui::RichText::new(&line.name).weak());
+                        ui.label(egui::RichText::new(&line.value).monospace());
+                        ui.end_row();
+                    }
+                });
         }
         if node.subtree.as_ref().is_some_and(|s| s.can_expand) {
             ui.label(

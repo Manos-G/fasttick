@@ -457,6 +457,17 @@ fn direction_tag(direction: PortDirection) -> &'static str {
     }
 }
 
+/// The help text of a condition attribute name (for example `_skipIf`).
+pub fn condition_help(name: &str) -> &'static str {
+    if let Some(pre) = PreCondition::from_attribute_name(name) {
+        pre_help(pre)
+    } else if let Some(post) = PostCondition::from_attribute_name(name) {
+        post_help(post)
+    } else {
+        ""
+    }
+}
+
 fn pre_help(condition: PreCondition) -> &'static str {
     match condition {
         PreCondition::FailureIf => {

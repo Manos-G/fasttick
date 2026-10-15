@@ -439,3 +439,39 @@ fn statistics_sort_and_select() {
     let primary = view.canvas.primary().expect("a selected node");
     assert_eq!(view.canvas.tree().get(primary).unwrap().uid, Some(uid));
 }
+
+#[test]
+fn conditions_show_on_cards_and_in_the_inspector() {
+    let mut harness = harness();
+    {
+        let app = harness.state();
+        let tree = app.workspace().active().unwrap().canvas.tree();
+        let node = tree
+            .nodes()
+            .iter()
+            .find(|n| n.label == "on_success")
+            .expect("the node on_success");
+        let names: Vec<&str> = node.conditions.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["_onSuccess", "_post"]);
+        assert!(node.card.conditions.len() == 2, "the card shows both");
+    }
+    // The inspector lists the conditions of the selected node.
+    let id = {
+        let app = harness.state();
+        let tree = app.workspace().active().unwrap().canvas.tree();
+        tree.ids()
+            .find(|id| tree.get(*id).unwrap().label == "skipped_node")
+            .unwrap()
+    };
+    harness
+        .state_mut()
+        .workspace_mut()
+        .active_mut()
+        .unwrap()
+        .canvas
+        .tree_mut()
+        .select_only(id);
+    harness.run();
+    harness.get_by_label("_skipIf");
+    harness.get_by_label("flag == true");
+}

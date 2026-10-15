@@ -116,6 +116,21 @@ impl RuntimeNode {
             .filter(|(key, _)| key != "name" && key != "ID" && !key.starts_with('_'))
             .map(|(key, value)| (key.as_str(), value.as_str()))
     }
+
+    /// The pre-condition and post-condition attributes (for example
+    /// `_skipIf`) and their scripts, in document order.
+    pub fn condition_attributes(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.attributes
+            .iter()
+            .filter(|(key, _)| {
+                matches!(
+                    crate::bt::AttributeClass::of(key),
+                    crate::bt::AttributeClass::PreCondition(_)
+                        | crate::bt::AttributeClass::PostCondition(_)
+                )
+            })
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+    }
 }
 
 /// One SubTree instance: one `<BehaviorTree>` element of the runtime XML.
