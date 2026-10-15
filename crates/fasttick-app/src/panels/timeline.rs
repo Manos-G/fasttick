@@ -10,8 +10,8 @@
 //! - "Show the whole log" (or a double-click on the ruler): zoom out.
 
 use egui::{
-    Align2, Color32, CornerRadius, FontId, Id, Pos2, Rect, RichText, Sense, Stroke, StrokeKind,
-    Ui, WidgetInfo, pos2, vec2,
+    Align2, Color32, CornerRadius, FontId, Id, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui,
+    WidgetInfo, pos2, vec2,
 };
 use fasttick_log::replay::PlaybackSpeed;
 
@@ -93,10 +93,26 @@ fn transport(
         };
         let back = applied > low;
         let forward = applied < high;
-        if transport_button(ui, keymap, Command::GoToStart, Icon::First, "Go to the start", back, None) {
+        if transport_button(
+            ui,
+            keymap,
+            Command::GoToStart,
+            Icon::First,
+            "Go to the start",
+            back,
+            None,
+        ) {
             model.go_to_start();
         }
-        if transport_button(ui, keymap, Command::StepBack, Icon::Previous, "One transition back", back, None) {
+        if transport_button(
+            ui,
+            keymap,
+            Command::StepBack,
+            Icon::Previous,
+            "One transition back",
+            back,
+            None,
+        ) {
             model.step_back();
         }
         let playing = model.cursor().is_playing();
@@ -105,13 +121,37 @@ fn transport(
         } else {
             (Icon::Play, "Play")
         };
-        if transport_button(ui, keymap, Command::PlayPause, icon, text, total > 0, Some(palette.accent)) {
+        if transport_button(
+            ui,
+            keymap,
+            Command::PlayPause,
+            icon,
+            text,
+            total > 0,
+            Some(palette.accent),
+        ) {
             model.toggle_play();
         }
-        if transport_button(ui, keymap, Command::StepForward, Icon::Next, "One transition forward", forward, None) {
+        if transport_button(
+            ui,
+            keymap,
+            Command::StepForward,
+            Icon::Next,
+            "One transition forward",
+            forward,
+            None,
+        ) {
             model.step_forward();
         }
-        if transport_button(ui, keymap, Command::GoToEnd, Icon::Last, "Go to the end", forward, None) {
+        if transport_button(
+            ui,
+            keymap,
+            Command::GoToEnd,
+            Icon::Last,
+            "Go to the end",
+            forward,
+            None,
+        ) {
             model.go_to_end();
         }
         ui.separator();
@@ -202,9 +242,8 @@ fn time_bar(ui: &mut Ui, model: &mut ReplayModel, palette: &CanvasPalette) {
     let (start, end) = model.cursor().bounds(model.index());
     let span = end.saturating_sub(start).max(1);
     let fraction = (model.cursor().time_us().saturating_sub(start)) as f64 / span as f64;
-    response.widget_info(|| {
-        WidgetInfo::slider(true, fraction.clamp(0.0, 1.0), "Timeline position")
-    });
+    response
+        .widget_info(|| WidgetInfo::slider(true, fraction.clamp(0.0, 1.0), "Timeline position"));
     let response = response.on_hover_text(
         "Click or drag to move. Drag on the ruler (or Shift + drag) to zoom into a time range.",
     );
@@ -299,7 +338,9 @@ fn time_bar(ui: &mut Ui, model: &mut ReplayModel, palette: &CanvasPalette) {
     let counts = model.density((start, end), bins);
     let max = counts.iter().copied().max().unwrap_or(0).max(1) as f32;
     let bin_width = lane.width() / counts.len() as f32;
-    let bar_color = palette.accent.gamma_multiply(if palette.dark { 0.6 } else { 0.45 });
+    let bar_color = palette
+        .accent
+        .gamma_multiply(if palette.dark { 0.6 } else { 0.45 });
     let usable = lane.height() - 6.0;
     for (i, count) in counts.iter().enumerate() {
         if *count == 0 {
@@ -364,7 +405,10 @@ fn time_bar(ui: &mut Ui, model: &mut ReplayModel, palette: &CanvasPalette) {
     // Position marker.
     let marker = palette.accent;
     painter.line_segment(
-        [pos2(cursor_x, ruler.bottom() - 2.0), pos2(cursor_x, lane.bottom())],
+        [
+            pos2(cursor_x, ruler.bottom() - 2.0),
+            pos2(cursor_x, lane.bottom()),
+        ],
         Stroke::new(2.0, marker),
     );
     let handle: Vec<Pos2> = vec![

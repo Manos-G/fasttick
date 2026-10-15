@@ -129,8 +129,13 @@ fn breakpoint_button(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     } else {
         "Add a breakpoint before the selected node (F9)"
     };
-    let response =
-        widgets::icon_button_colored(ui, Icon::Breakpoint, label, enabled, Some(cx.palette.breakpoint));
+    let response = widgets::icon_button_colored(
+        ui,
+        Icon::Breakpoint,
+        label,
+        enabled,
+        Some(cx.palette.breakpoint),
+    );
     let response = if enabled {
         response
     } else {
@@ -167,8 +172,7 @@ fn recording(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         );
         if loss {
             ui.label(
-                RichText::new("Some transitions can be lost")
-                    .color(ui.visuals().warn_fg_color),
+                RichText::new("Some transitions can be lost").color(ui.visuals().warn_fg_color),
             )
             .on_hover_text(
                 "The executor keeps only the last 1000 transitions. FastTick reads them \

@@ -177,7 +177,9 @@ fn connect_breakpoint_banner_and_continue() {
     harness.get_by_label("Force FAILURE");
 
     // Continue releases the node.
-    harness.get_by_role_and_label(Role::Button, "Continue").click();
+    harness
+        .get_by_role_and_label(Role::Button, "Continue")
+        .click();
     harness.run_ok();
     wait_fake(&mut harness, &fake, "the unlock", |s| {
         s.hooks.get(&2).is_some_and(|h| !h.blocked)
@@ -249,9 +251,13 @@ fn connect_breakpoint_banner_and_continue() {
     });
 
     // Disconnect: the session removes all hooks of the executor.
-    harness.get_by_role_and_label(Role::Button, "Disconnect").click();
+    harness
+        .get_by_role_and_label(Role::Button, "Disconnect")
+        .click();
     harness.run_ok();
-    wait_fake(&mut harness, &fake, "the hook cleanup", |s| s.hooks.is_empty());
+    wait_fake(&mut harness, &fake, "the hook cleanup", |s| {
+        s.hooks.is_empty()
+    });
     wait(&mut harness, "the disconnected state", |h| {
         !h.state().live().is_active() && h.state().live().hooks().is_empty()
     });
@@ -349,19 +355,29 @@ fn blackboard_recording_and_breakpoint_files() {
     harness.state_mut().save_breakpoints_to(&ctx, file.clone());
     wait(&mut harness, "the saved breakpoints", |_| file.exists());
     let set = BreakpointSet::load(&file).unwrap();
-    let paths: Vec<&str> = set.breakpoints.iter().map(|b| b.node_path.as_str()).collect();
+    let paths: Vec<&str> = set
+        .breakpoints
+        .iter()
+        .map(|b| b.node_path.as_str())
+        .collect();
     assert_eq!(paths, ["first", "sub/fail"]);
     harness.state_mut().live_mut().remove_all_hooks();
     wait_fake(&mut harness, &fake, "no hooks", |s| s.hooks.is_empty());
-    harness.state_mut().prepare_breakpoints(&ctx, file.clone(), set);
+    harness
+        .state_mut()
+        .prepare_breakpoints(&ctx, file.clone(), set);
     harness.run_ok();
     harness.get_by_label("Load breakpoints");
     assert_eq!(harness.query_all_by_label("Found by path").count(), 2);
     harness.get_by_label("Insert 2 hooks").click();
     harness.run_ok();
     wait_fake(&mut harness, &fake, "the loaded hooks", |s| {
-        s.hooks.get(&2).is_some_and(|h| h.hook.mode == HookMode::Breakpoint)
-            && s.hooks.get(&6).is_some_and(|h| h.hook.mode == HookMode::Replace)
+        s.hooks
+            .get(&2)
+            .is_some_and(|h| h.hook.mode == HookMode::Breakpoint)
+            && s.hooks
+                .get(&6)
+                .is_some_and(|h| h.hook.mode == HookMode::Replace)
     });
     assert!(harness.state().pending_breakpoints().is_none());
 

@@ -41,7 +41,8 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
             .on_disabled_hover_text("Connect to an executor first.")
             .clicked()
         {
-            cx.actions.push(AppAction::Command(Command::LoadBreakpoints));
+            cx.actions
+                .push(AppAction::Command(Command::LoadBreakpoints));
         }
         if ui
             .add_enabled(connected, egui::Button::new("Refresh"))

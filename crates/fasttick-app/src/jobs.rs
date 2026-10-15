@@ -755,13 +755,15 @@ mod tests {
             }
         }
         // A bad path gives an error.
-        assert!(write_export(
-            &dir.path().join("no/dir/x.csv"),
-            ExportFormat::Csv,
-            &log,
-            &filter
-        )
-        .is_err());
+        assert!(
+            write_export(
+                &dir.path().join("no/dir/x.csv"),
+                ExportFormat::Csv,
+                &log,
+                &filter
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -771,16 +773,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("b.ftbp.json");
         let mut set = BreakpointSet::new();
-        set.breakpoints.push(fasttick_protocol::breakpoints::Breakpoint {
-            node_path: "a/b".into(),
-            uid: Some(3),
-            position: Default::default(),
-            mode: Default::default(),
-            enabled: true,
-            once: false,
-            desired_status: fasttick_core::status::NodeStatus::Skipped,
-            label: None,
-        });
+        set.breakpoints
+            .push(fasttick_protocol::breakpoints::Breakpoint {
+                node_path: "a/b".into(),
+                uid: Some(3),
+                position: Default::default(),
+                mode: Default::default(),
+                enabled: true,
+                once: false,
+                desired_status: fasttick_core::status::NodeStatus::Skipped,
+                label: None,
+            });
         jobs.save_breakpoints(&ctx, path.clone(), set.clone());
         assert!(matches!(
             wait(&mut jobs),

@@ -191,7 +191,10 @@ mod tests {
         recording.start(1_700_000_000_000_000, Some(XML.to_owned()), now);
         assert!(recording.is_active());
         recording.push(
-            &[rec(10, 1, NodeStatus::Running), rec(15, 2, NodeStatus::Success)],
+            &[
+                rec(10, 1, NodeStatus::Running),
+                rec(15, 2, NodeStatus::Success),
+            ],
             false,
         );
         recording.push(&[rec(20, 1, NodeStatus::Success)], true);
@@ -200,7 +203,10 @@ mod tests {
         assert_eq!(recording.len(), 3);
         recording.stop(now + Duration::from_secs(2));
         assert!(!recording.is_active());
-        assert_eq!(recording.duration(now + Duration::from_secs(9)).as_secs(), 2);
+        assert_eq!(
+            recording.duration(now + Duration::from_secs(9)).as_secs(),
+            2
+        );
 
         let file = recording.to_file(None).unwrap();
         assert_eq!(file.start_time_us, 1_700_000_000_000_000);

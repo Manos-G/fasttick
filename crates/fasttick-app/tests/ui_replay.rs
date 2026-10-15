@@ -100,7 +100,14 @@ fn playback_steps_and_keys() {
     // Play at 1x: the log is about 0.2 s long; each frame is 1/30 s.
     harness.get_by_label("Play").click();
     harness.step();
-    assert!(harness.state().active_replay().unwrap().cursor().is_playing());
+    assert!(
+        harness
+            .state()
+            .active_replay()
+            .unwrap()
+            .cursor()
+            .is_playing()
+    );
     harness.step();
     harness.step();
     let during = applied(&harness);
@@ -118,16 +125,37 @@ fn playback_steps_and_keys() {
     }
     harness.run();
     assert_eq!(applied(&harness), count);
-    assert!(!harness.state().active_replay().unwrap().cursor().is_playing());
+    assert!(
+        !harness
+            .state()
+            .active_replay()
+            .unwrap()
+            .cursor()
+            .is_playing()
+    );
 
     // P toggles playback; at the end it starts again from the start.
     harness.key_press(egui::Key::P);
     harness.step();
-    assert!(harness.state().active_replay().unwrap().cursor().is_playing());
+    assert!(
+        harness
+            .state()
+            .active_replay()
+            .unwrap()
+            .cursor()
+            .is_playing()
+    );
     let ctx = harness.ctx.clone();
     harness.state_mut().run_command(&ctx, Command::PlayPause);
     harness.run();
-    assert!(!harness.state().active_replay().unwrap().cursor().is_playing());
+    assert!(
+        !harness
+            .state()
+            .active_replay()
+            .unwrap()
+            .cursor()
+            .is_playing()
+    );
 
     // The speed selector.
     harness.get_by_role(Role::ComboBox).click();
@@ -152,7 +180,9 @@ fn time_bar_scrub_and_range_zoom() {
     let bar = harness
         .get_by_role_and_label(Role::Slider, "Timeline position")
         .rect();
-    harness.get_by_role_and_label(Role::Slider, "Timeline position").click();
+    harness
+        .get_by_role_and_label(Role::Slider, "Timeline position")
+        .click();
     harness.run();
     let time = harness.state().active_replay().unwrap().cursor().time_us();
     let middle = end / 2;
@@ -168,7 +198,15 @@ fn time_bar_scrub_and_range_zoom() {
     );
     let time = harness.state().active_replay().unwrap().cursor().time_us();
     assert!(time > end / 2, "{time}");
-    assert!(harness.state().active_replay().unwrap().cursor().range().is_none());
+    assert!(
+        harness
+            .state()
+            .active_replay()
+            .unwrap()
+            .cursor()
+            .range()
+            .is_none()
+    );
 
     // A drag on the ruler selects a time range and zooms into it.
     let ruler_y = bar.top() + 6.0;
@@ -194,7 +232,15 @@ fn time_bar_scrub_and_range_zoom() {
     harness.get_by_label_contains("(the timeline zoom)");
     harness.get_by_label("Show the whole log").click();
     harness.run();
-    assert!(harness.state().active_replay().unwrap().cursor().range().is_none());
+    assert!(
+        harness
+            .state()
+            .active_replay()
+            .unwrap()
+            .cursor()
+            .range()
+            .is_none()
+    );
     harness.get_by_label_contains("The whole log.");
 }
 
@@ -207,7 +253,9 @@ fn transitions_table_filter_click_and_export() {
     harness.get_by_label("0.000383");
 
     // Include filter.
-    harness.get_by_role_and_label(Role::TextInput, "Include").focus();
+    harness
+        .get_by_role_and_label(Role::TextInput, "Include")
+        .focus();
     harness.run();
     harness
         .get_by_role_and_label(Role::TextInput, "Include")
@@ -222,7 +270,9 @@ fn transitions_table_filter_click_and_export() {
     assert!(rows > 0 && rows < count, "{rows}");
     harness.get_by_label(&format!("{rows} of {count} transitions"));
     // Status filter: hide IDLE.
-    harness.get_by_role_and_label(Role::CheckBox, "IDLE").click();
+    harness
+        .get_by_role_and_label(Role::CheckBox, "IDLE")
+        .click();
     harness.run();
     let without_idle = harness
         .state()
@@ -283,16 +333,20 @@ fn transitions_table_filter_click_and_export() {
                 .state_mut()
                 .export_transitions_to(&ctx, path.clone(), format)
         );
+        // Wait for the notice of this export: it names the file. (The
+        // notice of the previous export can still be visible.)
+        let notice = format!("Exported {without_idle} transitions to {}", path.display());
         let deadline = Instant::now() + Duration::from_secs(10);
-        while harness
-            .query_by_label_contains(&format!("Exported {without_idle} transitions"))
-            .is_none()
-        {
+        while harness.query_by_label_contains(&notice).is_none() {
             assert!(Instant::now() < deadline, "the export did not finish");
             harness.step();
             std::thread::sleep(Duration::from_millis(10));
         }
-        harness.get_by_label_contains("Exported").hover();
+        // A new notice area takes one more frame to reach its final
+        // place (egui sizes an anchored area from its last frame), so let
+        // the UI settle before the "Close" click below.
+        harness.run();
+        harness.get_by_label_contains(&notice);
         let text = std::fs::read_to_string(&path).unwrap();
         match format {
             ExportFormat::Csv => {
@@ -307,21 +361,24 @@ fn transitions_table_filter_click_and_export() {
         // Close the notice for the next export.
         harness.get_by_label("Close").click();
         harness.run();
+        assert!(harness.state().notices().is_empty());
     }
 
     // A bad time field shows an error and blocks the export.
-    harness.get_by_role_and_label(Role::TextInput, "From").focus();
+    harness
+        .get_by_role_and_label(Role::TextInput, "From")
+        .focus();
     harness.run();
     harness
         .get_by_role_and_label(Role::TextInput, "From")
         .type_text("soon");
     harness.run();
     harness.get_by_label_contains("From: enter a time in seconds");
-    assert!(
-        !harness
-            .state_mut()
-            .export_transitions_to(&ctx, dir.path().join("bad.csv"), ExportFormat::Csv)
-    );
+    assert!(!harness.state_mut().export_transitions_to(
+        &ctx,
+        dir.path().join("bad.csv"),
+        ExportFormat::Csv
+    ));
     harness.get_by_label("Clear filter").click();
     harness.run();
     harness.get_by_label(&format!("{count} of {count} transitions"));

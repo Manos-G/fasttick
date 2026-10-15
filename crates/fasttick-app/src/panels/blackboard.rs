@@ -73,7 +73,11 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         }
         if let Some(at) = cx.live.blackboard().updated_at() {
             let age = at.elapsed().as_secs_f32();
-            ui.label(RichText::new(format!("updated {age:.1} s ago")).small().weak());
+            ui.label(
+                RichText::new(format!("updated {age:.1} s ago"))
+                    .small()
+                    .weak(),
+            );
             if cx.live.blackboard().auto_refresh() {
                 ui.ctx()
                     .request_repaint_after(std::time::Duration::from_millis(500));
@@ -126,9 +130,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                 let id = Id::new(("blackboard", &name));
                 match cx.live.blackboard().value_of(&name) {
                     Some(value) => {
-                        if !blackboard::entry_matches(&name, value, &filter)
-                            && !filter.is_empty()
-                        {
+                        if !blackboard::entry_matches(&name, value, &filter) && !filter.is_empty() {
                             continue;
                         }
                         egui::CollapsingHeader::new(RichText::new(&name).strong())
@@ -253,8 +255,11 @@ fn json_entry(
                 }
             });
         if header.inner {
-            let mut state =
-                egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false);
+            let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                ui.ctx(),
+                id,
+                false,
+            );
             state.toggle(ui);
             state.store(ui.ctx());
         }

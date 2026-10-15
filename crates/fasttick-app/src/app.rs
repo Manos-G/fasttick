@@ -140,7 +140,11 @@ pub struct PendingBreakpoints {
 
 impl PendingBreakpoints {
     /// Resolves a breakpoint set against a tree.
-    pub fn new(path: PathBuf, set: BreakpointSet, tree: &fasttick_core::runtime::RuntimeTree) -> Self {
+    pub fn new(
+        path: PathBuf,
+        set: BreakpointSet,
+        tree: &fasttick_core::runtime::RuntimeTree,
+    ) -> Self {
         let resolved = set.resolve(tree);
         let chosen = resolved
             .iter()
@@ -438,7 +442,10 @@ impl FastTickApp {
 
     fn find_open_view(&self, path: &Path, session: Option<i64>) -> Option<ViewId> {
         let doc = self.workspace.find_doc(|d| match &d.kind {
-            DocKind::Replay { path: p, session: s } => p == path && *s == session,
+            DocKind::Replay {
+                path: p,
+                session: s,
+            } => p == path && *s == session,
             DocKind::TreeFile { path: p } => p == path,
             DocKind::Live { .. } => false,
         })?;
@@ -1841,22 +1848,24 @@ impl FastTickApp {
                     picker.sessions.len()
                 ));
                 ui.add_space(6.0);
-                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                    for (index, session) in picker.sessions.iter().enumerate() {
-                        let text = format!(
-                            "Session {}   {}   {} transitions",
-                            session.id, session.date, session.transition_count
-                        );
-                        let response =
-                            ui.add(egui::Button::selectable(picker.selected == index, text));
-                        if response.clicked() {
-                            picker.selected = index;
+                egui::ScrollArea::vertical()
+                    .max_height(300.0)
+                    .show(ui, |ui| {
+                        for (index, session) in picker.sessions.iter().enumerate() {
+                            let text = format!(
+                                "Session {}   {}   {} transitions",
+                                session.id, session.date, session.transition_count
+                            );
+                            let response =
+                                ui.add(egui::Button::selectable(picker.selected == index, text));
+                            if response.clicked() {
+                                picker.selected = index;
+                            }
+                            if response.double_clicked() {
+                                choice = Some(session.id);
+                            }
                         }
-                        if response.double_clicked() {
-                            choice = Some(session.id);
-                        }
-                    }
-                });
+                    });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui.button(RichText::new("Open").strong()).clicked() {
@@ -1890,7 +1899,10 @@ enum ResolutionColor {
 }
 
 /// The text that explains how a breakpoint of a file was found.
-fn resolution_text(resolved: &ResolvedBreakpoint, stored: Option<u16>) -> (String, ResolutionColor) {
+fn resolution_text(
+    resolved: &ResolvedBreakpoint,
+    stored: Option<u16>,
+) -> (String, ResolutionColor) {
     match resolved.resolution {
         Resolution::ByPath => ("Found by path".to_owned(), ResolutionColor::Good),
         Resolution::AmbiguousPath => (
@@ -1977,8 +1989,7 @@ impl Viewer<'_> {
         let doc_id = doc.id;
         let is_live = self.live_doc == Some(doc_id);
         // Statuses and markers of this frame, before the canvas draws.
-        self.workspace
-            .refresh_decorations(self.live, self.live_doc);
+        self.workspace.refresh_decorations(self.live, self.live_doc);
 
         let Some(view) = self.workspace.view_mut(view_id) else {
             return;
@@ -2056,7 +2067,10 @@ fn live_node_menu(ui: &mut Ui, live: &mut LiveController, node: &CanvasNode) {
         }
         _ => {
             let response = ui
-                .add_enabled(connected, egui::Button::new("Add breakpoint before the node"))
+                .add_enabled(
+                    connected,
+                    egui::Button::new("Add breakpoint before the node"),
+                )
                 .on_disabled_hover_text("Connect to an executor first.");
             let response = if hook.is_some() {
                 response.on_hover_text("This replaces the forced result: a node has one hook.")
@@ -2075,7 +2089,8 @@ fn live_node_menu(ui: &mut Ui, live: &mut LiveController, node: &CanvasNode) {
         ("Force SUCCESS", NodeStatus::Success),
         ("Force FAILURE", NodeStatus::Failure),
     ] {
-        let active = hook.is_some_and(|h| h.mode == HookMode::Replace && h.desired_status == status);
+        let active =
+            hook.is_some_and(|h| h.mode == HookMode::Replace && h.desired_status == status);
         if ui
             .add_enabled(connected && !active, egui::Button::new(text))
             .on_hover_text("The node does not tick. It returns this status.")
@@ -2086,7 +2101,10 @@ fn live_node_menu(ui: &mut Ui, live: &mut LiveController, node: &CanvasNode) {
     }
     let forced = hook.is_some_and(|h| h.mode == HookMode::Replace);
     if ui
-        .add_enabled(connected && forced, egui::Button::new("Clear forced result"))
+        .add_enabled(
+            connected && forced,
+            egui::Button::new("Clear forced result"),
+        )
         .clicked()
     {
         live.remove_hook(uid);
@@ -2265,8 +2283,7 @@ mod tests {
             breakpoint("gone", Some(77)),
         ];
         let pending = PendingBreakpoints::new("x.ftbp.json".into(), set, &tree);
-        let resolutions: Vec<Resolution> =
-            pending.resolved.iter().map(|r| r.resolution).collect();
+        let resolutions: Vec<Resolution> = pending.resolved.iter().map(|r| r.resolution).collect();
         assert_eq!(
             resolutions,
             [
@@ -2288,6 +2305,10 @@ mod tests {
                 _ => assert_eq!(color, ResolutionColor::Warning),
             }
         }
-        assert!(resolution_text(&pending.resolved[2], Some(2)).0.contains("UID 2"));
+        assert!(
+            resolution_text(&pending.resolved[2], Some(2))
+                .0
+                .contains("UID 2")
+        );
     }
 }

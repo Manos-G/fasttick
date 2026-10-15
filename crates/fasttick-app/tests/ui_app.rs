@@ -437,6 +437,20 @@ fn bad_file_shows_a_notice() {
 }
 
 #[test]
+fn notice_close_button_removes_the_notice() {
+    let dir = tempfile::tempdir().unwrap();
+    let bad = dir.path().join("bad.xml");
+    std::fs::write(&bad, "<root>").unwrap();
+    let mut harness = harness(light(vec![bad]));
+    harness.run();
+    assert_eq!(harness.state().notices().len(), 1);
+    harness.get_by_role_and_label(Role::Button, "Close").click();
+    harness.run();
+    assert!(harness.state().notices().is_empty());
+    assert!(harness.query_by_label_contains("Cannot open").is_none());
+}
+
+#[test]
 fn main_tree_to_execute_is_shown_first() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("two.xml");

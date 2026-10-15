@@ -118,9 +118,7 @@ fn parse_seconds(text: &str, field: &str) -> Result<Option<u64>, String> {
         Ok(seconds) if seconds.is_finite() && seconds >= 0.0 => {
             Ok(Some((seconds * 1e6).round().min(u64::MAX as f64) as u64))
         }
-        _ => Err(format!(
-            "{field}: enter a time in seconds, for example 1.5"
-        )),
+        _ => Err(format!("{field}: enter a time in seconds, for example 1.5")),
     }
 }
 
@@ -580,12 +578,7 @@ pub fn density(index: &ReplayIndex, (start, end): (u64, u64), bins: usize) -> Ve
 /// A time offset as `m:ss.mmm` (or `h:mm:ss.mmm` from one hour).
 pub fn format_clock(us: u64) -> String {
     let ms = us / 1000;
-    let (h, m, s, ms) = (
-        ms / 3_600_000,
-        ms / 60_000 % 60,
-        ms / 1000 % 60,
-        ms % 1000,
-    );
+    let (h, m, s, ms) = (ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000);
     if h > 0 {
         format!("{h}:{m:02}:{s:02}.{ms:03}")
     } else {
@@ -676,7 +669,10 @@ mod tests {
         let mut m = model();
         assert_eq!(m.cursor().applied(), 7);
         assert_eq!(m.end_us(), 60);
-        assert_eq!(m.state().get(Uid(1)).last_non_idle, Some(NodeStatus::Failure));
+        assert_eq!(
+            m.state().get(Uid(1)).last_non_idle,
+            Some(NodeStatus::Failure)
+        );
         assert_eq!(m.node(Uid(3)).unwrap().path, "bad");
         m.go_to_start();
         assert_eq!(m.cursor().applied(), 0);

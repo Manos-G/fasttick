@@ -714,10 +714,7 @@ mod tests {
         assert_eq!(v.decorated, None);
         let selected: Vec<_> = v.canvas.tree().selected().collect();
         assert_eq!(selected.len(), 1);
-        assert_eq!(
-            v.canvas.tree().get(selected[0]).unwrap().uid,
-            Some(Uid(6))
-        );
+        assert_eq!(v.canvas.tree().get(selected[0]).unwrap().uid, Some(Uid(6)));
         assert!(!ws.reveal_uid(view, Uid(99), true));
         // A view of the inner tree does not show the outer nodes.
         ws.set_view_root(view, InstanceIndex(2));

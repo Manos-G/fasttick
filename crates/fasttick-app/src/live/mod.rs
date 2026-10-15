@@ -388,7 +388,8 @@ impl LiveController {
                 {
                     self.move_hooks(&old, &tree);
                 }
-                self.blackboard.tree_changed(&tree, self.session.as_ref().map(|s| &s.0));
+                self.blackboard
+                    .tree_changed(&tree, self.session.as_ref().map(|s| &s.0));
                 self.request_dump();
                 self.bump();
                 out.push(LiveUpdate::Tree(tree));
@@ -553,7 +554,10 @@ impl LiveController {
         let hooks: Vec<Hook> = self.hooks.values().copied().collect();
         let set = BreakpointSet {
             version: fasttick_protocol::breakpoints::FORMAT_VERSION,
-            breakpoints: hooks.iter().map(|h| Breakpoint::from_hook(h, old)).collect(),
+            breakpoints: hooks
+                .iter()
+                .map(|h| Breakpoint::from_hook(h, old))
+                .collect(),
         };
         self.hooks.clear();
         for (hook, resolved) in hooks.iter().zip(set.resolve(new)) {
@@ -567,7 +571,13 @@ impl LiveController {
                 Resolution::ByStoredUid | Resolution::Unresolved => None,
             };
             if let Some(uid) = target {
-                self.hooks.insert(uid.0, Hook { uid: uid.0, ..*hook });
+                self.hooks.insert(
+                    uid.0,
+                    Hook {
+                        uid: uid.0,
+                        ..*hook
+                    },
+                );
             }
         }
         self.hook_revision += 1;
@@ -1183,7 +1193,10 @@ mod tests {
         assert!(live.stop_recording());
         apply(&mut live, SessionEvent::RecordingStopped);
         assert!(!live.recording().is_active());
-        assert_eq!(live.recording().xml(), Some(live.tree().unwrap().xml.as_str()));
+        assert_eq!(
+            live.recording().xml(),
+            Some(live.tree().unwrap().xml.as_str())
+        );
         live.discard_recording();
         assert!(live.recording().is_empty());
     }

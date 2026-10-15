@@ -133,9 +133,17 @@ fn sort_header(ui: &mut Ui, column: StatsColumn, sort: StatsSort) -> bool {
         let c = rect.center();
         let color = ui.visuals().hyperlink_color;
         let points = if sort.ascending {
-            vec![pos2(c.x - 4.0, c.y + 2.5), pos2(c.x + 4.0, c.y + 2.5), pos2(c.x, c.y - 3.0)]
+            vec![
+                pos2(c.x - 4.0, c.y + 2.5),
+                pos2(c.x + 4.0, c.y + 2.5),
+                pos2(c.x, c.y - 3.0),
+            ]
         } else {
-            vec![pos2(c.x - 4.0, c.y - 2.5), pos2(c.x + 4.0, c.y - 2.5), pos2(c.x, c.y + 3.0)]
+            vec![
+                pos2(c.x - 4.0, c.y - 2.5),
+                pos2(c.x + 4.0, c.y - 2.5),
+                pos2(c.x, c.y + 3.0),
+            ]
         };
         ui.painter()
             .add(egui::Shape::convex_polygon(points, color, Stroke::NONE));

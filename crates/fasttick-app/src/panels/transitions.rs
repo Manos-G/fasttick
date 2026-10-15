@@ -130,7 +130,9 @@ fn replay(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                 let Some((transition, previous)) = model.transition(position) else {
                     return;
                 };
-                row.set_selected(Some(position) == current || Some(position) == model.selected_transition);
+                row.set_selected(
+                    Some(position) == current || Some(position) == model.selected_transition,
+                );
                 let node = model.node(transition.uid);
                 row.col(|ui| {
                     ui.label(RichText::new(format_seconds(transition.offset_us)).monospace());
@@ -139,9 +141,7 @@ fn replay(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                     match node {
                         Some(node) if !node.name.is_empty() => ui.label(&node.name),
                         Some(_) => ui.label(RichText::new("(no name)").weak()),
-                        None => ui.label(
-                            RichText::new(format!("UID {}", transition.uid.0)).weak(),
-                        ),
+                        None => ui.label(RichText::new(format!("UID {}", transition.uid.0)).weak()),
                     };
                 });
                 row.col(|ui| {
@@ -159,7 +159,10 @@ fn replay(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         });
 
     if let Some(format) = export {
-        cx.actions.push(AppAction::PickFile(DialogPurpose::ExportTransitions(format)));
+        cx.actions
+            .push(AppAction::PickFile(DialogPurpose::ExportTransitions(
+                format,
+            )));
     }
     if let Some((position, uid)) = clicked {
         if let Some(model) = cx.workspace.replay_mut(doc) {

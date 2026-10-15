@@ -129,6 +129,8 @@ fn live_mode_with_the_real_executor() {
         .get_by_role_and_label(Role::Button, "Disconnect")
         .click();
     harness.run_ok();
-    wait(&mut harness, "the disconnect", |h| !h.state().live().is_active());
+    wait(&mut harness, "the disconnect", |h| {
+        !h.state().live().is_active()
+    });
     drop(executor);
 }
