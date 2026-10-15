@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use fasttick_core::runtime::{InstanceIndex, Uid};
 
 use crate::documents::{DocId, ViewId};
+use crate::edit_ops::EditOp;
 use crate::jobs::DialogPurpose;
 use crate::shortcuts::Command;
 
@@ -41,4 +42,15 @@ pub enum AppAction {
     PickFile(DialogPurpose),
     /// Remove the recent-files list.
     ClearRecent,
+    /// Change the edit document of a view (see [`crate::edit_ops`]).
+    Edit(ViewId, EditOp),
+    /// Select an element of the edit document of a view and show it.
+    RevealXml {
+        /// The view.
+        view: ViewId,
+        /// The file of the element.
+        file: fasttick_core::project::FileId,
+        /// The element.
+        node: fasttick_core::xml::NodeId,
+    },
 }

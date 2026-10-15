@@ -27,10 +27,11 @@ use fasttick_protocol::session::ConnectionState;
 use serde::{Deserialize, Serialize};
 
 use crate::actions::AppAction;
-use crate::canvas::{CanvasEvent, CanvasNode, LayoutDirection, TreeCanvas};
+use crate::canvas::{CanvasEvent, CanvasNode, LayoutDirection, NodeSource, TreeCanvas};
 use crate::dialogs::{self, ConnectChoice, ConnectForm, Notice, NoticeLevel};
 use crate::dock::{self, Tab};
 use crate::documents::{DocId, DocKind, ViewId, ViewOptions, Workspace};
+use crate::edit_ops::EditOp;
 use crate::jobs::{DialogPurpose, ExportFormat, JobResult, Jobs, LoadingFile};
 use crate::live::{AFTER_BREAKPOINT_UNAVAILABLE, LiveController, LiveUpdate, ResumeAction};
 use crate::panels::{self, PanelContext, live_bar};
@@ -197,6 +198,8 @@ pub struct FastTickApp {
     notices: Vec<Notice>,
     actions: Vec<AppAction>,
     save_as_view: Option<ViewId>,
+    /// The clipboard of the tree editor (XML text of copied nodes).
+    clipboard: Option<String>,
     window_title: String,
     pending_breakpoints: Option<PendingBreakpoints>,
     sqlite_picker: Option<SqlitePicker>,
@@ -244,6 +247,7 @@ impl FastTickApp {
             notices: Vec::new(),
             actions: Vec::new(),
             save_as_view: None,
+            clipboard: None,
             window_title: String::new(),
             pending_breakpoints: None,
             sqlite_picker: None,
@@ -521,15 +525,14 @@ impl FastTickApp {
     pub fn is_enabled(&self, command: Command) -> bool {
         let active = self.active_view_in_mode();
         match command {
-            Command::NewProject
-            | Command::Save
-            | Command::Undo
-            | Command::Redo
-            | Command::Cut
-            | Command::Copy
-            | Command::Paste
-            | Command::Duplicate
-            | Command::Delete => false,
+            Command::NewProject => true,
+            Command::Save => self.active_edit_view().is_some(),
+            Command::Undo => self.active_editor().is_some_and(|e| e.can_undo()),
+            Command::Redo => self.active_editor().is_some_and(|e| e.can_redo()),
+            Command::Cut | Command::Copy | Command::Duplicate | Command::Delete => self
+                .active_edit_view()
+                .is_some_and(|v| !crate::edit_ops::selected_nodes(&self.workspace, v).is_empty()),
+            Command::Paste => self.active_edit_view().is_some() && self.clipboard.is_some(),
             Command::SaveAs => active.is_some_and(|v| {
                 self.workspace
                     .doc_of_view(v)
@@ -730,15 +733,32 @@ impl FastTickApp {
             }
             Command::ShowShortcuts => self.show_shortcuts = true,
             Command::About => self.show_about = true,
-            Command::NewProject
-            | Command::Save
-            | Command::Undo
+            Command::NewProject => self.new_document(),
+            Command::Save => {
+                if let Some(view) = self.active_edit_view() {
+                    self.save_view(ctx, view);
+                }
+            }
+            Command::Undo
             | Command::Redo
             | Command::Cut
             | Command::Copy
             | Command::Paste
             | Command::Duplicate
-            | Command::Delete => {}
+            | Command::Delete => {
+                if let Some(view) = self.active_edit_view() {
+                    let op = match command {
+                        Command::Undo => EditOp::Undo,
+                        Command::Redo => EditOp::Redo,
+                        Command::Cut => EditOp::Cut,
+                        Command::Copy => EditOp::Copy,
+                        Command::Paste => EditOp::Paste,
+                        Command::Duplicate => EditOp::Duplicate,
+                        _ => EditOp::Delete,
+                    };
+                    self.run_edit(ctx, view, op);
+                }
+            }
         }
     }
 
@@ -924,12 +944,32 @@ impl FastTickApp {
                             self.start_open(ctx, path);
                         }
                         DialogPurpose::SaveAs => {
-                            let text = self
-                                .save_as_view
-                                .take()
+                            let view = self.save_as_view.take();
+                            let doc = view
                                 .and_then(|v| self.workspace.doc_of_view(v))
-                                .map(|d| d.runtime.xml.clone());
-                            if let Some(text) = text {
+                                .map(|d| d.id);
+                            if let Some(doc) = doc
+                                && let Some(editor) = self.workspace.editor_mut(doc)
+                            {
+                                match editor.save_as(&path) {
+                                    Ok(()) => {
+                                        if let Some(document) = self.workspace.doc_mut(doc) {
+                                            document.kind =
+                                                DocKind::TreeFile { path: path.clone() };
+                                            document.title = file_name(&path);
+                                        }
+                                        self.settings.add_recent(&path);
+                                    }
+                                    Err(message) => self.notify(
+                                        ctx,
+                                        NoticeLevel::Error,
+                                        format!("Cannot save: {message}"),
+                                    ),
+                                }
+                            } else if let Some(text) = doc
+                                .and_then(|d| self.workspace.doc(d))
+                                .map(|d| d.runtime.xml.clone())
+                            {
                                 self.jobs.save_text(ctx, path, text);
                             }
                         }
@@ -1185,7 +1225,112 @@ impl FastTickApp {
                     }
                 }
                 AppAction::ClearRecent => self.settings.recent.clear(),
+                AppAction::Edit(view, op) => self.run_edit(ctx, view, op),
+                AppAction::RevealXml { view, file, node } => {
+                    self.workspace.reveal_xml(view, file, node, true);
+                    self.workspace.active_view = Some(view);
+                }
             }
+        }
+    }
+
+    /// The active view if it shows an edit document.
+    pub fn active_edit_view(&self) -> Option<ViewId> {
+        let view = self.workspace.active_view?;
+        self.workspace
+            .doc_of_view(view)
+            .filter(|d| d.editor.is_some() && d.mode() == self.mode)
+            .map(|_| view)
+    }
+
+    /// The editor document of the active edit view.
+    fn active_editor(&self) -> Option<&crate::editor::EditorDoc> {
+        let view = self.active_edit_view()?;
+        self.workspace.doc_of_view(view)?.editor.as_deref()
+    }
+
+    /// The clipboard text of the tree editor.
+    pub fn clipboard(&self) -> Option<&str> {
+        self.clipboard.as_deref()
+    }
+
+    /// Runs an edit operation on the document of a view, then selects the
+    /// new or changed nodes. Errors show as a notice.
+    pub fn run_edit(&mut self, ctx: &egui::Context, view: ViewId, op: EditOp) {
+        let is_copy = op == EditOp::Copy;
+        match crate::edit_ops::run(&mut self.workspace, view, op, &mut self.clipboard) {
+            Ok(outcome) => {
+                if is_copy && let Some(text) = &self.clipboard {
+                    ctx.copy_text(text.clone());
+                }
+                if let Some(tree) = outcome.show_tree {
+                    self.workspace.set_view_root(view, tree);
+                }
+                self.workspace.refresh_editor_views();
+                let file = self
+                    .workspace
+                    .doc_of_view(view)
+                    .and_then(|d| d.editor.as_ref())
+                    .map(|e| e.file_id());
+                if let (Some(file), false) = (file, outcome.select.is_empty())
+                    && let Some(view_ref) = self.workspace.view_mut(view)
+                {
+                    let tree = view_ref.canvas.tree_mut();
+                    tree.clear_selection();
+                    let ids: Vec<_> = outcome
+                        .select
+                        .iter()
+                        .filter_map(|n| tree.find_source(NodeSource::Xml(file, *n)))
+                        .collect();
+                    for id in &ids {
+                        tree.set_selected(*id, true);
+                    }
+                    if let Some(first) = ids.first() {
+                        view_ref.canvas.focus_on(*first, true);
+                    }
+                }
+                if let Some(message) = outcome.message {
+                    self.notify(ctx, NoticeLevel::Info, message);
+                }
+            }
+            Err(message) => self.notify(ctx, NoticeLevel::Warning, message),
+        }
+    }
+
+    /// Saves the document of a view. A new file asks for a path.
+    fn save_view(&mut self, ctx: &egui::Context, view: ViewId) {
+        let Some(doc) = self.workspace.doc_of_view(view).map(|d| d.id) else {
+            return;
+        };
+        let Some(editor) = self.workspace.editor_mut(doc) else {
+            return;
+        };
+        match editor.save() {
+            Ok(crate::editor::SaveOutcome::Saved) => {
+                if let Some(path) = editor.path() {
+                    self.settings.add_recent(&path);
+                }
+            }
+            Ok(crate::editor::SaveOutcome::NeedsPath) => {
+                self.save_as_view = Some(view);
+                self.jobs.pick_file(ctx, DialogPurpose::SaveAs, None);
+            }
+            Err(message) => {
+                self.notify(ctx, NoticeLevel::Error, format!("Cannot save: {message}"));
+            }
+        }
+    }
+
+    /// Opens a new, empty tree file in edit mode.
+    fn new_document(&mut self) {
+        let editor = crate::editor::EditorDoc::untitled();
+        let main = InstanceIndex(editor.main_tree_index());
+        let doc = self
+            .workspace
+            .add_editor_doc(PathBuf::new(), "Untitled", editor);
+        if let Some(view) = self.workspace.open_view(doc, main, self.view_options()) {
+            dock::add_document(&mut self.docks[Mode::Edit.index()], Tab::Document(view));
+            self.focus_view(view);
         }
     }
 
@@ -2118,6 +2263,9 @@ impl TabViewer for Viewer<'_> {
                 };
                 if self.live_doc == Some(doc.id) && !self.live.is_active() {
                     title.push_str(" (disconnected)");
+                }
+                if doc.editor.as_ref().is_some_and(|e| e.is_dirty()) {
+                    title.push_str(" \u{2022}");
                 }
                 title.into()
             }
