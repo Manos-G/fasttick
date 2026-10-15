@@ -10,7 +10,7 @@
 //! - "Show the whole log" (or a double-click on the ruler): zoom out.
 
 use egui::{
-    Align2, Color32, CornerRadius, FontId, Id, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui,
+    Color32, CornerRadius, FontId, Id, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui,
     WidgetInfo, pos2, vec2,
 };
 use fasttick_log::replay::PlaybackSpeed;
@@ -365,6 +365,8 @@ fn time_bar(ui: &mut Ui, model: &mut ReplayModel, palette: &CanvasPalette) {
     let first = start.div_ceil(step) * step;
     let font = FontId::proportional(10.5);
     let mut t = first;
+    // The right end of the last label, so that labels do not overlap.
+    let mut last_end = f32::NEG_INFINITY;
     while t <= end {
         let x = to_x(t);
         painter.line_segment(
@@ -376,13 +378,18 @@ fn time_bar(ui: &mut Ui, model: &mut ReplayModel, palette: &CanvasPalette) {
         } else {
             format_seconds(t)
         };
-        painter.text(
-            pos2(x + 3.0, ruler.top()),
-            Align2::LEFT_TOP,
-            label,
-            font.clone(),
-            text_color,
-        );
+        let galley = painter.layout_no_wrap(label, font.clone(), text_color);
+        let width = galley.size().x;
+        // Right of the tick; left of it at the right end of the ruler.
+        let left = if x + 3.0 + width <= rect.right() {
+            x + 3.0
+        } else {
+            x - 3.0 - width
+        };
+        if left > last_end + 4.0 && left >= rect.left() {
+            painter.galley(pos2(left, ruler.top()), galley, text_color);
+            last_end = left + width;
+        }
         t = match t.checked_add(step) {
             Some(next) => next,
             None => break,
