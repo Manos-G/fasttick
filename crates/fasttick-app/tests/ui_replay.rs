@@ -130,7 +130,7 @@ fn playback_steps_and_keys() {
     assert!(!harness.state().active_replay().unwrap().cursor().is_playing());
 
     // The speed selector.
-    harness.get_by_label("1\u{00D7}").click();
+    harness.get_by_role(Role::ComboBox).click();
     harness.run();
     harness.get_by_label("10\u{00D7}").click();
     harness.run();
@@ -222,7 +222,7 @@ fn transitions_table_filter_click_and_export() {
     assert!(rows > 0 && rows < count, "{rows}");
     harness.get_by_label(&format!("{rows} of {count} transitions"));
     // Status filter: hide IDLE.
-    harness.get_by_label("IDLE").click();
+    harness.get_by_role_and_label(Role::CheckBox, "IDLE").click();
     harness.run();
     let without_idle = harness
         .state()

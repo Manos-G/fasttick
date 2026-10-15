@@ -117,6 +117,7 @@ fn transport(
         ui.separator();
 
         let speed = model.cursor().speed().factor();
+        ui.label(RichText::new("Speed").small().weak());
         egui::ComboBox::from_id_salt("replay_speed")
             .width(70.0)
             .selected_text(speed_text(speed))
@@ -221,8 +222,10 @@ fn time_bar(ui: &mut Ui, model: &mut ReplayModel, palette: &CanvasPalette) {
     // Interaction.
     let drag_id = Id::new("fasttick_timeline_drag");
     let shift = ui.input(|i| i.modifiers.shift);
+    // A drag starts after the pointer moved a little: use the press point.
+    let press = ui.input(|i| i.pointer.press_origin());
     if response.drag_started()
-        && let Some(pointer) = response.interact_pointer_pos()
+        && let Some(pointer) = press.or(response.interact_pointer_pos())
     {
         let kind = if ruler.contains(pointer) || shift {
             DragKind::Select(to_time(pointer.x))
