@@ -18,18 +18,23 @@ use std::sync::Arc;
 use egui::{Id, RichText, Ui, WidgetText};
 use egui_dock::tab_viewer::OnCloseResponse;
 use egui_dock::{DockArea, DockState, TabViewer};
-use fasttick_core::runtime::InstanceIndex;
-use fasttick_protocol::session::{ConnectionState, SessionEvent};
+use fasttick_core::runtime::{InstanceIndex, Uid};
+use fasttick_core::status::NodeStatus;
+use fasttick_log::sqlite::SessionInfo;
+use fasttick_protocol::breakpoints::{BreakpointSet, Resolution, ResolvedBreakpoint};
+use fasttick_protocol::messages::{Hook, HookMode};
+use fasttick_protocol::session::ConnectionState;
 use serde::{Deserialize, Serialize};
 
 use crate::actions::AppAction;
-use crate::canvas::{CanvasEvent, LayoutDirection, TreeCanvas};
+use crate::canvas::{CanvasEvent, CanvasNode, LayoutDirection, TreeCanvas};
 use crate::dialogs::{self, ConnectChoice, ConnectForm, Notice, NoticeLevel};
 use crate::dock::{self, Tab};
-use crate::documents::{DocId, DocKind, ReplayData, ViewId, ViewOptions, Workspace};
-use crate::jobs::{DialogPurpose, JobResult, Jobs};
-use crate::live::LiveController;
-use crate::panels::{self, PanelContext};
+use crate::documents::{DocId, DocKind, ViewId, ViewOptions, Workspace};
+use crate::jobs::{DialogPurpose, ExportFormat, JobResult, Jobs, LoadingFile};
+use crate::live::{AFTER_BREAKPOINT_UNAVAILABLE, LiveController, LiveUpdate, ResumeAction};
+use crate::panels::{self, PanelContext, live_bar};
+use crate::replay::ReplayModel;
 use crate::settings::{RecentKind, Settings};
 use crate::shortcuts::{Command, KeyMap};
 use crate::theme::{self, CanvasPalette, ThemeChoice};
@@ -93,6 +98,60 @@ fn dock_key(mode: Mode) -> String {
     format!("fasttick.dock.{}", mode.name().to_ascii_lowercase())
 }
 
+/// A breakpoint file that waits for the user to confirm: the breakpoints
+/// and how each one was found in the running tree.
+#[derive(Debug, Clone)]
+pub struct PendingBreakpoints {
+    /// The file.
+    pub path: PathBuf,
+    /// The breakpoints of the file.
+    pub set: BreakpointSet,
+    /// How each breakpoint was found ([`BreakpointSet::resolve`]).
+    pub resolved: Vec<ResolvedBreakpoint>,
+    /// The breakpoints to insert. A breakpoint found by path is chosen by
+    /// default; a breakpoint found only by its stored UID is not (the UID
+    /// can belong to another node after a change of the tree).
+    pub chosen: Vec<bool>,
+}
+
+impl PendingBreakpoints {
+    /// Resolves a breakpoint set against a tree.
+    pub fn new(path: PathBuf, set: BreakpointSet, tree: &fasttick_core::runtime::RuntimeTree) -> Self {
+        let resolved = set.resolve(tree);
+        let chosen = resolved
+            .iter()
+            .map(|r| matches!(r.resolution, Resolution::ByPath | Resolution::AmbiguousPath))
+            .collect();
+        PendingBreakpoints {
+            path,
+            set,
+            resolved,
+            chosen,
+        }
+    }
+
+    /// The hooks of the chosen breakpoints.
+    pub fn hooks(&self) -> Vec<Hook> {
+        self.resolved
+            .iter()
+            .zip(&self.chosen)
+            .filter(|(_, chosen)| **chosen)
+            .filter_map(|(resolved, _)| {
+                let uid = resolved.uid?;
+                Some(self.set.breakpoints.get(resolved.index)?.to_hook(uid))
+            })
+            .collect()
+    }
+}
+
+/// The sessions of a SQLite log, for the user to choose one.
+#[derive(Debug, Clone)]
+struct SqlitePicker {
+    path: PathBuf,
+    sessions: Vec<SessionInfo>,
+    selected: usize,
+}
+
 /// The application.
 pub struct FastTickApp {
     mode: Mode,
@@ -111,6 +170,8 @@ pub struct FastTickApp {
     actions: Vec<AppAction>,
     save_as_view: Option<ViewId>,
     window_title: String,
+    pending_breakpoints: Option<PendingBreakpoints>,
+    sqlite_picker: Option<SqlitePicker>,
 }
 
 impl std::fmt::Debug for FastTickApp {
@@ -156,6 +217,8 @@ impl FastTickApp {
             actions: Vec::new(),
             save_as_view: None,
             window_title: String::new(),
+            pending_breakpoints: None,
+            sqlite_picker: None,
         };
         crate::fonts::install(&cc.egui_ctx);
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
@@ -222,6 +285,38 @@ impl FastTickApp {
         &self.live
     }
 
+    /// The live controller, for changes (tests and scripts).
+    pub fn live_mut(&mut self) -> &mut LiveController {
+        &mut self.live
+    }
+
+    /// The document of the live tree, if any.
+    pub fn live_doc(&self) -> Option<DocId> {
+        self.live_doc
+    }
+
+    /// The background jobs.
+    pub fn jobs(&self) -> &Jobs {
+        &self.jobs
+    }
+
+    /// The breakpoint file that waits for confirmation, if any.
+    pub fn pending_breakpoints(&self) -> Option<&PendingBreakpoints> {
+        self.pending_breakpoints.as_ref()
+    }
+
+    /// The replay model of the active replay document.
+    pub fn active_replay(&self) -> Option<&ReplayModel> {
+        let doc = self.workspace.active_replay_doc()?;
+        self.workspace.doc(doc)?.replay.as_ref()
+    }
+
+    /// The replay model of the active replay document, for changes.
+    pub fn active_replay_mut(&mut self) -> Option<&mut ReplayModel> {
+        let doc = self.workspace.active_replay_doc()?;
+        self.workspace.replay_mut(doc)
+    }
+
     /// The notices on screen.
     pub fn notices(&self) -> &[Notice] {
         &self.notices
@@ -232,6 +327,23 @@ impl FastTickApp {
             text: text.into(),
             level,
             since: ctx.input(|i| i.time),
+            action: None,
+        });
+    }
+
+    fn notify_with_action(
+        &mut self,
+        ctx: &egui::Context,
+        level: NoticeLevel,
+        text: impl Into<String>,
+        button: &str,
+        action: AppAction,
+    ) {
+        self.notices.push(Notice {
+            text: text.into(),
+            level,
+            since: ctx.input(|i| i.time),
+            action: Some((button.to_owned(), action)),
         });
     }
 
@@ -250,7 +362,16 @@ impl FastTickApp {
             RecentKind::Log => {
                 let loaded = crate::jobs::read_log(path)
                     .map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
-                self.add_log_document(path, loaded);
+                let session = if crate::jobs::is_sqlite(path) {
+                    loaded
+                        .source
+                        .as_deref()
+                        .and_then(|s| s.strip_prefix("session "))
+                        .and_then(|id| id.parse().ok())
+                } else {
+                    None
+                };
+                self.add_log_document(path, session, loaded);
             }
             RecentKind::Project => return Err(project_message(path)),
             RecentKind::Tree => {
@@ -263,8 +384,13 @@ impl FastTickApp {
     }
 
     fn start_open(&mut self, ctx: &egui::Context, path: PathBuf) {
-        if let Some(view) = self.find_open_view(&path) {
+        if !crate::jobs::is_sqlite(&path)
+            && let Some(view) = self.find_open_view(&path, None)
+        {
             self.focus_view(view);
+            return;
+        }
+        if self.jobs.loading().iter().any(|l| l.path == path) {
             return;
         }
         match RecentKind::for_path(&path) {
@@ -277,8 +403,12 @@ impl FastTickApp {
         }
     }
 
-    fn find_open_view(&self, path: &Path) -> Option<ViewId> {
-        let doc = self.workspace.find_doc(|d| d.kind.path() == Some(path))?;
+    fn find_open_view(&self, path: &Path, session: Option<i64>) -> Option<ViewId> {
+        let doc = self.workspace.find_doc(|d| match &d.kind {
+            DocKind::Replay { path: p, session: s } => p == path && *s == session,
+            DocKind::TreeFile { path: p } => p == path,
+            DocKind::Live { .. } => false,
+        })?;
         self.workspace.views_of(doc).next().map(|v| v.id)
     }
 
@@ -300,7 +430,7 @@ impl FastTickApp {
         path: &Path,
         loaded: crate::jobs::LoadedTree,
     ) -> Option<ViewId> {
-        if let Some(view) = self.find_open_view(path) {
+        if let Some(view) = self.find_open_view(path, None) {
             self.focus_view(view);
             return Some(view);
         }
@@ -324,24 +454,32 @@ impl FastTickApp {
         Some(view)
     }
 
-    fn add_log_document(&mut self, path: &Path, loaded: crate::jobs::LoadedLog) -> Option<ViewId> {
-        if let Some(view) = self.find_open_view(path) {
+    fn add_log_document(
+        &mut self,
+        path: &Path,
+        session: Option<i64>,
+        loaded: crate::jobs::LoadedLog,
+    ) -> Option<ViewId> {
+        if let Some(view) = self.find_open_view(path, session) {
             self.focus_view(view);
             return Some(view);
         }
-        let crate::jobs::LoadedLog { log, index } = loaded;
-        let position = index.len();
+        let crate::jobs::LoadedLog { log, index, source } = loaded;
+        let title = match &source {
+            Some(source) => format!("{} ({source})", file_name(path)),
+            None => file_name(path),
+        };
+        let runtime = Arc::new(log.tree.clone());
+        let mut model = ReplayModel::new(log, index);
+        model.source = source;
         let doc = self.workspace.add_doc(
             DocKind::Replay {
                 path: path.to_owned(),
+                session,
             },
-            file_name(path),
-            Arc::new(log.tree),
-            Some(ReplayData {
-                index,
-                position,
-                start_time_us: log.start_time_us,
-            }),
+            title,
+            runtime,
+            Some(model),
         );
         let view = self
             .workspace
@@ -379,6 +517,43 @@ impl FastTickApp {
             | Command::CloseTab => active.is_some(),
             Command::Disconnect => self.live.is_active(),
             Command::OpenFile | Command::OpenLog => !self.jobs.dialog_open(),
+            Command::ToggleBreakpoint => {
+                self.mode == Mode::Live
+                    && self.live.is_connected()
+                    && live_bar::selected_live_uid(&self.workspace, self.live_doc).is_some()
+            }
+            Command::Continue => self.live.is_connected() && !self.live.hits().is_empty(),
+            Command::ToggleRecording => {
+                self.live.recording().is_active()
+                    || (self.live.is_connected() && !self.live.recording_requested())
+            }
+            Command::SaveRecording => {
+                self.live.recording().has_data()
+                    && !self.live.recording().is_active()
+                    && !self.jobs.dialog_open()
+            }
+            Command::SaveBreakpoints => {
+                !self.live.hooks().is_empty()
+                    && self.live.tree().is_some()
+                    && !self.jobs.dialog_open()
+            }
+            Command::LoadBreakpoints => {
+                self.live.is_connected() && self.live.tree().is_some() && !self.jobs.dialog_open()
+            }
+            Command::PlayPause
+            | Command::StepBack
+            | Command::StepForward
+            | Command::GoToStart
+            | Command::GoToEnd => self.mode == Mode::Replay && self.active_replay().is_some(),
+            Command::ResetTimelineZoom => {
+                self.mode == Mode::Replay
+                    && self
+                        .active_replay()
+                        .is_some_and(|m| m.cursor().range().is_some())
+            }
+            Command::ExportJson | Command::ExportCsv => {
+                self.active_replay().is_some() && !self.jobs.dialog_open()
+            }
             Command::Quit
             | Command::Find
             | Command::LayoutTopDown
@@ -464,6 +639,42 @@ impl FastTickApp {
                 });
             }
             Command::Disconnect => self.live.disconnect(),
+            Command::ToggleBreakpoint => {
+                if let Some(uid) = live_bar::selected_live_uid(&self.workspace, self.live_doc) {
+                    self.live.toggle_breakpoint(uid);
+                }
+            }
+            Command::Continue => {
+                if let Some(uid) = self.live.hits().first().copied() {
+                    self.live.resume(uid, ResumeAction::Continue);
+                }
+            }
+            Command::ToggleRecording => {
+                if self.live.recording().is_active() {
+                    self.live.stop_recording();
+                } else {
+                    self.live.start_recording();
+                }
+            }
+            Command::SaveRecording => self.pick_file(ctx, DialogPurpose::SaveRecording),
+            Command::SaveBreakpoints => self.pick_file(ctx, DialogPurpose::SaveBreakpoints),
+            Command::LoadBreakpoints => self.pick_file(ctx, DialogPurpose::LoadBreakpoints),
+            Command::PlayPause => self.with_replay(ReplayModel::toggle_play),
+            Command::StepBack => self.with_replay(|m| {
+                m.step_back();
+            }),
+            Command::StepForward => self.with_replay(|m| {
+                m.step_forward();
+            }),
+            Command::GoToStart => self.with_replay(ReplayModel::go_to_start),
+            Command::GoToEnd => self.with_replay(ReplayModel::go_to_end),
+            Command::ResetTimelineZoom => self.with_replay(|m| m.set_range(None)),
+            Command::ExportJson => {
+                self.pick_file(ctx, DialogPurpose::ExportTransitions(ExportFormat::Json));
+            }
+            Command::ExportCsv => {
+                self.pick_file(ctx, DialogPurpose::ExportTransitions(ExportFormat::Csv));
+            }
             Command::SplitView => {
                 if let Some(view) = active
                     && let Some(new_view) = self.workspace.split_view(view)
@@ -501,6 +712,121 @@ impl FastTickApp {
             | Command::Paste
             | Command::Duplicate
             | Command::Delete => {}
+        }
+    }
+
+    fn with_replay(&mut self, f: impl FnOnce(&mut ReplayModel)) {
+        if let Some(model) = self.active_replay_mut() {
+            f(model);
+        }
+    }
+
+    /// Opens a file dialog. The start folder is the folder of a recent
+    /// file of the same kind.
+    fn pick_file(&mut self, ctx: &egui::Context, purpose: DialogPurpose) {
+        let start = match purpose {
+            DialogPurpose::SaveRecording | DialogPurpose::ExportTransitions(_) => self
+                .settings
+                .recent
+                .iter()
+                .find(|r| r.kind == RecentKind::Log)
+                .map(|r| r.path.clone()),
+            _ => self.settings.recent.first().map(|r| r.path.clone()),
+        };
+        self.jobs.pick_file(ctx, purpose, start);
+    }
+
+    /// Writes the finished recording to a `.btlog` file (on a worker
+    /// thread). Returns false if there is no recording.
+    pub fn save_recording_to(&mut self, ctx: &egui::Context, path: PathBuf) -> bool {
+        let fallback = self.live.tree().map(|t| t.xml.clone());
+        match self.live.recording().to_file(fallback.as_deref()) {
+            Some(file) => {
+                self.jobs.save_recording(ctx, path, file);
+                true
+            }
+            None => {
+                self.notify(ctx, NoticeLevel::Warning, "There is no recording to save.");
+                false
+            }
+        }
+    }
+
+    /// Exports the filtered transitions of the active replay document (on
+    /// a worker thread). Returns false if no log is open or the filter is
+    /// not valid.
+    pub fn export_transitions_to(
+        &mut self,
+        ctx: &egui::Context,
+        path: PathBuf,
+        format: ExportFormat,
+    ) -> bool {
+        let Some(model) = self.active_replay() else {
+            self.notify(ctx, NoticeLevel::Warning, "Open a log first.");
+            return false;
+        };
+        match model.export_filter() {
+            Ok(filter) => {
+                let log = Arc::clone(model.log());
+                self.jobs.export_transitions(ctx, path, format, log, filter);
+                true
+            }
+            Err(message) => {
+                self.notify(ctx, NoticeLevel::Warning, message);
+                false
+            }
+        }
+    }
+
+    /// Writes the breakpoints and forced results to a file (on a worker
+    /// thread).
+    pub fn save_breakpoints_to(&mut self, ctx: &egui::Context, path: PathBuf) {
+        let set = self.live.breakpoint_set();
+        self.jobs.save_breakpoints(ctx, path, set);
+    }
+
+    /// Resolves a loaded breakpoint set against the running tree and shows
+    /// it for confirmation.
+    pub fn prepare_breakpoints(&mut self, ctx: &egui::Context, path: PathBuf, set: BreakpointSet) {
+        match self.live.tree() {
+            Some(tree) => {
+                self.pending_breakpoints = Some(PendingBreakpoints::new(path, set, tree));
+            }
+            None => self.notify(
+                ctx,
+                NoticeLevel::Warning,
+                "Connect to an executor first: FastTick finds the nodes of the breakpoints \
+                 in the running tree.",
+            ),
+        }
+    }
+
+    /// Inserts the chosen breakpoints of the pending file. Returns the
+    /// number of hooks sent.
+    pub fn apply_pending_breakpoints(&mut self) -> usize {
+        let Some(pending) = self.pending_breakpoints.take() else {
+            return 0;
+        };
+        self.live.insert_hooks(&pending.hooks())
+    }
+
+    /// Selects a node of a document and moves a view to it.
+    fn reveal_node(&mut self, doc: DocId, uid: Uid) {
+        let Some(view) = self.workspace.view_for_doc(doc) else {
+            return;
+        };
+        if !self.workspace.reveal_uid(view, uid, true) {
+            return;
+        }
+        // Show the tab of the view in its dock (without a mode change).
+        if let Some(mode) = self.workspace.doc(doc).map(|d| d.mode()) {
+            let dock = &mut self.docks[mode.index()];
+            if let Some(path) = dock.find_tab(&Tab::Document(view)) {
+                let _ = dock.set_active_tab(path);
+            }
+            if mode == self.mode {
+                self.workspace.active_view = Some(view);
+            }
         }
     }
 

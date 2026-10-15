@@ -57,9 +57,34 @@ fn edit_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
 }
 
 fn replay_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
-    ui.label("Open a .btlog file that FileLogger2 wrote.");
+    ui.label(
+        "Open a .btlog file that FileLogger2 wrote, a SQLite log of SqliteLogger, or a \
+         recording that FastTick saved.",
+    );
     ui.add_space(8.0);
     action_button(ui, cx, Command::OpenLog, "Open log\u{2026}");
+    for loading in cx.loading {
+        ui.add_space(10.0);
+        let name = loading
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let (text, fraction) = match loading.progress.phase() {
+            crate::jobs::LoadPhase::Reading => {
+                (format!("Reading {name}"), loading.progress.fraction())
+            }
+            crate::jobs::LoadPhase::Indexing => (format!("Indexing {name}"), 1.0),
+        };
+        ui.add(
+            egui::ProgressBar::new(fraction)
+                .desired_width(300.0)
+                .text(text)
+                .animate(true),
+        );
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(100));
+    }
 }
 
 fn live_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
