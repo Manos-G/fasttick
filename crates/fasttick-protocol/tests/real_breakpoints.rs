@@ -507,3 +507,59 @@ fn heartbeat_loss_disables_the_hooks_and_requests_enable_them_again() {
     assert!(stopped.probe_ticks > before.probe_ticks + 3, "{stopped:?}");
     assert_eq!(live.hooks(), [Hook::breakpoint(probe)]);
 }
+
+#[test]
+fn a_request_after_a_heartbeat_timeout_enables_disabled_hooks() {
+    // BT.CPP 4.9.0 behaviour: when the heartbeat comes back, the publisher
+    // enables all hooks, also the hooks that a client disabled
+    // (heartbeatLoop of the publisher calls enableAllHooks(true)). Its
+    // heartbeat thread checks every 10 ms, so this happens a little after
+    // the first request. LiveSession handles this (see
+    // disabled_hooks_stay_disabled_after_a_heartbeat_timeout in
+    // real_session.rs).
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
+    let heartbeat = Duration::from_millis(300);
+    let mut options = options(harness, "probe.xml");
+    options.heartbeat_ms = Some(heartbeat.as_millis() as u64);
+    let mut live = Live::start(options);
+    let probe = live.uid("probe");
+    let count_runs = live.uid("count_runs");
+    let disabled = Hook {
+        enabled: false,
+        ..Hook::breakpoint(probe)
+    };
+    // A tracepoint (replace with SKIPPED) shows when the publisher disables
+    // its hooks.
+    let tracepoint = Hook::replace(count_runs, NodeStatus::Skipped);
+    live.client.insert_hooks(&[tracepoint, disabled]).unwrap();
+    wait_hit_with_heartbeat(&mut live.client, count_runs);
+
+    // Silence: wait until the tracepoint stops for some runs (a run takes
+    // 3 ticks of 20 ms), and the heartbeat timeout is over.
+    let silent_since = Instant::now();
+    let mut last_trace = Instant::now();
+    while last_trace.elapsed() < Duration::from_millis(250)
+        || silent_since.elapsed() < heartbeat + Duration::from_millis(100)
+    {
+        assert!(silent_since.elapsed() < WAIT, "the tracepoint did not stop");
+        if live
+            .client
+            .poll_notification(Duration::from_millis(20))
+            .unwrap()
+            .is_some_and(|notification| notification.uid == Uid(count_runs))
+        {
+            last_trace = Instant::now();
+        }
+    }
+
+    // The first request after the timeout disables the breakpoint once
+    // more. The publisher enables all hooks after it, so the disabled
+    // breakpoint stops the tree.
+    live.client.insert_hook(&disabled).unwrap();
+    wait_hit_with_heartbeat(&mut live.client, probe);
+    let stopped = live.assert_blocked();
+    assert_eq!(stopped.probe_ticks + 1, stopped.runs, "{stopped:?}");
+    assert_eq!(live.hooks(), [tracepoint, Hook::breakpoint(probe)]);
+}

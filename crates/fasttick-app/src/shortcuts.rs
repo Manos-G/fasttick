@@ -395,10 +395,7 @@ mod tests {
     }
 
     fn press(ctx: &egui::Context, modifiers: Modifiers, key: Key, map: &KeyMap) -> Vec<Command> {
-        let mut input = egui::RawInput {
-            modifiers,
-            ..Default::default()
-        };
+        let mut input = egui::RawInput::default();
         input.events.push(egui::Event::Key {
             key,
             physical_key: None,
@@ -433,10 +430,7 @@ mod tests {
     fn disabled_commands_are_not_consumed() {
         let ctx = egui::Context::default();
         let map = KeyMap::default();
-        let mut input = egui::RawInput {
-            modifiers: Modifiers::COMMAND,
-            ..Default::default()
-        };
+        let mut input = egui::RawInput::default();
         input.events.push(egui::Event::Key {
             key: Key::C,
             physical_key: None,

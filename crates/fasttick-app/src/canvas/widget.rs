@@ -844,11 +844,13 @@ fn handle_input(
         state.band_end = None;
     }
 
-    // Clicks.
-    if response.clicked() || response.secondary_clicked() {
+    // Clicks. A focused widget also "clicks" on Space and Enter; the
+    // canvas uses those keys itself, so it reads only real pointer clicks.
+    let clicked = response.clicked_by(PointerButton::Primary);
+    if clicked || response.secondary_clicked() {
         response.request_focus();
     }
-    if response.clicked() {
+    if clicked {
         let target = world_pointer.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
         if click_select(state, target, select_mode(modifiers)) {
             events.push(CanvasEvent::SelectionChanged);

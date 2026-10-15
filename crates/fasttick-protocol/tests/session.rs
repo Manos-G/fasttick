@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use fasttick_core::runtime::Uid;
 use fasttick_core::status::NodeStatus;
+use fasttick_protocol::client::{Client, ClientConfig};
 use fasttick_protocol::messages::{Hook, HookMode, HookPosition, UnlockRequest};
 use fasttick_protocol::session::{
     ConnectionState, LiveSession, PollConfig, SessionCommand, SessionConfig, SessionEvent,
@@ -1122,6 +1123,90 @@ fn hooks_go_back_only_after_the_notification_socket_connects() {
     events.wait_for("BreakpointReached", |event| {
         *event == SessionEvent::BreakpointReached { uid: Uid(2) }
     });
+    assert!(handle.join());
+    fake.assert_not_crashed();
+}
+
+#[test]
+fn a_hit_of_a_disabled_hook_disables_it_again() {
+    // Regression test. The executor can run a hook that the session has
+    // as disabled: the publisher enables all hooks when a request comes
+    // after a heartbeat timeout (heartbeatLoop of the publisher), and a
+    // hit can cross a disable. The session then removes the hook, which
+    // releases the node, and inserts it again as disabled. It does not
+    // report a hit, and it does not send an unlock (the publisher keeps
+    // an unlock for a node that does not wait).
+    let fake = FakePublisher::start();
+    let (handle, mut events, _) = connect(&fake, fast_config());
+    let disabled = Hook {
+        enabled: false,
+        ..Hook::breakpoint(4)
+    };
+    handle.send(SessionCommand::InsertHook(disabled));
+    assert!(fake.wait_until(WAIT, |state| {
+        state
+            .hooks
+            .get(&4)
+            .is_some_and(|hook| hook.hook == disabled)
+    }));
+
+    // Enable the hook behind the back of the session, as the publisher
+    // does after a heartbeat timeout.
+    let mut other = Client::connect(ClientConfig {
+        request_timeout: Duration::from_secs(2),
+        ..ClientConfig::new("127.0.0.1", fake.port)
+    })
+    .unwrap();
+    other.insert_hook(&Hook::breakpoint(4)).unwrap();
+
+    // The node stops at the hook. Hit it again until the session reacts
+    // (ZeroMQ can drop the first notifications).
+    let deadline = Instant::now() + WAIT;
+    loop {
+        fake.hit(4);
+        let warned = events
+            .collect_for(Duration::from_millis(50))
+            .iter()
+            .any(|event| {
+                matches!(event, SessionEvent::Warning(text) if text.contains("disabled hook at node 4"))
+            });
+        if warned {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no warning: {:#?}", events.seen);
+    }
+    assert!(fake.wait_until(WAIT, |state| {
+        state
+            .hooks
+            .get(&4)
+            .is_some_and(|hook| hook.hook == disabled && !hook.blocked)
+    }));
+    let state = fake.state();
+    let remove = state
+        .requests
+        .iter()
+        .rposition(|request| request.type_byte == b'R')
+        .expect("a HOOK_REMOVE");
+    let insert = state
+        .requests
+        .iter()
+        .rposition(|request| request.type_byte == b'I')
+        .unwrap();
+    assert!(remove < insert);
+    assert!(
+        state
+            .requests
+            .iter()
+            .all(|request| request.type_byte != b'U')
+    );
+    drop(state);
+    assert!(
+        events
+            .position(|event| matches!(event, SessionEvent::BreakpointReached { .. }))
+            .is_none(),
+        "{:#?}",
+        events.seen
+    );
     assert!(handle.join());
     fake.assert_not_crashed();
 }

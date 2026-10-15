@@ -567,3 +567,90 @@ fn executor_restart_is_detected_and_the_hooks_come_back() {
     assert!(live_b.hooks().is_empty());
     assert!(live_b.executor.is_running().unwrap());
 }
+
+/// Sends a signal to a process with the `kill` command (this crate has no
+/// unsafe code).
+fn signal(name: &str, pid: u32) {
+    let status = std::process::Command::new("kill")
+        .arg(format!("-{name}"))
+        .arg(pid.to_string())
+        .status()
+        .expect("the kill command runs");
+    assert!(status.success(), "kill -{name} {pid}: {status}");
+}
+
+#[test]
+fn disabled_hooks_stay_disabled_after_a_heartbeat_timeout() {
+    // Regression test. After a heartbeat timeout, the publisher enables all
+    // hooks with the next request, also the disabled ones (see
+    // a_request_after_a_heartbeat_timeout_enables_disabled_hooks in
+    // real_breakpoints.rs). The session inserted its hooks again at once
+    // after the reconnect, before the publisher enabled them, so a
+    // disabled breakpoint was enabled again in the executor and stopped
+    // the tree (4 of 5 runs).
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
+    let heartbeat = Duration::from_millis(300);
+    let mut options = options(harness, "probe.xml");
+    options.heartbeat_ms = Some(heartbeat.as_millis() as u64);
+    let mut live = Live::start(options);
+    let probe = live.uid("probe");
+    let mut config = fast_config();
+    config.request_timeout = Duration::from_millis(200);
+    let (handle, mut events) = connect(&live, config);
+    let disabled = Hook {
+        enabled: false,
+        ..Hook::breakpoint(probe)
+    };
+    send(&handle, SessionCommand::InsertHook(disabled));
+    wait_until("the disabled hook", || {
+        (live.hooks() == [disabled]).then_some(())
+    });
+
+    // Stop the executor process for longer than the heartbeat timeout. The
+    // requests of the session time out, and the publisher loses its
+    // heartbeat. The test sends no request until the session is back.
+    let pid = live.executor.pid();
+    signal("STOP", pid);
+    events.wait_for("Reconnecting", |event| {
+        matches!(
+            event,
+            SessionEvent::State(ConnectionState::Reconnecting { .. })
+        )
+        .then_some(())
+    });
+    std::thread::sleep(heartbeat);
+    signal("CONT", pid);
+    events.connected();
+
+    // The tree runs without a stop, and the hook stays disabled.
+    let runs = live.wait_more_runs(3);
+    assert!(
+        runs.iter().all(|(_, result)| result == "SUCCESS"),
+        "{runs:?}"
+    );
+    wait_until("the disabled hook", || {
+        (live.hooks() == [disabled]).then_some(())
+    });
+    let before = live.probe_counters();
+    let runs = live.wait_more_runs(3);
+    assert!(
+        runs.iter().all(|(_, result)| result == "SUCCESS"),
+        "{runs:?}"
+    );
+    let after = live.probe_counters();
+    assert!(after.probe_ticks >= before.probe_ticks + 3, "{after:?}");
+    assert_eq!(live.hooks(), [disabled]);
+    // The session reported no hit of the disabled breakpoint.
+    events.seen.extend(events.receiver.try_iter());
+    assert!(
+        !events
+            .seen
+            .iter()
+            .any(|event| matches!(event, SessionEvent::BreakpointReached { .. })),
+        "{:#?}",
+        events.seen
+    );
+    assert!(handle.join());
+}
