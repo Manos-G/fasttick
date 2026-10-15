@@ -1,0 +1,201 @@
+# BT.CPP XML fixtures that BT.CPP 4.9.0 accepts, and the node types that
+# they use but that only exist in the C++ code of the BT.CPP tests and
+# examples (no model in the fixture and none in all_models.xml). The
+# validator reports UnknownNodeType for exactly these types and no other
+# error. Format: <fixture path>\t<type> <type> ...
+examples/test_files/Check.xml	CheckBattery CheckTemperature
+examples/test_files/subtrees/Talk.xml	SayHello SaySomething
+inline/ex01_wrap_legacy_1.xml	MoveTo
+inline/ex02_runtime_ports_1.xml	SayRuntimePort ThinkRuntimePort
+inline/ex03_sqlite_log_1.xml	SaySomething SetTask
+inline/gtest_blackboard_1.xml	BB_TestNode
+inline/gtest_blackboard_10.xml	UpdatePosition
+inline/gtest_blackboard_11.xml	ActionWithLockedPort
+inline/gtest_blackboard_2.xml	BB_TestNode
+inline/gtest_blackboard_3.xml	BB_TestNode
+inline/gtest_blackboard_5.xml	ComparisonNode
+inline/gtest_blackboard_7.xml	SaySomething
+inline/gtest_blackboard_8.xml	BB_TestNode SaySomething
+inline/gtest_decorator_1.xml	TestA TestB
+inline/gtest_decorator_10.xml	SuccessThenFail
+inline/gtest_enums_1.xml	ActionEnum
+inline/gtest_enums_3.xml	IsHealthOk PrintEnum
+inline/gtest_enums_4.xml	ActionWithNodeType
+inline/gtest_exception_tracking_1.xml	ThrowingAction
+inline/gtest_exception_tracking_2.xml	SucceedingAction ThrowingAction
+inline/gtest_exception_tracking_3.xml	ThrowingAction
+inline/gtest_exception_tracking_4.xml	SucceedingAction
+inline/gtest_exception_tracking_5.xml	ThrowingAction
+inline/gtest_factory_10.xml	ActionIssue1046
+inline/gtest_factory_2.xml	IsDoorClosed OpenDoor PassThroughDoor PickLock SmashDoor
+inline/gtest_factory_20.xml	NonExistentNodeType
+inline/gtest_factory_4.xml	IsDoorClosed OpenDoor PassThroughDoor
+inline/gtest_factory_6.xml	SaySomething
+inline/gtest_publisher_1.xml	ThrowRuntimeError
+inline/gtest_publisher_2.xml	ThrowRuntimeError
+inline/gtest_if_then_else_1.xml	TestA TestB
+inline/gtest_if_then_else_2.xml	TestA TestB
+inline/gtest_if_then_else_3.xml	TestA
+inline/gtest_if_then_else_4.xml	TestA
+inline/gtest_if_then_else_5.xml	TestA
+inline/gtest_if_then_else_6.xml	RunningThenSuccess TestA TestB
+inline/gtest_if_then_else_7.xml	TestA TestB
+inline/gtest_interface_1.xml	PathFollow
+inline/gtest_loop_1.xml	RecordIntValue
+inline/gtest_loop_10.xml	RecordBoolValue
+inline/gtest_loop_11.xml	CountTicks
+inline/gtest_loop_2.xml	RecordDoubleValue
+inline/gtest_loop_3.xml	RecordStringValue
+inline/gtest_loop_4.xml	CountTicks
+inline/gtest_loop_5.xml	CountTicks
+inline/gtest_loop_6.xml	CountTicks
+inline/gtest_loop_7.xml	FailOnThird
+inline/gtest_loop_8.xml	RecordIntValue
+inline/gtest_loop_9.xml	RecordIntValue
+inline/gtest_parallel_1.xml	BadTest GoodTest SlowTest
+inline/gtest_parallel_2.xml	BadTest GoodTest
+inline/gtest_parallel_3.xml	BadTest GoodTest
+inline/gtest_parallel_4.xml	TestA
+inline/gtest_parallel_6.xml	TestCondition
+inline/gtest_parallel_7.xml	TestCondition
+inline/gtest_plugin_issue953_1.xml	Issue953Action
+inline/gtest_plugin_issue953_2.xml	Issue953Action
+inline/gtest_plugin_issue953_3.xml	Issue953Action
+inline/gtest_polymorphic_ports_1.xml	CreateCat PrintAnimalName PrintCatName
+inline/gtest_polymorphic_ports_2.xml	CreateSphynx PrintAnimalName
+inline/gtest_polymorphic_ports_3.xml	CreateCat UpdateAnimal
+inline/gtest_polymorphic_ports_4.xml	CreateCat PrintDogName
+inline/gtest_polymorphic_ports_5.xml	CreateCatAsAnimal PrintCatName
+inline/gtest_polymorphic_ports_6.xml	CreateAnimal PrintCatName
+inline/gtest_port_type_rules_1.xml	NodeWithIntPorts
+inline/gtest_port_type_rules_10.xml	NodeWithVectorPorts
+inline/gtest_port_type_rules_11.xml	NodeWithVectorPorts
+inline/gtest_port_type_rules_12.xml	NodeWithIntPorts NodeWithStringPorts
+inline/gtest_port_type_rules_13.xml	NodeWithDoublePorts NodeWithIntPorts
+inline/gtest_port_type_rules_14.xml	NodeWithIntPorts NodeWithTestPointPorts
+inline/gtest_port_type_rules_16.xml	NodeWithAnyPorts NodeWithIntPorts
+inline/gtest_port_type_rules_17.xml	GetAnyAsString NodeWithIntPorts
+inline/gtest_port_type_rules_18.xml	NodeWithGenericPorts NodeWithIntPorts
+inline/gtest_port_type_rules_19.xml	NodeWithGenericPorts NodeWithIntPorts
+inline/gtest_port_type_rules_2.xml	NodeWithStringPorts
+inline/gtest_port_type_rules_20.xml	NodeWithIntPorts
+inline/gtest_port_type_rules_21.xml	NodeWithIntPorts
+inline/gtest_port_type_rules_22.xml	NodeWithTestPointPorts
+inline/gtest_port_type_rules_23.xml	NodeWithTestPointPorts
+inline/gtest_port_type_rules_24.xml	NodeWithDoublePorts NodeWithIntPorts NodeWithStringPorts
+inline/gtest_port_type_rules_3.xml	NodeWithTestPointPorts
+inline/gtest_port_type_rules_4.xml	NodeWithGenericPorts NodeWithIntPorts
+inline/gtest_port_type_rules_5.xml	NodeWithGenericPorts NodeWithStringPorts
+inline/gtest_port_type_rules_6.xml	NodeWithGenericPorts NodeWithIntPorts
+inline/gtest_port_type_rules_7.xml	NodeWithIntPorts
+inline/gtest_port_type_rules_8.xml	NodeWithDoublePorts
+inline/gtest_port_type_rules_9.xml	NodeWithTestPointPorts
+inline/gtest_ports_1.xml	NodeWithPorts
+inline/gtest_ports_10.xml	NodeWithDefaultStrings
+inline/gtest_ports_11.xml	NodeWithDefaultNullptr
+inline/gtest_ports_12.xml	NodeWithDefaultNullptr
+inline/gtest_ports_13.xml	ActionWithDefaultPort
+inline/gtest_ports_14.xml	CollectDouble ProduceVectorDouble
+inline/gtest_ports_15.xml	ActionWithDefaultEmptyVector
+inline/gtest_ports_16.xml	CollectDouble
+inline/gtest_ports_2.xml	NodeWithPorts
+inline/gtest_ports_3.xml	NodeWithPorts
+inline/gtest_ports_4.xml	NodeWithPorts
+inline/gtest_ports_5.xml	NodeWithPorts
+inline/gtest_ports_6.xml	NodeInPorts NodeOutPorts
+inline/gtest_ports_7.xml	ActionVectorStringIn
+inline/gtest_ports_8.xml	DefaultTestAction
+inline/gtest_ports_9.xml	NodeWithDefaultPoints
+inline/gtest_preconditions_1.xml	TestA TestB TestC
+inline/gtest_preconditions_10.xml	KeepRunning
+inline/gtest_preconditions_11.xml	SimpleOutput TestA TestB
+inline/gtest_preconditions_12.xml	KeepRunning
+inline/gtest_preconditions_2.xml	TestA TestB TestC
+inline/gtest_preconditions_3.xml	TestA TestB
+inline/gtest_preconditions_4.xml	KeepRunning
+inline/gtest_preconditions_5.xml	KeepRunning TestA
+inline/gtest_preconditions_6.xml	TestA TestB TestC TestD
+inline/gtest_preconditions_7.xml	TestA TestB TestC
+inline/gtest_preconditions_8.xml	CoroTest
+inline/gtest_reactive_1.xml	TestA TestB TestC TestD TestE TestF
+inline/gtest_reactive_10.xml	TestA
+inline/gtest_reactive_11.xml	TestA TestB TestC
+inline/gtest_reactive_12.xml	CountingCondition
+inline/gtest_reactive_2.xml	TestA
+inline/gtest_reactive_4.xml	TestA
+inline/gtest_reactive_6.xml	TestA
+inline/gtest_reactive_7.xml	DynamicCondition TrackingAction
+inline/gtest_reactive_8.xml	TestA
+inline/gtest_reactive_backchaining_1.xml	IsHoldingJacket IsWarm WearJacket
+inline/gtest_reactive_backchaining_2.xml	GrabJacket IsHoldingJacket IsNearCloset IsWarm WearJacket
+inline/gtest_sequence_1.xml	TestA TestB TestC
+inline/gtest_skipping_1.xml	TestA TestB
+inline/gtest_skipping_2.xml	TestA TestB TestC
+inline/gtest_skipping_3.xml	TestA TestB
+inline/gtest_skipping_5.xml	AsyncActionTest TestA
+inline/gtest_skipping_6.xml	AsyncActionTest TestB
+inline/gtest_skipping_7.xml	TestA
+inline/gtest_skipping_8.xml	TestB
+inline/gtest_substitution_3.xml	SaySomething
+inline/gtest_subtree_1.xml	SaySomething
+inline/gtest_subtree_10.xml	NaughtyNav2Node SaySomething
+inline/gtest_subtree_11.xml	NaughtyNav2Node
+inline/gtest_subtree_12.xml	TestA
+inline/gtest_subtree_13.xml	MoveBase
+inline/gtest_subtree_14.xml	Assert
+inline/gtest_subtree_16.xml	PrintToConsole
+inline/gtest_subtree_17.xml	PrintToConsole
+inline/gtest_subtree_2.xml	CopyPorts SaySomething
+inline/gtest_subtree_3.xml	CopyPorts SaySomething
+inline/gtest_subtree_4.xml	CopyPorts SaySomething
+inline/gtest_subtree_5.xml	SaySomething
+inline/gtest_subtree_6.xml	SaySomething
+inline/gtest_subtree_7.xml	ReadInConstructor
+inline/gtest_subtree_9.xml	ModifyPose
+inline/gtest_try_catch_1.xml	TestA TestB TestC
+inline/gtest_try_catch_10.xml	FailThenSucceed TestA
+inline/gtest_try_catch_11.xml	AlwaysRunning CountCatch
+inline/gtest_try_catch_12.xml	AlwaysRunning CountCatch
+inline/gtest_try_catch_13.xml	RunningCatch
+inline/gtest_try_catch_14.xml	AsyncCleanup TestA
+inline/gtest_try_catch_15.xml	TestA TestB
+inline/gtest_try_catch_16.xml	TestA TestB TestC
+inline/gtest_try_catch_2.xml	TestA TestB
+inline/gtest_try_catch_3.xml	TestA TestB
+inline/gtest_try_catch_6.xml	RunningThenSuccess TestA
+inline/gtest_try_catch_7.xml	RunningThenFailure
+inline/gtest_try_catch_9.xml	TestA TestB
+inline/gtest_updates_1.xml	TestA TestB
+inline/gtest_wakeup_1.xml	FastAction
+inline/gtest_while_do_else_1.xml	TestA TestB
+inline/gtest_while_do_else_11.xml	RunningThenSuccess TestA TestB
+inline/gtest_while_do_else_2.xml	TestA TestB
+inline/gtest_while_do_else_3.xml	TestA
+inline/gtest_while_do_else_4.xml	TestA
+inline/gtest_while_do_else_5.xml	TestA
+inline/gtest_while_do_else_6.xml	TestA TestB ToggleCondition
+inline/gtest_while_do_else_7.xml	TestA TestB ToggleCondition2
+inline/gtest_while_do_else_8.xml	TestA TestB
+inline/navigation_test_1.xml	BackUpAndSpin ComputePathToPose FollowPath IsStuck
+inline/plugin_executor_1.xml	PrintVector
+inline/script_parser_test_2.xml	CheckLevel SaySomething
+inline/script_parser_test_3.xml	SampleNode595 TestA
+inline/t01_build_your_first_tree_1.xml	ApproachObject CheckBattery CloseGripper OpenGripper
+inline/t02_basic_ports_1.xml	SaySomething SaySomething2 ThinkWhatToSay
+inline/t03_generic_ports_1.xml	CalculateGoal PrintTarget
+inline/t04_reactive_sequence_1.xml	BatteryOK MoveBase SaySomething
+inline/t04_reactive_sequence_2.xml	BatteryOK MoveBase SaySomething
+inline/t05_crossdoor_1.xml	IsDoorClosed OpenDoor PassThroughDoor PickLock SmashDoor
+inline/t06_subtree_port_remapping_1.xml	MoveBase SaySomething
+inline/t07_load_multiple_xml_2.xml	SaySomething
+inline/t07_load_multiple_xml_3.xml	SaySomething
+inline/t08_additional_node_args_1.xml	Action_A Action_B
+inline/t09_scripting_1.xml	SaySomething
+inline/t11_howto_1.xml	IsDoorClosed OpenDoor PassThroughDoor PickLock SmashDoor UpdatePosition
+inline/t12_default_ports_1.xml	NodeWithDefaultPoints
+inline/t13_access_by_ref_1.xml	PushIntoVector
+inline/t15_nodes_mocking_1.xml	SaySomething
+inline/t16_global_blackboard_1.xml	PrintNumber
+inline/t17_blackboard_backup_1.xml	SaySomething
+inline/t18_waypoints_1.xml	GenerateWaypoints LoopPose PrintNumber UseWaypoint
+inline/t19_polymorphic_ports_1.xml	CreateCat CreateSphynx SayHi
