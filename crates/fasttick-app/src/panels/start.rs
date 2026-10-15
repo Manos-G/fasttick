@@ -1,5 +1,5 @@
-//! The start page of each mode: the main action of the mode and the
-//! recent files.
+//! The start page of each mode: the main actions of the mode, the recent
+//! files, what is new in this version and some tips.
 
 use egui::{RichText, Ui};
 use fasttick_protocol::session::ConnectionState;
@@ -11,37 +11,160 @@ use crate::settings::RecentKind;
 use crate::shortcuts::Command;
 use crate::widgets;
 
+/// The most recent files that the page shows.
+const MAX_RECENT: usize = 12;
+
+/// The page is in two columns if it is at least this wide.
+const TWO_COLUMNS: f32 = 820.0;
+
+/// What is new in this version: a title and a short text.
+pub const WHATS_NEW: &[(&str, &str)] = &[
+    (
+        "Add nodes from the dot",
+        "Drag from the dot under a node and release where the new node must go. \
+         A search window with fuzzy matching asks for the type.",
+    ),
+    (
+        "Pre- and post-conditions",
+        "The conditions show in a box on the cards. FastTick checks each script \
+         with the grammar of BT.CPP and shows the message of BT.CPP.",
+    ),
+    (
+        "Missing SubTree files",
+        "When a tree uses SubTrees from other files of its folder, FastTick finds \
+         the files and adds them to the project with one click.",
+    ),
+    (
+        "Descriptions",
+        "Put the pointer on a node or on a palette entry to see what the node does.",
+    ),
+    (
+        "All ports on the cards",
+        "The cards show all ports and remappings. A long value, for example a \
+         script, continues on the next lines.",
+    ),
+    (
+        "Twelve themes",
+        "OpenWire, Catppuccin and VS Code themes, in View > Theme.",
+    ),
+];
+
+/// Short tips, as (keys, text).
+const TIPS: &[(&str, &str)] = &[
+    ("F1", "Show all keyboard shortcuts."),
+    ("F", "Fit the tree to the view."),
+    ("Ctrl+L", "Change the layout direction."),
+    ("Double-click", "Expand or collapse a SubTree."),
+    ("Ctrl+F", "Search the nodes of the tree."),
+    ("Ctrl+1/2/3", "Change to edit, live or replay mode."),
+];
+
 /// Draws the start page.
 pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        ui.add_space(36.0);
-        ui.vertical_centered(|ui| {
-            ui.set_max_width(520.0);
-            ui.scope(|ui| {
-                ui.spacing_mut().interact_size.y = 44.0;
-                widgets::logo(ui, cx.palette.accent);
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.add_space(28.0);
+            let width = ui.available_width().min(1040.0);
+            let left = ((ui.available_width() - width) * 0.5).max(0.0);
+            ui.horizontal(|ui| {
+                ui.add_space(left);
+                ui.vertical(|ui| {
+                    ui.set_width(width);
+                    header(ui, cx);
+                    ui.add_space(22.0);
+                    if width >= TWO_COLUMNS {
+                        ui.columns(2, |columns| {
+                            columns[0].vertical(|ui| {
+                                start_section(ui, cx);
+                                ui.add_space(20.0);
+                                recent(ui, cx);
+                            });
+                            columns[1].vertical(|ui| {
+                                whats_new(ui);
+                                ui.add_space(20.0);
+                                tips(ui);
+                            });
+                        });
+                    } else {
+                        start_section(ui, cx);
+                        ui.add_space(20.0);
+                        recent(ui, cx);
+                        ui.add_space(20.0);
+                        whats_new(ui);
+                        ui.add_space(20.0);
+                        tips(ui);
+                    }
+                    ui.add_space(24.0);
+                });
             });
-            ui.label(RichText::new("FastTick").size(26.0).strong());
+        });
+}
+
+/// The logo, the name, the version and what FastTick is.
+fn header(ui: &mut Ui, cx: &mut PanelContext<'_>) {
+    ui.horizontal(|ui| {
+        ui.scope(|ui| {
+            ui.spacing_mut().interact_size.y = 44.0;
+            widgets::logo(ui, cx.palette.accent);
+        });
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(medium("FastTick", 26.0));
+                ui.label(
+                    RichText::new(format!("version {}", env!("CARGO_PKG_VERSION")))
+                        .small()
+                        .weak(),
+                );
+            });
             ui.label(
                 RichText::new("Tree editor, live debugger and log replayer for BehaviorTree.CPP 4")
                     .weak(),
             );
-            ui.add_space(20.0);
-            match cx.mode {
-                Mode::Edit => edit_actions(ui, cx),
-                Mode::Live => live_actions(ui, cx),
-                Mode::Replay => replay_actions(ui, cx),
-            }
-            ui.add_space(24.0);
-            recent(ui, cx);
         });
+    });
+}
+
+/// Text in the medium font.
+fn medium(text: &str, size: f32) -> RichText {
+    RichText::new(text)
+        .family(egui::FontFamily::Name(crate::fonts::MEDIUM.into()))
+        .size(size)
+        .strong()
+}
+
+/// A section title.
+fn heading(ui: &mut Ui, text: &str) {
+    ui.label(medium(text, 16.0));
+    ui.add_space(6.0);
+}
+
+/// The main actions of the mode, and the ways to the other modes.
+fn start_section(ui: &mut Ui, cx: &mut PanelContext<'_>) {
+    heading(ui, "Start");
+    match cx.mode {
+        Mode::Edit => edit_actions(ui, cx),
+        Mode::Live => live_actions(ui, cx),
+        Mode::Replay => replay_actions(ui, cx),
+    }
+    ui.add_space(10.0);
+    ui.horizontal_wrapped(|ui| {
+        for (mode, command, text) in [
+            (Mode::Edit, Command::ModeEdit, "Edit trees"),
+            (Mode::Live, Command::ModeLive, "Debug a running tree"),
+            (Mode::Replay, Command::ModeReplay, "Replay a log"),
+        ] {
+            if mode != cx.mode && ui.link(text).clicked() {
+                cx.actions.push(AppAction::Command(command));
+            }
+        }
     });
 }
 
 fn action_button(ui: &mut Ui, cx: &mut PanelContext<'_>, command: Command, text: &str) {
     let shortcut = cx.keymap.shortcut_text(ui.ctx(), command);
     let mut button =
-        egui::Button::new(RichText::new(text).size(14.5)).min_size(egui::vec2(220.0, 34.0));
+        egui::Button::new(RichText::new(text).size(14.5)).min_size(egui::vec2(260.0, 34.0));
     if let Some(shortcut) = shortcut {
         button = button.shortcut_text(shortcut);
     }
@@ -51,9 +174,16 @@ fn action_button(ui: &mut Ui, cx: &mut PanelContext<'_>, command: Command, text:
 }
 
 fn edit_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
-    ui.label("Open a tree XML file to show its trees. Editing comes in a later version.");
+    ui.label("Open a tree XML file or a project, or make a new project.");
     ui.add_space(8.0);
-    action_button(ui, cx, Command::OpenFile, "Open tree XML\u{2026}");
+    action_button(
+        ui,
+        cx,
+        Command::OpenFile,
+        "Open tree XML or project\u{2026}",
+    );
+    ui.add_space(4.0);
+    action_button(ui, cx, Command::NewProject, "New project");
 }
 
 fn replay_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
@@ -90,15 +220,9 @@ fn replay_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
 fn live_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     ui.label("Connect to an executor that runs the BT.CPP publisher.");
     ui.add_space(8.0);
-    // Centre the form: a frame does not centre itself.
-    let width = 300.0;
-    let left = ((ui.available_width() - width) * 0.5).max(0.0);
-    ui.horizontal(|ui| {
-        ui.add_space(left);
-        ui.vertical(|ui| {
-            ui.set_width(width);
-            connect_form(ui, cx);
-        });
+    ui.vertical(|ui| {
+        ui.set_width(320.0);
+        connect_form(ui, cx);
     });
 }
 
@@ -153,23 +277,20 @@ fn connect_form(ui: &mut Ui, cx: &mut PanelContext<'_>) {
 }
 
 fn recent(ui: &mut Ui, cx: &mut PanelContext<'_>) {
-    let wanted: &[RecentKind] = match cx.mode {
+    heading(ui, "Recent");
+    // The files of this mode first, then the others.
+    let first: &[RecentKind] = match cx.mode {
         Mode::Edit => &[RecentKind::Tree, RecentKind::Project],
         Mode::Replay => &[RecentKind::Log],
         Mode::Live => &[],
     };
-    let entries: Vec<_> = cx
-        .settings
-        .recent
-        .iter()
-        .filter(|r| wanted.contains(&r.kind))
-        .cloned()
-        .collect();
+    let mut entries: Vec<_> = cx.settings.recent.to_vec();
+    entries.sort_by_key(|r| !first.contains(&r.kind));
+    entries.truncate(MAX_RECENT);
     if entries.is_empty() {
+        ui.label(RichText::new("The files that you open show here.").weak());
         return;
     }
-    ui.label(RichText::new("Recent").strong());
-    ui.add_space(4.0);
     for entry in entries {
         let name = entry
             .path
@@ -181,13 +302,64 @@ fn recent(ui: &mut Ui, cx: &mut PanelContext<'_>) {
             .parent()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
-        let response = ui
-            .add(egui::Button::new(RichText::new(&name)).frame(false))
-            .on_hover_text(entry.path.display().to_string());
-        if response.clicked() {
-            cx.actions.push(AppAction::OpenPath(entry.path.clone()));
-        }
-        ui.label(RichText::new(dir).small().weak());
-        ui.add_space(2.0);
+        let exists = entry.path.exists();
+        ui.horizontal(|ui| {
+            let kind = match entry.kind {
+                RecentKind::Tree => "tree",
+                RecentKind::Project => "project",
+                RecentKind::Log => "log",
+            };
+            ui.add_sized(
+                [52.0, 18.0],
+                egui::Label::new(RichText::new(kind).small().weak()),
+            );
+            let mut text = RichText::new(&name);
+            if !exists {
+                text = text.strikethrough().weak();
+            }
+            let response = ui
+                .add_enabled(exists, egui::Button::new(text).frame(false))
+                .on_hover_text(entry.path.display().to_string())
+                .on_disabled_hover_text("The file is not there any more.");
+            if response.clicked() {
+                cx.actions.push(AppAction::OpenPath(entry.path.clone()));
+            }
+            ui.label(RichText::new(dir).small().weak());
+        });
     }
+    ui.add_space(4.0);
+    if ui.small_button("Clear the list").clicked() {
+        cx.actions.push(AppAction::ClearRecent);
+    }
+}
+
+/// What is new in this version.
+fn whats_new(ui: &mut Ui) {
+    heading(ui, "What's new");
+    for (title, text) in WHATS_NEW {
+        ui.label(medium(title, 13.5));
+        ui.label(RichText::new(*text).weak());
+        ui.add_space(6.0);
+    }
+}
+
+/// Keyboard and mouse tips.
+fn tips(ui: &mut Ui) {
+    heading(ui, "Tips");
+    egui::Grid::new("start_tips")
+        .num_columns(2)
+        .spacing([12.0, 4.0])
+        .show(ui, |ui| {
+            for (keys, text) in TIPS {
+                ui.label(RichText::new(*keys).monospace());
+                ui.label(*text);
+                ui.end_row();
+            }
+        });
+    ui.add_space(6.0);
+    ui.label(
+        RichText::new("The user guide is in docs/USER_GUIDE.md of the source code.")
+            .small()
+            .weak(),
+    );
 }

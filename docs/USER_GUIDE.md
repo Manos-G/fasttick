@@ -40,6 +40,10 @@ Options:
 
 ## 2. The main window
 
+Each mode starts with a **Start** tab. It shows the main actions of the
+mode, the recent files (the files of the mode first; click a name to open
+it), what is new in this version, and some tips.
+
 The window has three modes. Use the switch at the top, or push Ctrl+1,
 Ctrl+2 or Ctrl+3.
 
