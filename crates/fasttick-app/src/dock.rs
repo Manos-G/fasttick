@@ -141,7 +141,9 @@ pub fn default_dock(mode: Mode) -> DockState<Tab> {
     // Order of the splits: bottom row under the centre column only, then
     // the side columns over the full height.
     let [center, _left] = surface.split_left(NodeIndex::root(), 0.18, left);
-    let [center, _right] = surface.split_right(center, 0.76, right);
+    // The right column (the inspector in edit mode) is wide enough for
+    // long port values.
+    let [center, _right] = surface.split_right(center, 0.71, right);
     match mode {
         Mode::Replay => {
             // The tables below, and the timeline between the tree and the

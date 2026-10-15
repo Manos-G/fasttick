@@ -58,14 +58,25 @@ impl AddCandidate {
 }
 
 /// The candidates that match `query`, best first. For an empty query: the
-/// types of the project first, then the built-in types, each sorted by ID.
-pub fn matches<'a>(query: &str, candidates: &'a [AddCandidate]) -> Vec<&'a AddCandidate> {
+/// recent types (newest first), then the types of the project, then the
+/// built-in types, each sorted by ID.
+pub fn matches<'a>(
+    query: &str,
+    candidates: &'a [AddCandidate],
+    recent: &[String],
+) -> Vec<&'a AddCandidate> {
     let mut scored: Vec<(i32, &AddCandidate)> = candidates
         .iter()
         .filter_map(|c| Some((fuzzy::score(query, &c.id)?, c)))
         .collect();
     if query.trim().is_empty() {
-        scored.sort_by(|a, b| a.1.builtin.cmp(&b.1.builtin).then(a.1.id.cmp(&b.1.id)));
+        let rank = |c: &AddCandidate| recent.iter().position(|r| *r == c.id).unwrap_or(usize::MAX);
+        scored.sort_by(|a, b| {
+            rank(a.1)
+                .cmp(&rank(b.1))
+                .then(a.1.builtin.cmp(&b.1.builtin))
+                .then(a.1.id.cmp(&b.1.id))
+        });
     } else {
         scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.id.cmp(&b.1.id)));
     }
@@ -138,6 +149,7 @@ pub fn show(
     ctx: &egui::Context,
     popup: &mut AddPopup,
     candidates: &[AddCandidate],
+    recent: &[String],
     palette: &CanvasPalette,
 ) -> AddChoice {
     let mut choice = AddChoice::Open;
@@ -150,7 +162,7 @@ pub fn show(
             i.consume_key(Modifiers::NONE, Key::Escape),
         )
     });
-    let found = matches(&popup.query, candidates);
+    let found = matches(&popup.query, candidates, recent);
     if !found.is_empty() {
         if down {
             popup.selected = (popup.selected + 1).min(found.len() - 1);
@@ -201,7 +213,7 @@ pub fn show(
                 }
                 ui.add_space(4.0);
                 // The list of this frame uses the query of this frame.
-                let found = matches(&popup.query, candidates);
+                let found = matches(&popup.query, candidates, recent);
                 if found.is_empty() {
                     ui.label(RichText::new("No node type matches the search.").weak());
                 }
@@ -332,13 +344,23 @@ mod tests {
             candidate("AlwaysSuccess", true),
             candidate("Grab", false),
         ];
-        let ids: Vec<&str> = matches("", &list).iter().map(|c| c.id.as_str()).collect();
-        assert_eq!(ids, ["Grab", "MoveBase", "AlwaysSuccess", "Sequence"]);
-        let ids: Vec<&str> = matches("seq", &list)
-            .iter()
-            .map(|c| c.id.as_str())
-            .collect();
-        assert_eq!(ids, ["Sequence"]);
+        let ids = |query: &str, recent: &[String]| -> Vec<String> {
+            matches(query, &list, recent)
+                .iter()
+                .map(|c| c.id.clone())
+                .collect()
+        };
+        assert_eq!(
+            ids("", &[]),
+            ["Grab", "MoveBase", "AlwaysSuccess", "Sequence"]
+        );
+        assert_eq!(ids("seq", &[]), ["Sequence"]);
+        // The recent types come first, newest first.
+        let recent = ["Sequence".to_owned(), "MoveBase".to_owned()];
+        assert_eq!(
+            ids("", &recent),
+            ["Sequence", "MoveBase", "Grab", "AlwaysSuccess"]
+        );
     }
 
     #[test]

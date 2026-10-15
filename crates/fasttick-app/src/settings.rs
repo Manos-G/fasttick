@@ -76,6 +76,9 @@ pub struct Settings {
     pub auto_focus_on_breakpoint: bool,
     /// Show the minimap when the tree does not fit the view.
     pub show_minimap: bool,
+    /// The node types that the user added last, newest first (the add
+    /// popup shows them first).
+    pub recent_types: Vec<String>,
 }
 
 impl Default for Settings {
@@ -90,9 +93,13 @@ impl Default for Settings {
             edge_style: EdgeStyle::Orthogonal,
             auto_focus_on_breakpoint: true,
             show_minimap: true,
+            recent_types: Vec::new(),
         }
     }
 }
+
+/// The most recent node types that the settings keep.
+pub const MAX_RECENT_TYPES: usize = 8;
 
 /// The smallest poll interval (the session accepts 10 ms and more).
 pub const MIN_POLL_MS: u32 = 10;
@@ -125,6 +132,14 @@ impl Settings {
             self.live_port = DEFAULT_PORT;
         }
         self.recent.truncate(MAX_RECENT);
+        self.recent_types.truncate(MAX_RECENT_TYPES);
+    }
+
+    /// Puts a node type at the top of the recent types.
+    pub fn add_recent_type(&mut self, type_id: &str) {
+        self.recent_types.retain(|t| t != type_id);
+        self.recent_types.insert(0, type_id.to_owned());
+        self.recent_types.truncate(MAX_RECENT_TYPES);
     }
 
     /// Adds a file at the top of the recent-files list.

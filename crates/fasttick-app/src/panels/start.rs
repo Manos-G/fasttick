@@ -21,8 +21,17 @@ const TWO_COLUMNS: f32 = 820.0;
 pub const WHATS_NEW: &[(&str, &str)] = &[
     (
         "Add nodes from the dot",
-        "Drag from the dot under a node and release where the new node must go. \
-         A search window with fuzzy matching asks for the type.",
+        "Drag from the dot under a node and release where the new node must go, \
+         or push Shift+A. A search window with fuzzy matching asks for the type; \
+         the types that you used last come first.",
+    ),
+    (
+        "Fold large trees",
+        "Double-click a node to hide or show the nodes below it.",
+    ),
+    (
+        "Blackboard keys",
+        "The keys menu of a port lists the blackboard keys that the tree uses.",
     ),
     (
         "Pre- and post-conditions",

@@ -2187,10 +2187,17 @@ impl FastTickApp {
             candidates
                 .retain(|c| !(c.kind == fasttick_core::models::NodeKind::SubTree && c.id == title));
         }
-        match crate::add_popup::show(ctx, popup, &candidates, palette) {
+        match crate::add_popup::show(
+            ctx,
+            popup,
+            &candidates,
+            &self.settings.recent_types,
+            palette,
+        ) {
             crate::add_popup::AddChoice::Open => {}
             crate::add_popup::AddChoice::Cancel => self.add_popup = None,
             crate::add_popup::AddChoice::Add(type_id) => {
+                self.settings.add_recent_type(&type_id);
                 if let Some(popup) = self.add_popup.take() {
                     let op = popup.op(type_id);
                     self.run_edit(ctx, view, op);
