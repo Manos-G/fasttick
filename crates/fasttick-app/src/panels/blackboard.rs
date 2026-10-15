@@ -217,9 +217,15 @@ fn json_entry(
             // A child matches: open the entry to show it.
             state.set_open(true);
         }
-        state
+        let (_, header, _) = state
             .show_header(ui, |ui| {
-                ui.label(RichText::new(key).monospace());
+                // A click on the key opens or closes the entry too.
+                let clicked = ui
+                    .add(
+                        egui::Label::new(RichText::new(key).monospace())
+                            .sense(egui::Sense::click()),
+                    )
+                    .clicked();
                 if let Some(hint) = blackboard::type_hint(value) {
                     ui.label(RichText::new(hint).small().italics().color(colors.weak))
                         .on_hover_text("The C++ type (the \"__type\" key)");
@@ -231,6 +237,7 @@ fn json_entry(
                             .color(colors.weak),
                     );
                 });
+                clicked
             })
             .body(|ui| {
                 for (child_key, child) in blackboard::children(value) {
@@ -245,6 +252,12 @@ fn json_entry(
                     );
                 }
             });
+        if header.inner {
+            let mut state =
+                egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false);
+            state.toggle(ui);
+            state.store(ui.ctx());
+        }
     } else {
         ui.horizontal(|ui| {
             // Line up with the text of the collapsible headers.

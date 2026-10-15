@@ -123,7 +123,13 @@ fn connect_breakpoint_banner_and_continue() {
     connected(&mut harness);
 
     // The status bar and the live bar show the connection.
-    harness.get_by_label(&format!("Connected to 127.0.0.1:{}", fake.port));
+    assert_eq!(
+        harness
+            .query_all_by_label(&format!("Connected to 127.0.0.1:{}", fake.port))
+            .count(),
+        2,
+        "the live bar and the status bar"
+    );
     harness.get_by_role_and_label(Role::Button, "Disconnect");
 
     // Status colours: current and faded previous.
@@ -278,9 +284,9 @@ fn blackboard_recording_and_breakpoint_files() {
     harness.get_by_label("[1]");
     harness.get_by_label("2.25");
     // The filter hides entries that do not match.
-    harness
-        .get_by_role(Role::TextInput)
-        .type_text("flag");
+    harness.get_by_role(Role::TextInput).focus();
+    harness.run_ok();
+    harness.get_by_role(Role::TextInput).type_text("flag");
     harness.run_ok();
     harness.get_by_label("flag");
     assert!(harness.query_by_label("\"fast\"").is_none());
@@ -296,13 +302,20 @@ fn blackboard_recording_and_breakpoint_files() {
     wait(&mut harness, "the recorded transitions", |h| {
         h.state().live().recording().len() == 7
     });
-    harness.get_by_label_contains("Recording: 7 transitions");
+    // The live bar and the transitions panel show the count.
+    assert_eq!(
+        harness
+            .query_all_by_label_contains("Recording: 7 transitions")
+            .count(),
+        2
+    );
     harness.get_by_label("Stop recording").click();
     harness.run_ok();
     wait(&mut harness, "the recording stop", |h| {
         !h.state().live().recording().is_active()
     });
     harness.get_by_label("Recorded 7 transitions");
+    harness.get_by_label_contains("Recorded 7 transitions. Save the recording");
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("live.btlog");

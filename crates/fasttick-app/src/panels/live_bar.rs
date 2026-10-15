@@ -61,10 +61,12 @@ fn connection(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     ui.label(RichText::new(cx.live.state_text()).strong());
     match state {
         ConnectionState::Disconnected => {
-            ui.label("Host");
-            ui.add(egui::TextEdit::singleline(&mut cx.settings.live_host).desired_width(120.0));
-            ui.label("Port");
+            let label = ui.label("Host");
+            ui.add(egui::TextEdit::singleline(&mut cx.settings.live_host).desired_width(120.0))
+                .labelled_by(label.id);
+            let label = ui.label("Port");
             ui.add(egui::DragValue::new(&mut cx.settings.live_port).range(1..=65534))
+                .labelled_by(label.id)
                 .on_hover_text("The server port. The notifications use the next port.");
             let valid = !cx.settings.live_host.trim().is_empty();
             if ui
@@ -95,7 +97,7 @@ fn connection(ui: &mut Ui, cx: &mut PanelContext<'_>) {
 }
 
 fn poll_interval(ui: &mut Ui, cx: &mut PanelContext<'_>) {
-    ui.label("Poll");
+    let label = ui.label("Poll");
     let (low, high) = POLL_SLIDER_MS;
     let mut ms = cx.settings.poll_interval_ms.clamp(low, high);
     let response = ui
@@ -105,6 +107,7 @@ fn poll_interval(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                 .suffix(" ms")
                 .integer(),
         )
+        .labelled_by(label.id)
         .on_hover_text(
             "How often FastTick reads the node statuses. The connection also sends a \
              heartbeat each second.",

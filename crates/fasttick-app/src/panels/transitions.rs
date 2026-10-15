@@ -171,22 +171,24 @@ fn replay(ui: &mut Ui, cx: &mut PanelContext<'_>) {
 /// The first filter row: the patterns and the statuses.
 fn filter_bar(ui: &mut Ui, model: &mut ReplayModel, palette: &CanvasPalette) {
     ui.horizontal_wrapped(|ui| {
-        ui.label("Include");
+        let label = ui.label("Include");
         ui.add(
             egui::TextEdit::singleline(&mut model.filter.include)
                 .hint_text("name, path or type")
                 .desired_width(140.0),
         )
+        .labelled_by(label.id)
         .on_hover_text(
             "Show only nodes that match. Separate patterns with commas. * matches any \
              text, ? one character. Case is ignored.",
         );
-        ui.label("Exclude");
+        let label = ui.label("Exclude");
         ui.add(
             egui::TextEdit::singleline(&mut model.filter.exclude)
                 .hint_text("patterns")
                 .desired_width(120.0),
         )
+        .labelled_by(label.id)
         .on_hover_text("Hide nodes that match. Exclude wins over include.");
         ui.separator();
         for status in NodeStatus::ALL {
@@ -203,18 +205,20 @@ fn filter_bar(ui: &mut Ui, model: &mut ReplayModel, palette: &CanvasPalette) {
 
 /// The time range fields of the second filter row.
 fn time_range_fields(ui: &mut Ui, model: &mut ReplayModel) {
-    ui.label("From");
+    let label = ui.label("From");
     ui.add(
         egui::TextEdit::singleline(&mut model.filter.from_s)
             .hint_text("start")
             .desired_width(64.0),
-    );
-    ui.label("to");
+    )
+    .labelled_by(label.id);
+    let label = ui.label("to");
     ui.add(
         egui::TextEdit::singleline(&mut model.filter.to_s)
             .hint_text("end")
             .desired_width(64.0),
-    );
+    )
+    .labelled_by(label.id);
     ui.label("s");
     let range = model.cursor().range();
     if ui
