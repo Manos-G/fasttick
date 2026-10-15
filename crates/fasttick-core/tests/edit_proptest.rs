@@ -49,6 +49,7 @@ const TEXTS: &[&str] = &[
 "#,
     "<root BTCPP_format=\"4\">\r\n\t<BehaviorTree ID=\"Main\">\r\n\t\t<Sequence>\r\n\t\t\t<!-- first -->\r\n\t\t\t<A x=\"1\"/>\r\n\t\t\t<Inverter>\r\n\t\t\t\t<B/>\r\n\t\t\t</Inverter>\r\n\t\t\t<C/>\r\n\t\t</Sequence>\r\n\t</BehaviorTree>\r\n</root>\r\n",
     "<root BTCPP_format=\"4\"><BehaviorTree ID=\"Main\"><Sequence><A/><B x=\"1\"/><Fallback><C/><D/></Fallback></Sequence></BehaviorTree><BehaviorTree ID=\"Walk\"><E/></BehaviorTree></root>",
+    "\u{feff}<?xml version=\"1.0\"?>\r\n<root BTCPP_format=\"4\" main_tree_to_execute=\"Main\">\r\n  <BehaviorTree ID=\"Main\">\r\n    <Fallback>\r\n      <Sleep msec=\"10\"/> <!-- same line -->\r\n      <Walk/>\r\n    </Fallback>\r\n  </BehaviorTree>\r\n  <TreeNodesModel>\r\n    <Action ID=\"Beep\"/>\r\n  </TreeNodesModel>\r\n  <BehaviorTree ID=\"Walk\"/>\r\n</root>\r\n",
     "<root>\n  <BehaviorTree ID=\"Main\">\n    <Control ID=\"Sequence\" name=\"s\">\n      <Action ID=\"Act\" p=\"{k}\"/>  <Condition ID=\"Cond\"/>\n      <SubTree ID=\"Walk\" _autoremap=\"true\"/>\n    </Control>\n  </BehaviorTree>\n  <BehaviorTree ID=\"Walk\">\n    <Sleep msec=\"{t}\"/>\n  </BehaviorTree>\n</root>\n",
 ];
 
