@@ -81,7 +81,7 @@ pub fn shortcut_list(ui: &mut Ui, keymap: &KeyMap) {
             .iter()
             .position(|g| *g == group)
             .unwrap_or(order.len());
-        let text = ui.ctx().format_shortcut(&binding.shortcut);
+        let text = crate::shortcuts::format_shortcut(ui.ctx(), &binding.shortcut);
         groups
             .entry(rank)
             .or_insert_with(|| (group, Vec::new()))

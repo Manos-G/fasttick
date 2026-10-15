@@ -901,7 +901,7 @@ impl FastTickApp {
             self.menu_item(ui, Command::NewProject);
             self.menu_item(ui, Command::OpenFile);
             self.menu_item(ui, Command::OpenLog);
-            ui.menu_button("Recent", |ui| {
+            submenu(ui, "Recent", |ui| {
                 if self.settings.recent.is_empty() {
                     ui.label(RichText::new("No recent files").weak());
                 }
@@ -952,7 +952,7 @@ impl FastTickApp {
                 .active_view_in_mode()
                 .and_then(|v| self.workspace.view(v))
                 .map_or(self.settings.layout_direction, |v| v.canvas.direction());
-            ui.menu_button("Layout", |ui| {
+            submenu(ui, "Layout", |ui| {
                 self.radio_item(
                     ui,
                     Command::LayoutTopDown,
@@ -966,7 +966,7 @@ impl FastTickApp {
                 ui.separator();
                 self.menu_item(ui, Command::ToggleLayout);
             });
-            ui.menu_button("Edges", |ui| {
+            submenu(ui, "Edges", |ui| {
                 for style in [
                     crate::canvas::EdgeStyle::Orthogonal,
                     crate::canvas::EdgeStyle::Curved,
@@ -987,13 +987,13 @@ impl FastTickApp {
                     }
                 }
             });
-            ui.menu_button("Theme", |ui| {
+            submenu(ui, "Theme", |ui| {
                 let theme = self.theme();
                 self.radio_item(ui, Command::ThemeLight, theme == ThemeChoice::Light);
                 self.radio_item(ui, Command::ThemeDark, theme == ThemeChoice::Dark);
                 self.radio_item(ui, Command::ThemeSystem, theme == ThemeChoice::System);
             });
-            ui.menu_button("Panels", |ui| {
+            submenu(ui, "Panels", |ui| {
                 let dock = &mut self.docks[self.mode.index()];
                 for tab in Tab::PANELS {
                     let mut shown = dock::contains(dock, tab);
@@ -1149,6 +1149,15 @@ impl FastTickApp {
             }
         }
     }
+}
+
+/// A submenu entry. egui's default arrow glyph is not in the bundled font,
+/// so the entry uses "›" (U+203A), which Roboto has.
+fn submenu(ui: &mut Ui, text: &str, content: impl FnOnce(&mut Ui)) {
+    egui::containers::menu::SubMenuButton::from_button(
+        egui::Button::new(text).right_text("\u{203A}"),
+    )
+    .ui(ui, content);
 }
 
 /// Why a menu command is disabled.

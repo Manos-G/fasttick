@@ -297,7 +297,7 @@ impl KeyMap {
 
     /// The shortcut text of a command, for example `Ctrl+Shift+O`.
     pub fn shortcut_text(&self, ctx: &egui::Context, command: Command) -> Option<String> {
-        self.shortcut(command).map(|s| ctx.format_shortcut(&s))
+        self.shortcut(command).map(|s| format_shortcut(ctx, &s))
     }
 
     /// Commands that have two bindings with the same keys. Should be empty.
@@ -342,6 +342,31 @@ impl KeyMap {
             }
         });
         commands
+    }
+}
+
+/// The text of a shortcut. Like `Context::format_shortcut`, but with
+/// symbols for the punctuation keys (`Ctrl+=` instead of `Ctrl+Equals`).
+pub fn format_shortcut(ctx: &egui::Context, shortcut: &KeyboardShortcut) -> String {
+    let symbol = match shortcut.logical_key {
+        Key::Equals => Some("="),
+        Key::Plus => Some("+"),
+        Key::Minus => Some("-"),
+        Key::Backslash => Some("\\"),
+        Key::Slash => Some("/"),
+        Key::Comma => Some(","),
+        Key::Period => Some("."),
+        _ => None,
+    };
+    let Some(symbol) = symbol else {
+        return ctx.format_shortcut(shortcut);
+    };
+    // Format the modifiers with a placeholder key, then put the symbol in.
+    let modifiers_only = KeyboardShortcut::new(shortcut.modifiers, Key::A);
+    let text = ctx.format_shortcut(&modifiers_only);
+    match text.strip_suffix('A') {
+        Some(prefix) => format!("{prefix}{symbol}"),
+        None => text,
     }
 }
 
@@ -408,6 +433,17 @@ mod tests {
         });
         output.textures_delta.clear();
         out
+    }
+
+    #[test]
+    fn shortcut_text_uses_symbols() {
+        let ctx = egui::Context::default();
+        let map = KeyMap::default();
+        assert_eq!(map.shortcut_text(&ctx, Command::ZoomIn).as_deref(), Some("Ctrl+="));
+        assert_eq!(map.shortcut_text(&ctx, Command::ZoomOut).as_deref(), Some("Ctrl+-"));
+        assert_eq!(map.shortcut_text(&ctx, Command::SplitView).as_deref(), Some("Ctrl+\\"));
+        assert_eq!(map.shortcut_text(&ctx, Command::OpenLog).as_deref(), Some("Ctrl+Shift+O"));
+        assert_eq!(map.shortcut_text(&ctx, Command::FitToView).as_deref(), Some("F"));
     }
 
     #[test]

@@ -201,6 +201,7 @@ pub struct CanvasState {
     edge_bounds: Vec<Option<Rect>>,
     direction: LayoutDirection,
     edge_style: EdgeStyle,
+    minimap: bool,
     viewport: Viewport,
     needs_layout: bool,
     pending: Option<PendingView>,
@@ -240,6 +241,7 @@ impl CanvasState {
             edge_bounds: Vec::new(),
             direction: LayoutDirection::default(),
             edge_style: EdgeStyle::default(),
+            minimap: true,
             viewport: Viewport::default(),
             needs_layout: true,
             pending: Some(PendingView::Initial),
@@ -321,6 +323,16 @@ impl CanvasState {
     /// Sets the edge style.
     pub fn set_edge_style(&mut self, style: EdgeStyle) {
         self.edge_style = style;
+    }
+
+    /// True if the minimap shows when the tree does not fit the view.
+    pub fn minimap(&self) -> bool {
+        self.minimap
+    }
+
+    /// Shows or hides the minimap.
+    pub fn set_minimap(&mut self, show: bool) {
+        self.minimap = show;
     }
 
     /// The viewport.
@@ -734,6 +746,9 @@ impl<'a> TreeCanvas<'a> {
         paint_canvas(state, ui, rect, palette, response.has_focus());
         state.stats.paint_ms = started.elapsed().as_secs_f32() * 1000.0;
 
+        if state.minimap {
+            minimap(state, ui, rect, palette, id);
+        }
         describe_for_accesskit(state, ui, rect, id);
         show_tooltip(state, ui, &response, id, now);
 
@@ -1734,6 +1749,84 @@ fn paint_card(
     }
 }
 
+/// The largest size of the minimap.
+const MINIMAP_MAX: Vec2 = vec2(220.0, 150.0);
+
+/// The rectangle of the minimap in a canvas, for tree bounds of this
+/// shape. `None` if the canvas is too small.
+fn minimap_rect(canvas: Rect, bounds: Rect) -> Option<Rect> {
+    if !bounds.is_positive() || canvas.width() < 360.0 || canvas.height() < 240.0 {
+        return None;
+    }
+    let scale = (MINIMAP_MAX.x / bounds.width()).min(MINIMAP_MAX.y / bounds.height());
+    let size = (bounds.size() * scale).max(vec2(40.0, 24.0)) + Vec2::splat(12.0);
+    Some(Rect::from_min_size(
+        canvas.max - size - Vec2::splat(12.0),
+        size,
+    ))
+}
+
+/// The minimap: an overview of the whole tree in the bottom-right corner.
+/// It shows when the tree does not fit the view. A click or a drag moves
+/// the view to that place.
+fn minimap(state: &mut CanvasState, ui: &Ui, rect: Rect, palette: &CanvasPalette, canvas: Id) {
+    let bounds = state.layout.bounds;
+    let visible = state.viewport.visible_world(rect);
+    if !bounds.is_positive() || visible.contains_rect(bounds) {
+        return;
+    }
+    let Some(frame) = minimap_rect(rect, bounds) else {
+        return;
+    };
+    let inner = frame.shrink(6.0);
+    let scale = (inner.width() / bounds.width()).min(inner.height() / bounds.height());
+    let offset = inner.center() - bounds.center().to_vec2() * scale;
+    let to_mini = |p: Pos2| (offset + p.to_vec2() * scale);
+    let from_mini = |p: Pos2| ((p - offset) / scale).to_pos2();
+
+    let response = ui.interact(frame, canvas.with("minimap"), Sense::click_and_drag());
+    if (response.clicked() || response.dragged())
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let target = Viewport::centered_on(from_mini(pointer), state.size, state.viewport.zoom);
+        if response.dragged() {
+            state.set_viewport(target);
+        } else {
+            state.animate_to(target, SHORT_ANIMATION_SECONDS);
+        }
+    }
+
+    let painter = ui.painter_at(rect);
+    painter.rect(
+        frame,
+        CornerRadius::same(6),
+        palette.card.gamma_multiply(0.94),
+        Stroke::new(1.0, palette.card_border),
+        StrokeKind::Inside,
+    );
+    let mut mesh = Mesh::default();
+    for (node, world) in state.tree.nodes().iter().zip(&state.layout.rects) {
+        let color = palette
+            .status(node.deco.status)
+            .unwrap_or_else(|| palette.category(node.category));
+        let r = Rect::from_min_max(to_mini(world.min), to_mini(world.max));
+        let r = Rect::from_center_size(r.center(), r.size().max(Vec2::splat(1.0)));
+        mesh.add_colored_rect(r, color);
+    }
+    painter.add(Shape::mesh(mesh));
+    let view = Rect::from_min_max(to_mini(visible.min), to_mini(visible.max)).intersect(inner.expand(2.0));
+    if view.is_positive() {
+        painter.rect(
+            view,
+            CornerRadius::same(2),
+            palette.accent.gamma_multiply(0.1),
+            Stroke::new(1.5, palette.accent),
+            StrokeKind::Middle,
+        );
+    }
+    response.on_hover_text("Click or drag to move the view");
+}
+
 /// Describes the visible nodes for screen readers (and for UI tests).
 fn describe_for_accesskit(state: &CanvasState, ui: &Ui, rect: Rect, canvas: Id) {
     let ctx = ui.ctx();
@@ -2059,6 +2152,21 @@ mod tests {
         assert_eq!(select_mode(Modifiers::COMMAND), SelectMode::Toggle);
         assert_eq!(select_mode(Modifiers::SHIFT), SelectMode::Add);
         assert_eq!(select_mode(Modifiers::NONE), SelectMode::Replace);
+    }
+
+    #[test]
+    fn minimap_rect_keeps_the_aspect_ratio() {
+        let canvas = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 700.0));
+        let wide = Rect::from_min_size(Pos2::ZERO, vec2(10000.0, 500.0));
+        let mini = minimap_rect(canvas, wide).unwrap();
+        assert!(canvas.contains_rect(mini));
+        assert!((mini.width() - 12.0 - MINIMAP_MAX.x).abs() < 0.01);
+        assert!(mini.height() < mini.width());
+        let tall = Rect::from_min_size(Pos2::ZERO, vec2(100.0, 10000.0));
+        let mini = minimap_rect(canvas, tall).unwrap();
+        assert!((mini.height() - 12.0 - MINIMAP_MAX.y).abs() < 0.01);
+        assert!(minimap_rect(Rect::from_min_size(Pos2::ZERO, vec2(200.0, 100.0)), wide).is_none());
+        assert!(minimap_rect(canvas, Rect::NOTHING).is_none());
     }
 
     #[test]
