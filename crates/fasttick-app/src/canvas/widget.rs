@@ -32,7 +32,10 @@ use fasttick_core::status::NodeStatus;
 use super::card::{self, CardGeometry, TextKind, TextMeasure};
 use super::hit;
 use super::layout::{self, LayoutDirection, TreeLayout};
-use super::model::{CanvasNodeId, CanvasTree, NavStep, NodeCategory, NodeSource, Substitution};
+use super::model::{
+    BreakpointMarker, CanvasNode, CanvasNodeId, CanvasTree, NavStep, NodeCategory, NodeSource,
+    Substitution,
+};
 use super::paint::{self, EdgeStyle};
 use super::viewport::{self, Viewport};
 use crate::fonts;
@@ -168,6 +171,7 @@ const SLOT_MORE: u64 = 8;
 const SLOT_CHIP: u64 = 9;
 const SLOT_TAG: u64 = 10;
 const SLOT_LABEL_SMALL: u64 = 11;
+const SLOT_TAG_FAILURE: u64 = 12;
 
 /// The smallest label size (screen points) at [`Detail::Labels`].
 const LABEL_MIN_PX: f32 = 9.5;
@@ -679,12 +683,25 @@ impl TextMeasure for EguiMeasure<'_, '_> {
     }
 }
 
+/// Extra entries for the context menu of a node. The owner of the canvas
+/// adds mode-specific actions (for example breakpoints in live mode).
+pub type NodeMenu<'a> = dyn FnMut(&mut Ui, &CanvasNode) + 'a;
+
 /// The tree canvas widget. See the module documentation.
-#[derive(Debug)]
 pub struct TreeCanvas<'a> {
     state: &'a mut CanvasState,
     palette: &'a CanvasPalette,
     id_salt: Id,
+    node_menu: Option<&'a mut NodeMenu<'a>>,
+}
+
+impl std::fmt::Debug for TreeCanvas<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TreeCanvas")
+            .field("id_salt", &self.id_salt)
+            .field("node_menu", &self.node_menu.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> TreeCanvas<'a> {
@@ -694,7 +711,15 @@ impl<'a> TreeCanvas<'a> {
             state,
             palette,
             id_salt: Id::new("tree_canvas"),
+            node_menu: None,
         }
+    }
+
+    /// Adds entries at the top of the context menu of a node. The function
+    /// gets the node under the pointer at the right-click.
+    pub fn node_menu(mut self, menu: &'a mut NodeMenu<'a>) -> Self {
+        self.node_menu = Some(menu);
+        self
     }
 
     /// Sets the ID salt. Use a different salt for each canvas on screen.
@@ -709,6 +734,7 @@ impl<'a> TreeCanvas<'a> {
             state,
             palette,
             id_salt,
+            mut node_menu,
         } = self;
         let id = ui.make_persistent_id(id_salt);
         let available = ui.available_rect_before_wrap();
@@ -760,7 +786,9 @@ impl<'a> TreeCanvas<'a> {
 
         // Context menu, for the node under the pointer at the right-click.
         let target = state.context_target;
-        response.context_menu(|ui| context_menu(state, ui, target, &mut events));
+        response.context_menu(|ui| {
+            context_menu(state, ui, target, &mut events, node_menu.as_deref_mut());
+        });
 
         CanvasOutput { response, events }
     }
@@ -1045,7 +1073,12 @@ fn context_menu(
     ui: &mut Ui,
     target: Option<CanvasNodeId>,
     events: &mut Vec<CanvasEvent>,
+    node_menu: Option<&mut NodeMenu<'_>>,
 ) {
+    if let (Some(node), Some(menu)) = (target.and_then(|id| state.tree.get(id)), node_menu) {
+        menu(ui, node);
+        ui.separator();
+    }
     if let Some(node) = target.and_then(|id| state.tree.get(id)) {
         let source = node.source;
         let label = node.label.clone();
@@ -1359,6 +1392,17 @@ fn paint_card(
         ));
     }
 
+    // The executor waits before this node: a halo in the breakpoint
+    // colour, and a strong outline after the card (below).
+    let stopped = deco.breakpoint == Some(BreakpointMarker::Hit);
+    if stopped {
+        shapes.push(Shape::rect_filled(
+            screen.expand(8.0 * zoom.max(0.5)),
+            radius(12.0 * zoom),
+            palette.breakpoint.gamma_multiply(0.2),
+        ));
+    }
+
     if detail == Detail::Boxes {
         let fill = match status_color {
             Some(color) => mix(palette.card, color, 0.7),
@@ -1378,6 +1422,14 @@ fn paint_card(
                 screen.expand(2.0),
                 r,
                 Stroke::new(2.0, palette.accent),
+                StrokeKind::Outside,
+            ));
+        }
+        if stopped {
+            shapes.push(Shape::rect_stroke(
+                screen.expand(1.0),
+                r,
+                Stroke::new(2.5, palette.breakpoint),
                 StrokeKind::Outside,
             ));
         }
@@ -1459,6 +1511,14 @@ fn paint_card(
             screen.expand(2.0),
             radius(6.0 * zoom + 2.0),
             Stroke::new(3.0, palette.running.gamma_multiply(0.3)),
+            StrokeKind::Outside,
+        ));
+    }
+    if stopped {
+        shapes.push(Shape::rect_stroke(
+            screen.expand(1.0),
+            radius(6.0 * zoom + 1.0),
+            Stroke::new(3.0, palette.breakpoint),
             StrokeKind::Outside,
         ));
     }
@@ -1682,11 +1742,11 @@ fn paint_card(
 
     // Substitution tag.
     if let Some(substitution) = deco.substitution {
-        let (text, color) = match substitution {
-            Substitution::ForcedSuccess => ("forced SUCCESS", palette.success),
-            Substitution::ForcedFailure => ("forced FAILURE", palette.failure),
+        let (text, color, slot) = match substitution {
+            Substitution::ForcedSuccess => ("forced SUCCESS", palette.success, SLOT_TAG),
+            Substitution::ForcedFailure => ("forced FAILURE", palette.failure, SLOT_TAG_FAILURE),
         };
-        let galley = state.galleys.get(index, SLOT_TAG, || {
+        let galley = state.galleys.get(index, slot, || {
             painter.layout_job(LayoutJob::simple_singleline(
                 text.to_owned(),
                 state.fonts.font(TextKind::Note, 9.5 * text_zoom),

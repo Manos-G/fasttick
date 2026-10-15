@@ -56,4 +56,6 @@ pub use model::{
 };
 pub use paint::EdgeStyle;
 pub use viewport::Viewport;
-pub use widget::{CanvasEvent, CanvasOutput, CanvasState, CanvasStats, Detail, TreeCanvas};
+pub use widget::{
+    CanvasEvent, CanvasOutput, CanvasState, CanvasStats, Detail, NodeMenu, TreeCanvas,
+};

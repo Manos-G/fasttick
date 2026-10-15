@@ -38,7 +38,7 @@ impl RecentKind {
             .map(str::to_ascii_lowercase)
             .as_deref()
         {
-            Some("btlog") => RecentKind::Log,
+            Some("btlog" | "db3" | "btdb" | "sqlite" | "sqlite3" | "db") => RecentKind::Log,
             Some("ftproj") => RecentKind::Project,
             _ => RecentKind::Tree,
         }

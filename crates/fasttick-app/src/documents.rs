@@ -9,15 +9,17 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use fasttick_core::runtime::{InstanceIndex, NodeIndex, RuntimeTree};
+use fasttick_core::runtime::{InstanceIndex, NodeIndex, RuntimeTree, Uid};
 use fasttick_core::status::NodeStatus;
-use fasttick_log::replay::{ReplayIndex, ReplayState};
+use fasttick_log::replay::ReplayState;
 
 use crate::app::Mode;
 use crate::canvas::{
     BuiltinCategories, CanvasState, CanvasTree, EdgeStyle, Expansion, LayoutDirection, NodeSource,
     RuntimeBuildOptions, SubtreeLinking,
 };
+use crate::live::LiveController;
+use crate::replay::ReplayModel;
 
 /// The ID of a document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -42,10 +44,12 @@ pub enum DocKind {
         /// `host:port` of the executor.
         endpoint: String,
     },
-    /// A `.btlog` file.
+    /// A log: a `.btlog` file or one session of a SQLite database.
     Replay {
         /// The file.
         path: PathBuf,
+        /// The session ID in a SQLite database.
+        session: Option<i64>,
     },
 }
 
@@ -62,27 +66,9 @@ impl DocKind {
     /// The file of the document, if any.
     pub fn path(&self) -> Option<&std::path::Path> {
         match self {
-            DocKind::TreeFile { path } | DocKind::Replay { path } => Some(path),
+            DocKind::TreeFile { path } | DocKind::Replay { path, .. } => Some(path),
             DocKind::Live { .. } => None,
         }
-    }
-}
-
-/// Replay data of a `.btlog` document.
-#[derive(Debug, Clone)]
-pub struct ReplayData {
-    /// The replay index.
-    pub index: ReplayIndex,
-    /// The number of transitions that the views show as applied.
-    pub position: usize,
-    /// The start time of the log (microseconds since the Unix epoch).
-    pub start_time_us: i64,
-}
-
-impl ReplayData {
-    /// The state at the current position.
-    pub fn state(&self) -> ReplayState {
-        self.index.state_after(self.position)
     }
 }
 
@@ -99,8 +85,8 @@ pub struct Document {
     pub runtime: Arc<RuntimeTree>,
     /// How SubTree nodes find their tree.
     pub linking: SubtreeLinking,
-    /// Replay data (replay documents only).
-    pub replay: Option<ReplayData>,
+    /// The replay model (replay documents only).
+    pub replay: Option<ReplayModel>,
     /// The main tree: `main_tree_to_execute` of a tree file, else the
     /// first tree (the root instance of a runtime tree).
     pub main_instance: InstanceIndex,
@@ -126,6 +112,9 @@ pub struct View {
     pub expansion: Expansion,
     /// The canvas.
     pub canvas: CanvasState,
+    /// The decoration key (live generation or replay position) that the
+    /// canvas tree shows. `None` after the tree was built again.
+    pub decorated: Option<u64>,
 }
 
 /// All open documents and views.
@@ -224,7 +213,7 @@ impl Workspace {
         kind: DocKind,
         title: impl Into<String>,
         runtime: Arc<RuntimeTree>,
-        replay: Option<ReplayData>,
+        replay: Option<ReplayModel>,
     ) -> DocId {
         let id = DocId(self.next());
         let linking = SubtreeLinking::detect(&runtime);
@@ -258,6 +247,7 @@ impl Workspace {
             view.expansion = CanvasTree::default_expansion(&document.runtime, options);
             let tree = build_tree(document, view.root_instance, &view.expansion);
             view.canvas = fresh_canvas(tree, &view.canvas);
+            view.decorated = None;
         }
     }
 
@@ -271,10 +261,7 @@ impl Workspace {
         let document = self.doc(doc)?;
         let build = build_options(document, root_instance);
         let expansion = CanvasTree::default_expansion(&document.runtime, build);
-        let mut tree = build_tree(document, root_instance, &expansion);
-        if let Some(replay) = &document.replay {
-            apply_replay_state(&mut tree, &replay.state());
-        }
+        let tree = build_tree(document, root_instance, &expansion);
         let mut canvas = CanvasState::new(tree);
         canvas.set_direction(options.direction);
         canvas.set_edge_style(options.edge_style);
@@ -286,6 +273,7 @@ impl Workspace {
             root_instance,
             expansion,
             canvas,
+            decorated: None,
         });
         Some(id)
     }
@@ -317,6 +305,7 @@ impl Workspace {
             root_instance: root,
             expansion,
             canvas,
+            decorated: None,
         });
         Some(new_id)
     }
@@ -347,11 +336,9 @@ impl Workspace {
         view.root_instance = root_instance;
         let options = build_options(document, root_instance);
         view.expansion = CanvasTree::default_expansion(&document.runtime, options);
-        let mut tree = build_tree(document, root_instance, &view.expansion);
-        if let Some(replay) = &document.replay {
-            apply_replay_state(&mut tree, &replay.state());
-        }
+        let tree = build_tree(document, root_instance, &view.expansion);
         view.canvas = fresh_canvas(tree, &view.canvas);
+        view.decorated = None;
     }
 
     /// Expands or collapses a SubTree node of a view. The node stays at its
@@ -363,6 +350,7 @@ impl Workspace {
         view.expansion.toggle(source);
         let tree = build_tree(document, view.root_instance, &view.expansion);
         view.canvas.replace_tree(tree, Some(source));
+        view.decorated = None;
     }
 
     /// Expands or collapses all SubTree nodes of a view.
@@ -388,6 +376,7 @@ impl Workspace {
         let tree = build_tree(document, view.root_instance, &view.expansion);
         view.canvas.replace_tree(tree, anchor);
         view.canvas.fit_to_view(true);
+        view.decorated = None;
     }
 
     /// Expands the SubTree node of an instance and all SubTree nodes above
@@ -426,25 +415,115 @@ impl Workspace {
         if changed {
             let tree = build_tree(document, view.root_instance, &view.expansion);
             view.canvas.replace_tree(tree, None);
+            view.decorated = None;
         }
         if let Some(node) = view.canvas.tree().find_source(NodeSource::Runtime(target)) {
             view.canvas.focus_on(node, true);
         }
     }
 
-    /// Sets the replay position of a document and updates its views.
-    pub fn set_replay_position(&mut self, doc: DocId, position: usize) {
-        let Some(document) = self.doc_mut(doc) else {
-            return;
+    /// Shows a node of the runtime tree in a view: expands the SubTree
+    /// nodes above it, selects it and moves the view to it. Does nothing if
+    /// the node is not in the tree that the view shows. Returns true if
+    /// the node is on the canvas.
+    pub fn reveal_node(&mut self, id: ViewId, node: NodeIndex, select: bool) -> bool {
+        let Some((view, document)) = self.view_and_doc_mut(id) else {
+            return false;
         };
-        let Some(replay) = &mut document.replay else {
-            return;
-        };
-        replay.position = position.min(replay.index.len());
-        let state = replay.state();
-        for view in self.views.iter_mut().filter(|v| v.doc == doc) {
-            apply_replay_state(view.canvas.tree_mut(), &state);
+        let runtime = &document.runtime;
+        if node.0 >= runtime.len() {
+            return false;
         }
+        // Expand the SubTree nodes above the node, up to the view root.
+        let mut changed = false;
+        let mut current = runtime.node(node).instance;
+        while current != view.root_instance {
+            let Some(parent) = runtime.instances.get(current.0).and_then(|i| i.parent_node) else {
+                break;
+            };
+            let source = NodeSource::Runtime(parent);
+            if !view.expansion.is_expanded(source) {
+                view.expansion.set(source, true);
+                changed = true;
+            }
+            current = runtime.node(parent).instance;
+        }
+        if changed {
+            let tree = build_tree(document, view.root_instance, &view.expansion);
+            view.canvas.replace_tree(tree, None);
+            view.decorated = None;
+        }
+        let Some(id) = view.canvas.tree().find_source(NodeSource::Runtime(node)) else {
+            return false;
+        };
+        if select {
+            view.canvas.tree_mut().select_only(id);
+        }
+        view.canvas.focus_on(id, true);
+        true
+    }
+
+    /// Like [`Workspace::reveal_node`], for a node UID.
+    pub fn reveal_uid(&mut self, id: ViewId, uid: Uid, select: bool) -> bool {
+        let Some(node) = self
+            .doc_of_view(id)
+            .and_then(|d| d.runtime.index_of_uid(uid))
+        else {
+            return false;
+        };
+        self.reveal_node(id, node, select)
+    }
+
+    /// Decorates the canvas trees whose decorations are old: the live
+    /// statuses and markers, or the replay state at the cursor.
+    pub fn refresh_decorations(&mut self, live: &LiveController, live_doc: Option<DocId>) {
+        let Workspace { docs, views, .. } = self;
+        for document in docs.iter() {
+            let key = if let Some(replay) = &document.replay {
+                replay.decoration_key()
+            } else if live_doc == Some(document.id) {
+                live.generation()
+            } else {
+                continue;
+            };
+            let mut state = None;
+            for view in views
+                .iter_mut()
+                .filter(|v| v.doc == document.id && v.decorated != Some(key))
+            {
+                if let Some(replay) = &document.replay {
+                    let state = state.get_or_insert_with(|| replay.state());
+                    apply_replay_state(view.canvas.tree_mut(), state);
+                } else {
+                    live.decorate(view.canvas.tree_mut());
+                }
+                view.decorated = Some(key);
+            }
+        }
+    }
+
+    /// The replay model of a document.
+    pub fn replay_mut(&mut self, doc: DocId) -> Option<&mut ReplayModel> {
+        self.doc_mut(doc)?.replay.as_mut()
+    }
+
+    /// The first replay document of the active view, else the first replay
+    /// document.
+    pub fn active_replay_doc(&self) -> Option<DocId> {
+        self.active()
+            .and_then(|v| self.doc(v.doc))
+            .filter(|d| d.replay.is_some())
+            .or_else(|| self.docs.iter().find(|d| d.replay.is_some()))
+            .map(|d| d.id)
+    }
+
+    /// The view of a document to act on: the active view if it shows the
+    /// document, else its first view.
+    pub fn view_for_doc(&self, doc: DocId) -> Option<ViewId> {
+        self.active()
+            .filter(|v| v.doc == doc)
+            .or_else(|| self.views_of(doc).next())
+            .map(|v| v.id)
     }
 
     /// Applies a function to the canvas trees of all views of a document.
@@ -513,7 +592,6 @@ pub fn apply_replay_state(tree: &mut CanvasTree, state: &ReplayState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fasttick_core::runtime::Uid;
     use fasttick_log::btlog::Transition;
 
     const XML: &str = r#"<root BTCPP_format="4">
@@ -579,46 +657,72 @@ mod tests {
     #[test]
     fn replay_positions_update_views() {
         let mut ws = Workspace::default();
-        let runtime = Arc::new(RuntimeTree::parse(XML).unwrap());
         let transitions = vec![
             Transition::new(10, Uid(1), NodeStatus::Running),
             Transition::new(20, Uid(3), NodeStatus::Success),
             Transition::new(30, Uid(3), NodeStatus::Idle),
         ];
-        let index = ReplayIndex::new(&transitions);
+        let log = fasttick_log::btlog::BtLog::from_parts(XML.to_owned(), 0, transitions).unwrap();
+        let index = fasttick_log::replay::ReplayIndex::from_log(&log);
+        let runtime = Arc::new(log.tree.clone());
         let doc = ws.add_doc(
             DocKind::Replay {
                 path: "/tmp/x.btlog".into(),
+                session: None,
             },
             "x.btlog",
             runtime,
-            Some(ReplayData {
-                index,
-                position: 3,
-                start_time_us: 0,
-            }),
+            Some(ReplayModel::new(log, index)),
         );
         let view = ws
             .open_view(doc, InstanceIndex(0), ViewOptions::default())
             .unwrap();
-        let tree = ws.view(view).unwrap().canvas.tree();
-        let node3 = tree.get(tree.find_uid(Uid(3)).unwrap()).unwrap();
-        assert_eq!(node3.deco.status, NodeStatus::Idle);
-        assert_eq!(node3.deco.previous_status, Some(NodeStatus::Success));
-        ws.set_replay_position(doc, 2);
-        let tree = ws.view(view).unwrap().canvas.tree();
-        let node3 = tree.get(tree.find_uid(Uid(3)).unwrap()).unwrap();
-        assert_eq!(node3.deco.status, NodeStatus::Success);
-        ws.set_replay_position(doc, 0);
+        assert_eq!(ws.active_replay_doc(), Some(doc));
+        assert_eq!(ws.view_for_doc(doc), Some(view));
+        let live = LiveController::default();
+        let status = |ws: &Workspace, uid: u16| {
+            let tree = ws.view(view).unwrap().canvas.tree();
+            tree.get(tree.find_uid(Uid(uid)).unwrap()).unwrap().deco
+        };
+        // The model starts at the end; the views decorate lazily.
+        ws.refresh_decorations(&live, None);
+        assert_eq!(status(&ws, 3).status, NodeStatus::Idle);
+        assert_eq!(status(&ws, 3).previous_status, Some(NodeStatus::Success));
+        ws.replay_mut(doc).unwrap().step_back();
+        ws.refresh_decorations(&live, None);
+        assert_eq!(status(&ws, 3).status, NodeStatus::Success);
+        ws.replay_mut(doc).unwrap().go_to_start();
+        ws.refresh_decorations(&live, None);
         let tree = ws.view(view).unwrap().canvas.tree();
         assert!(
             tree.nodes()
                 .iter()
                 .all(|n| n.deco.status == NodeStatus::Idle)
         );
-        // Out of range clamps.
-        ws.set_replay_position(doc, 999);
-        assert_eq!(ws.doc(doc).unwrap().replay.as_ref().unwrap().position, 3);
+        assert_eq!(ws.view(view).unwrap().decorated, Some(0));
+    }
+
+    #[test]
+    fn reveal_node_expands_and_selects() {
+        let (mut ws, _doc, view) = workspace();
+        ws.set_all_subtrees(view, false);
+        assert_eq!(ws.view(view).unwrap().canvas.tree().len(), 3);
+        // UID 6 is in the innermost instance.
+        assert!(ws.reveal_uid(view, Uid(6), true));
+        let v = ws.view(view).unwrap();
+        assert_eq!(v.canvas.tree().len(), 6);
+        assert_eq!(v.decorated, None);
+        let selected: Vec<_> = v.canvas.tree().selected().collect();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(
+            v.canvas.tree().get(selected[0]).unwrap().uid,
+            Some(Uid(6))
+        );
+        assert!(!ws.reveal_uid(view, Uid(99), true));
+        // A view of the inner tree does not show the outer nodes.
+        ws.set_view_root(view, InstanceIndex(2));
+        assert!(!ws.reveal_uid(view, Uid(1), true));
+        assert!(ws.reveal_uid(view, Uid(6), false));
     }
 
     #[test]

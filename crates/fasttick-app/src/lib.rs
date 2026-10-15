@@ -28,6 +28,7 @@ pub mod documents;
 pub mod fonts;
 pub mod jobs;
 pub mod live;
+pub mod replay;
 pub mod panels;
 pub mod settings;
 pub mod shortcuts;

@@ -43,6 +43,8 @@ pub enum Tab {
     Transitions,
     /// Statistics of a log.
     Statistics,
+    /// The replay timeline: playback controls and the time bar.
+    Timeline,
 }
 
 /// Where a panel goes when it opens.
@@ -60,7 +62,7 @@ pub enum Zone {
 
 impl Tab {
     /// All panel tabs (not documents and not the start page).
-    pub const PANELS: [Tab; 10] = [
+    pub const PANELS: [Tab; 11] = [
         Tab::Trees,
         Tab::Palette,
         Tab::Inspector,
@@ -71,6 +73,7 @@ impl Tab {
         Tab::Search,
         Tab::Transitions,
         Tab::Statistics,
+        Tab::Timeline,
     ];
 
     /// The title of a panel tab. Documents get their title from the
@@ -89,6 +92,7 @@ impl Tab {
             Tab::Search => "Search",
             Tab::Transitions => "Transitions",
             Tab::Statistics => "Statistics",
+            Tab::Timeline => "Timeline",
         }
     }
 
@@ -98,9 +102,12 @@ impl Tab {
             Tab::Start | Tab::Document(_) => Zone::Center,
             Tab::Trees | Tab::Palette => Zone::Left,
             Tab::Inspector | Tab::Blackboard | Tab::Breakpoints => Zone::Right,
-            Tab::Problems | Tab::Xml | Tab::Search | Tab::Transitions | Tab::Statistics => {
-                Zone::Bottom
-            }
+            Tab::Problems
+            | Tab::Xml
+            | Tab::Search
+            | Tab::Transitions
+            | Tab::Statistics
+            | Tab::Timeline => Zone::Bottom,
         }
     }
 
@@ -125,7 +132,7 @@ pub fn default_dock(mode: Mode) -> DockState<Tab> {
         ),
         Mode::Replay => (
             vec![Tab::Trees],
-            vec![Tab::Inspector, Tab::Blackboard],
+            vec![Tab::Inspector],
             vec![Tab::Transitions, Tab::Statistics, Tab::Search],
         ),
     };
@@ -134,8 +141,18 @@ pub fn default_dock(mode: Mode) -> DockState<Tab> {
     // Order of the splits: bottom row under the centre column only, then
     // the side columns over the full height.
     let [center, _left] = surface.split_left(NodeIndex::root(), 0.18, left);
-    let [center, _right] = surface.split_right(center, 0.74, right);
-    let [_center, _bottom] = surface.split_below(center, 0.78, bottom);
+    let [center, _right] = surface.split_right(center, 0.76, right);
+    match mode {
+        Mode::Replay => {
+            // The tables below, and the timeline between the tree and the
+            // tables, so that both are visible at the same time.
+            let [center, _bottom] = surface.split_below(center, 0.64, bottom);
+            surface.split_below(center, 0.8, vec![Tab::Timeline]);
+        }
+        Mode::Edit | Mode::Live => {
+            surface.split_below(center, 0.74, bottom);
+        }
+    }
     dock
 }
 
@@ -278,7 +295,10 @@ mod tests {
         }
         assert!(contains(&default_dock(Mode::Edit), Tab::Palette));
         assert!(contains(&default_dock(Mode::Live), Tab::Breakpoints));
+        assert!(contains(&default_dock(Mode::Live), Tab::Blackboard));
         assert!(contains(&default_dock(Mode::Replay), Tab::Statistics));
+        assert!(contains(&default_dock(Mode::Replay), Tab::Timeline));
+        assert!(!contains(&default_dock(Mode::Live), Tab::Timeline));
     }
 
     #[test]
