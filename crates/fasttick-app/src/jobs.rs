@@ -61,6 +61,9 @@ pub enum DialogPurpose {
     AddTreeFile,
     /// Choose the path of a new tree XML file for the project.
     NewTreeFile,
+    /// Choose a node model file (`<TreeNodesModel>` XML) to add to the
+    /// project.
+    AddModelFile,
     /// Choose the path of the project file (`.ftproj`).
     SaveProject,
 }
@@ -374,6 +377,11 @@ impl Jobs {
                 DialogPurpose::AddTreeFile => dialog
                     .set_title("Add a tree file to the project")
                     .add_filter("Behavior trees", &["xml"])
+                    .add_filter("All files", &["*"])
+                    .pick_file(),
+                DialogPurpose::AddModelFile => dialog
+                    .set_title("Add a node model file to the project")
+                    .add_filter("Node models", &["xml"])
                     .add_filter("All files", &["*"])
                     .pick_file(),
                 DialogPurpose::NewTreeFile => dialog

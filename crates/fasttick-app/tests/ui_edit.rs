@@ -749,3 +749,47 @@ fn project_with_several_files() {
         Some(shown.as_str())
     );
 }
+
+#[test]
+fn a_model_file_removes_the_unknown_type_problems() {
+    let mut harness = harness();
+    let unknown = |h: &Harness<'static, FastTickApp>| {
+        let app = h.state();
+        let view = app.workspace().active().unwrap();
+        let doc = app.workspace().doc(view.doc).unwrap();
+        doc.editor
+            .as_ref()
+            .unwrap()
+            .problems()
+            .iter()
+            .filter(|p| p.message.contains("is not known"))
+            .count()
+    };
+    assert!(unknown(&harness) > 0, "the test nodes have no models");
+    let models = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/harness/custom_models.xml");
+    let view = harness.state().workspace().active_view.unwrap();
+    let ctx = harness.ctx.clone();
+    harness.state_mut().project_file_picked(
+        &ctx,
+        view,
+        fasttick_app::jobs::DialogPurpose::AddModelFile,
+        models,
+    );
+    harness.run();
+    assert_eq!(unknown(&harness), 0);
+    // The palette lists the new types.
+    harness.state_mut().show_panel(Tab::Palette);
+    harness.run();
+    type_into(
+        &mut harness,
+        Field::Hint("Search node types"),
+        "WriteValues",
+        false,
+    );
+    assert!(
+        harness
+            .query_all_by_label("WriteValues")
+            .any(|n| n.accesskit_node().role() != Role::TreeItem)
+    );
+}

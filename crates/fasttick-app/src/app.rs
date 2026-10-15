@@ -992,6 +992,7 @@ impl FastTickApp {
                             self.save_recording_to(ctx, path);
                         }
                         DialogPurpose::AddTreeFile
+                        | DialogPurpose::AddModelFile
                         | DialogPurpose::NewTreeFile
                         | DialogPurpose::SaveProject => {
                             if let Some(view) = self.project_view.take() {
@@ -1386,6 +1387,12 @@ impl FastTickApp {
                 (
                     format!("Added {} to the project.", file_name(&path)),
                     editor.tree_refs().iter().position(|r| r.file == file),
+                )
+            }),
+            DialogPurpose::AddModelFile => editor.add_model_file(&path).map(|_| {
+                (
+                    format!("Added the node models of {}.", file_name(&path)),
+                    None,
                 )
             }),
             DialogPurpose::NewTreeFile => editor.new_tree_file(&path).map(|file| {

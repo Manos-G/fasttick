@@ -91,6 +91,7 @@ menu in the **Trees** panel:
 
 - **Add tree file…** adds an XML file to the project.
 - **New tree file…** makes a new XML file with one tree.
+- **Add model file…** adds a file with node models (see 3.6).
 - **Save project as…** writes the project file (`.ftproj`).
 
 The **Trees** panel shows the trees of each file. Click a tree to show it.
@@ -160,9 +161,15 @@ models in project model files.
 - Right-click a model and select **Edit model…** to change its ID, kind and
   ports. Built-in models are read-only.
 
-To use the models of your own nodes, export them with
-`BT::writeTreeNodesModelXML` and add the file to the project as a model
-file, or copy the `<TreeNodesModel>` into a tree file.
+To use the models of your own nodes:
+
+1. Export them with `BT::writeTreeNodesModelXML` to an XML file.
+2. In the **Trees** panel, select **Project** > **Add model file…**.
+3. Select the XML file.
+
+The types show in the palette, and the "not known" problems go away. To
+keep the model file in the project, select **Project** > **Save project
+as…**. You can also copy the `<TreeNodesModel>` into a tree file.
 
 ### 3.7 Problems, XML and search
 

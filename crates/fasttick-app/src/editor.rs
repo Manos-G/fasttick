@@ -260,6 +260,18 @@ impl EditorDoc {
         Ok(id)
     }
 
+    /// Adds a node model file (for example the output of
+    /// `BT::writeTreeNodesModelXML`) to the project. Its models are visible
+    /// in all files. This change has no undo.
+    pub fn add_model_file(&mut self, path: &Path) -> Result<FileId, String> {
+        let id = self
+            .project
+            .add_model_file(path)
+            .map_err(|err| err.to_string())?;
+        self.changed();
+        Ok(id)
+    }
+
     /// Makes a new XML file with one empty tree (its ID comes from the file
     /// name), writes it to `path` and adds it to the project.
     pub fn new_tree_file(&mut self, path: &Path) -> Result<FileId, String> {

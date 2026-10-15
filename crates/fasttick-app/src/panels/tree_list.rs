@@ -177,6 +177,11 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                         "Make a new XML file in the project",
                     ),
                     (
+                        "Add model file…",
+                        DialogPurpose::AddModelFile,
+                        "Add a <TreeNodesModel> file (for example from BT::writeTreeNodesModelXML)",
+                    ),
+                    (
                         "Save project as…",
                         DialogPurpose::SaveProject,
                         "Write a project file that lists the open files",
