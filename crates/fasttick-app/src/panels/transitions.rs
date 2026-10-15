@@ -95,6 +95,8 @@ fn replay(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         (rows.get(row).is_some_and(|r| *r as usize == c)).then_some(row)
     });
     let mut clicked = None;
+    // Selectable text would take the clicks of the rows.
+    ui.style_mut().interaction.selectable_labels = false;
     let mut table = TableBuilder::new(ui)
         .id_salt("replay_transitions")
         .striped(true)

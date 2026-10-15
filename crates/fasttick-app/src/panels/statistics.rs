@@ -52,6 +52,8 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     let stats = stats.to_vec();
     let order = order.to_vec();
     let model = &*model;
+    // Selectable text would take the clicks of the rows.
+    ui.style_mut().interaction.selectable_labels = false;
     TableBuilder::new(ui)
         .id_salt("replay_statistics")
         .striped(true)

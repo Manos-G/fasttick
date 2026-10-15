@@ -236,7 +236,14 @@ fn transitions_table_filter_click_and_export() {
         for row in model.current_rows() {
             let (transition, _) = model.transition(*row as usize).unwrap();
             assert_ne!(transition.status, NodeStatus::Idle);
-            assert!(model.node(transition.uid).unwrap().name.starts_with("say"));
+            // "say*" matches the name, the path or the type.
+            let node = model.node(transition.uid).unwrap();
+            assert!(
+                [&node.name, &node.path, &node.type_id]
+                    .iter()
+                    .any(|text| text.to_lowercase().starts_with("say")),
+                "{node:?}"
+            );
         }
     }
 
