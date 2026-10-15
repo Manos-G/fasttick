@@ -32,6 +32,18 @@ pub enum Icon {
     Next,
     /// To the end.
     Last,
+    /// Start playback (a triangle).
+    Play,
+    /// Pause playback (two bars).
+    Pause,
+    /// Start a recording (a filled circle).
+    Record,
+    /// Stop a recording (a filled square).
+    Stop,
+    /// A breakpoint (a circle with a dot, like the canvas marker).
+    Breakpoint,
+    /// Back to the whole range (two outward arrows).
+    ZoomOutRange,
 }
 
 /// Draws an icon in a square.
@@ -110,6 +122,43 @@ pub fn paint_icon(ui: &Ui, rect: Rect, icon: Icon, color: Color32) {
             let x = c.x + dir * s * 0.5;
             painter.line_segment([pos2(x, c.y - s * 0.5), pos2(x, c.y + s * 0.5)], stroke);
         }
+        Icon::Play => {
+            let tri = vec![
+                c + vec2(-s * 0.45, -s * 0.6),
+                c + vec2(s * 0.6, 0.0),
+                c + vec2(-s * 0.45, s * 0.6),
+            ];
+            painter.add(Shape::convex_polygon(tri, color, Stroke::NONE));
+        }
+        Icon::Pause => {
+            for dx in [-0.3, 0.3] {
+                let bar = Rect::from_center_size(c + vec2(dx * s, 0.0), vec2(s * 0.32, s * 1.15));
+                painter.rect_filled(bar, CornerRadius::same(1), color);
+            }
+        }
+        Icon::Record => {
+            painter.circle_filled(c, s * 0.5, color);
+        }
+        Icon::Stop => {
+            let square = Rect::from_center_size(c, Vec2::splat(s * 0.95));
+            painter.rect_filled(square, CornerRadius::same(2), color);
+        }
+        Icon::Breakpoint => {
+            painter.circle_stroke(c, s * 0.62, stroke);
+            painter.circle_filled(c, s * 0.34, color);
+        }
+        Icon::ZoomOutRange => {
+            let y = c.y;
+            painter.line_segment([pos2(c.x - s * 0.8, y), pos2(c.x + s * 0.8, y)], stroke);
+            for dir in [-1.0, 1.0] {
+                let tip = pos2(c.x + dir * s * 0.8, y);
+                painter.line_segment([tip, tip + vec2(-dir * s * 0.35, -s * 0.35)], stroke);
+                painter.line_segment([tip, tip + vec2(-dir * s * 0.35, s * 0.35)], stroke);
+            }
+            for x in [c.x - s * 0.15, c.x + s * 0.15] {
+                painter.line_segment([pos2(x, y - s * 0.55), pos2(x, y + s * 0.55)], stroke);
+            }
+        }
         Icon::Previous | Icon::Next => {
             let dir = if icon == Icon::Next { 1.0 } else { -1.0 };
             let tri = vec![
@@ -125,6 +174,17 @@ pub fn paint_icon(ui: &Ui, rect: Rect, icon: Icon, color: Color32) {
 /// A small square button with an icon and a tooltip. The tooltip text is
 /// also the accessibility label.
 pub fn icon_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool) -> Response {
+    icon_button_colored(ui, icon, label, enabled, None)
+}
+
+/// An icon button with its own icon colour (for example red for "Record").
+pub fn icon_button_colored(
+    ui: &mut Ui,
+    icon: Icon,
+    label: &str,
+    enabled: bool,
+    color: Option<Color32>,
+) -> Response {
     let size = Vec2::splat(ui.spacing().interact_size.y);
     let sense = if enabled {
         Sense::click()
@@ -144,7 +204,7 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool) -> Respo
                 .rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
         }
         let color = if enabled {
-            visuals.fg_stroke.color
+            color.unwrap_or(visuals.fg_stroke.color)
         } else {
             ui.visuals().weak_text_color()
         };
@@ -304,9 +364,16 @@ mod tests {
                     Icon::First,
                     Icon::Previous,
                     Icon::Next,
+                    Icon::Play,
+                    Icon::Pause,
+                    Icon::Record,
+                    Icon::Stop,
+                    Icon::Breakpoint,
+                    Icon::ZoomOutRange,
                 ] {
                     icon_button(ui, icon, &format!("{icon:?}"), true);
                 }
+                icon_button_colored(ui, Icon::Record, "Red", true, Some(Color32::RED));
                 if icon_button(ui, Icon::Last, "Last", true).clicked() {
                     clicked = true;
                 }
@@ -316,6 +383,8 @@ mod tests {
             });
             harness.get_by_label("Last").click();
             harness.run();
+            harness.get_by_label("Breakpoint");
+            harness.get_by_label("Red");
         }
         assert!(clicked);
     }
