@@ -152,3 +152,45 @@ pub fn check_error<T: std::fmt::Debug>(
     assert!(!error.to_string().is_empty());
     error
 }
+
+/// Like [`check`], but the session may fail: then the project must not
+/// change. Returns the value if the session succeeded. At the end, the
+/// change is undone again if `keep` is false.
+pub fn try_check<T>(
+    project: &mut Project,
+    keep: bool,
+    f: impl FnOnce(&mut Editor<'_>) -> Result<T, CommandError>,
+) -> Option<T> {
+    let mut history = History::new();
+    let before = snapshot(project);
+    let dirty_before: Vec<bool> = project.files().map(|(_, _, f)| f.is_dirty()).collect();
+    match history.run(project, f) {
+        Ok(value) => {
+            let after = snapshot(project);
+            check_well_formed(project);
+            if history.can_undo() {
+                history.undo(project).unwrap();
+                assert_eq!(snapshot(project), before, "undo does not restore the state");
+                let dirty: Vec<bool> = project.files().map(|(_, _, f)| f.is_dirty()).collect();
+                assert_eq!(dirty, dirty_before, "undo does not restore the dirty flags");
+                history.redo(project).unwrap();
+                assert_eq!(snapshot(project), after, "redo does not restore the state");
+                if !keep {
+                    history.undo(project).unwrap();
+                    assert_eq!(snapshot(project), before, "the second undo");
+                }
+            } else {
+                assert_eq!(after, before, "a change without an undo step");
+            }
+            Some(value)
+        }
+        Err(_) => {
+            assert_eq!(
+                snapshot(project),
+                before,
+                "a failed command changed the project"
+            );
+            None
+        }
+    }
+}
