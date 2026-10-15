@@ -738,6 +738,13 @@ const CASES: &[Case] = &[
         C::BadRemapping,
         Warning,
         Accepts,
+        with_sub!("", "<SubTree ID=\"Sub\" __shared_blackboard=\"true\"/>"),
+        with_sub!("", "<SubTree ID=\"Sub\" _autoremap=\"true\"/>"),
+    ),
+    case(
+        C::BadRemapping,
+        Warning,
+        Accepts,
         "<Sequence _autoremap=\"true\"><AlwaysSuccess/></Sequence>",
         "<Sequence><AlwaysSuccess/></Sequence>",
     ),

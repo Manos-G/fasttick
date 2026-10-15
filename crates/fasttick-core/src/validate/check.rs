@@ -1378,6 +1378,22 @@ impl<'c, 'p> FileChecker<'c, 'p> {
                         self.check_port(view, node_type, name, value, tree);
                     }
                 }
+                AttributeClass::OtherUnderscore if is_subtree && name == "__shared_blackboard" => {
+                    // BT.CPP 3 used this attribute. BT.CPP 4 does not read
+                    // it (recursivelyCreateSubtree reads only _autoremap
+                    // and the allowed port names).
+                    self.push(
+                        Severity::Warning,
+                        ProblemCode::BadRemapping,
+                        Some(tree),
+                        node,
+                        Some(name),
+                        "BT.CPP 4 ignores the attribute __shared_blackboard of BT.CPP 3, so \
+                         the SubTree does not share the blackboard. Use _autoremap=\"true\" \
+                         or remap the ports one by one."
+                            .to_owned(),
+                    );
+                }
                 AttributeClass::Id
                 | AttributeClass::RuntimeMeta(_)
                 | AttributeClass::OtherUnderscore => {}

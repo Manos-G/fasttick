@@ -273,7 +273,8 @@ problem_codes! {
     CircularSubTree => "SubTrees make a cycle.",
     /// A SubTree remapping is not correct: `_autoremap` is not a boolean
     /// (Error; `convertFromString<bool>`), `"="` instead of `"{=}"`, or
-    /// `_autoremap` on a node that is not a SubTree (Warning). A remapping
+    /// `_autoremap` on a node that is not a SubTree, or the BT.CPP 3
+    /// attribute `__shared_blackboard` (Warning). A remapping
     /// of a port that the SubTree model does not declare is an
     /// [`ProblemCode::UnknownPort`] warning.
     BadRemapping => "A SubTree remapping is not correct.",
