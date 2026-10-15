@@ -2205,14 +2205,7 @@ fn ctx_repaint_soon(ui: &Ui) {
         .request_repaint_after(std::time::Duration::from_millis(100));
 }
 
-/// A submenu entry. egui's default arrow glyph is not in the bundled font,
-/// so the entry uses "›" (U+203A), which Roboto has.
-fn submenu(ui: &mut Ui, text: &str, content: impl FnOnce(&mut Ui)) {
-    egui::containers::menu::SubMenuButton::from_button(
-        egui::Button::new(text).right_text("\u{203A}"),
-    )
-    .ui(ui, content);
-}
+use crate::widgets::submenu;
 
 /// Why a menu command is disabled.
 fn disabled_reason(command: Command) -> &'static str {

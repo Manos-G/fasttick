@@ -15,6 +15,7 @@ use crate::canvas::{CanvasNode, NodeSource};
 use crate::documents::ViewId;
 use crate::edit_ops::{EditOp, Placement};
 use crate::editor::EditorDoc;
+use crate::widgets::submenu;
 
 /// The data of the edit menu of one view.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -66,9 +67,9 @@ pub fn kind_group_name(kind: NodeKind) -> &'static str {
 /// A submenu that lists the node types by kind. Returns the clicked type.
 fn type_menu(ui: &mut Ui, title: &str, context: &EditMenuContext) -> Option<String> {
     let mut picked = None;
-    ui.menu_button(title, |ui| {
+    submenu(ui, title, |ui| {
         for (kind, ids) in &context.groups {
-            ui.menu_button(kind_group_name(*kind), |ui| {
+            submenu(ui, kind_group_name(*kind), |ui| {
                 egui::ScrollArea::vertical()
                     .max_height(360.0)
                     .show(ui, |ui| {

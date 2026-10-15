@@ -195,7 +195,7 @@ pub fn show(
         for problem in problems {
             let color = severity_color(ui, problem.severity);
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(severity_icon(problem.severity)).color(color));
+                severity_badge(ui, problem.severity, color);
                 ui.label(&problem.message);
             });
         }
@@ -303,7 +303,7 @@ fn ports(
                 let label_id = ui
                     .horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 3.0;
-                        ui.label(RichText::new(direction_arrow(port.direction)).weak())
+                        ui.label(RichText::new(direction_tag(port.direction)).small().weak())
                             .on_hover_text(direction_text(port.direction));
                         let id = ui.label(label).on_hover_text(&tip).id;
                         if required {
@@ -447,11 +447,13 @@ fn direction_text(direction: PortDirection) -> &'static str {
     }
 }
 
-fn direction_arrow(direction: PortDirection) -> &'static str {
+/// A short tag of a port direction. (Roboto has few symbols, so the UI
+/// uses words; see `crate::fonts`.)
+fn direction_tag(direction: PortDirection) -> &'static str {
     match direction {
-        PortDirection::Input => "→",
-        PortDirection::Output => "←",
-        PortDirection::InOut => "↔",
+        PortDirection::Input => "in",
+        PortDirection::Output => "out",
+        PortDirection::InOut => "in/out",
     }
 }
 
@@ -479,13 +481,40 @@ fn post_help(condition: PostCondition) -> &'static str {
     }
 }
 
-/// The icon of a severity.
-pub fn severity_icon(severity: Severity) -> &'static str {
+/// Paints the badge of a severity: a filled circle for an error, a
+/// filled triangle for a warning and a ring for a note. The painter draws
+/// it, because the bundled font has no symbol glyphs (see `crate::fonts`).
+pub fn severity_badge(ui: &mut Ui, severity: Severity, color: Color32) -> egui::Response {
+    let size = ui.text_style_height(&egui::TextStyle::Body).min(14.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let c = rect.center();
+    let r = size * 0.38;
+    let painter = ui.painter();
     match severity {
-        Severity::Error => "⛔",
-        Severity::Warning => "⚠",
-        Severity::Info => "ℹ",
+        Severity::Error => {
+            painter.circle_filled(c, r, color);
+        }
+        Severity::Warning => {
+            let h = r * 1.15;
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    egui::pos2(c.x, c.y - h),
+                    egui::pos2(c.x + h, c.y + h * 0.8),
+                    egui::pos2(c.x - h, c.y + h * 0.8),
+                ],
+                color,
+                egui::Stroke::NONE,
+            ));
+        }
+        Severity::Info => {
+            painter.circle_stroke(c, r * 0.9, egui::Stroke::new(1.5, color));
+        }
     }
+    response.on_hover_text(match severity {
+        Severity::Error => "Error",
+        Severity::Warning => "Warning",
+        Severity::Info => "Note",
+    })
 }
 
 /// The colour of a severity.

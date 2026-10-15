@@ -389,3 +389,12 @@ mod tests {
         assert!(clicked);
     }
 }
+
+/// A submenu entry. egui's default arrow glyph is not in the bundled font,
+/// so the entry uses "›" (U+203A), which Roboto has.
+pub fn submenu(ui: &mut Ui, text: &str, content: impl FnOnce(&mut Ui)) {
+    egui::containers::menu::SubMenuButton::from_button(
+        egui::Button::new(text).right_text("\u{203A}"),
+    )
+    .ui(ui, content);
+}

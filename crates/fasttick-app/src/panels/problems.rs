@@ -6,7 +6,7 @@ use egui_extras::{Column, TableBuilder};
 use fasttick_core::validate::{Problem, Severity};
 
 use super::PanelContext;
-use super::node_editor::{severity_color, severity_icon};
+use super::node_editor::{severity_badge, severity_color};
 use crate::actions::AppAction;
 
 /// The filter of the problems list.
@@ -70,26 +70,13 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let warn = severity_color(ui, Severity::Warning);
         ui.toggle_value(
             &mut filter.errors,
-            RichText::new(format!(
-                "{} {} errors",
-                severity_icon(Severity::Error),
-                counts.errors
-            ))
-            .color(error),
+            RichText::new(format!("{} errors", counts.errors)).color(error),
         );
         ui.toggle_value(
             &mut filter.warnings,
-            RichText::new(format!(
-                "{} {} warnings",
-                severity_icon(Severity::Warning),
-                counts.warnings
-            ))
-            .color(warn),
+            RichText::new(format!("{} warnings", counts.warnings)).color(warn),
         );
-        ui.toggle_value(
-            &mut filter.infos,
-            format!("{} {} notes", severity_icon(Severity::Info), counts.infos),
-        );
+        ui.toggle_value(&mut filter.infos, format!("{} notes", counts.infos));
         ui.add(
             egui::TextEdit::singleline(&mut filter.text)
                 .hint_text("Filter problems")
@@ -143,10 +130,8 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
             body.rows(row_height, rows.len(), |mut row| {
                 let problem = rows[row.index()];
                 row.col(|ui| {
-                    ui.label(
-                        RichText::new(severity_icon(problem.severity))
-                            .color(severity_color(ui, problem.severity)),
-                    );
+                    let color = severity_color(ui, problem.severity);
+                    severity_badge(ui, problem.severity, color);
                 });
                 row.col(|ui| {
                     ui.label(&problem.message)
