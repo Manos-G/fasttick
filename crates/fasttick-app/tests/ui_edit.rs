@@ -1438,3 +1438,24 @@ fn the_copy_and_paste_events_of_the_platform_work_on_the_canvas() {
     harness.run();
     assert_eq!(children(&harness, "fallback").len(), 4);
 }
+
+#[test]
+fn alt_arrow_keys_move_a_node_among_its_siblings() {
+    let mut harness = harness();
+    focus(&mut harness, "check_blocked");
+    let center = item_rect(&harness, "check_blocked").center();
+    click_at(&mut harness, center);
+    harness.key_press_modifiers(Modifiers::ALT, egui::Key::ArrowRight);
+    harness.run();
+    assert_eq!(
+        children(&harness, "fallback"),
+        ["check_flag", "check_blocked"]
+    );
+    // The node stays selected; Alt+Up moves it back.
+    harness.key_press_modifiers(Modifiers::ALT, egui::Key::ArrowUp);
+    harness.run();
+    assert_eq!(
+        children(&harness, "fallback"),
+        ["check_blocked", "check_flag"]
+    );
+}

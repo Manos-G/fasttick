@@ -231,6 +231,8 @@ Other ways to add nodes:
   **Delete**, **Paste as child**, **Move up**, **Move down**, **Disconnect**
   and **Create SubTree from selection…**.
 - Right-click an empty place to add or paste an unconnected node.
+- Alt+Left or Alt+Up moves the selected node before its previous sibling.
+  Alt+Right or Alt+Down moves it after its next sibling.
 - Ctrl+C copies the selected nodes, Ctrl+X cuts them and Ctrl+V pastes
   them. The paste goes into the selected node as its last children. If
   the selected node cannot take more children (for example an action),

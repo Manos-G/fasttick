@@ -43,6 +43,10 @@ pub enum Command {
     AddNode,
     /// Find nodes.
     Find,
+    /// Move the selected node before its previous sibling.
+    MoveUp,
+    /// Move the selected node after its next sibling.
+    MoveDown,
     /// Show the whole tree.
     FitToView,
     /// Show the selected nodes.
@@ -123,7 +127,7 @@ pub enum Command {
 
 impl Command {
     /// All commands, in help-dialog order.
-    pub const ALL: [Command; 54] = [
+    pub const ALL: [Command; 56] = [
         Command::NewProject,
         Command::OpenFile,
         Command::OpenLog,
@@ -140,6 +144,8 @@ impl Command {
         Command::Delete,
         Command::SelectAll,
         Command::AddNode,
+        Command::MoveUp,
+        Command::MoveDown,
         Command::Find,
         Command::FitToView,
         Command::FitSelection,
@@ -199,6 +205,8 @@ impl Command {
             Command::SelectAll => "Select all",
             Command::AddNode => "Add node\u{2026}",
             Command::Find => "Find\u{2026}",
+            Command::MoveUp => "Move up",
+            Command::MoveDown => "Move down",
             Command::FitToView => "Fit to view",
             Command::FitSelection => "Fit selection",
             Command::ZoomIn => "Zoom in",
@@ -259,6 +267,8 @@ impl Command {
             | Command::Delete
             | Command::SelectAll
             | Command::AddNode
+            | Command::MoveUp
+            | Command::MoveDown
             | Command::Find => "Edit",
             Command::FitToView
             | Command::FitSelection
@@ -364,6 +374,10 @@ impl Default for KeyMap {
                 bind(Command::Delete, none, Key::Delete),
                 bind(Command::SelectAll, cmd, Key::A),
                 bind(Command::AddNode, Modifiers::SHIFT, Key::A),
+                bind(Command::MoveUp, Modifiers::ALT, Key::ArrowUp),
+                bind(Command::MoveUp, Modifiers::ALT, Key::ArrowLeft),
+                bind(Command::MoveDown, Modifiers::ALT, Key::ArrowDown),
+                bind(Command::MoveDown, Modifiers::ALT, Key::ArrowRight),
                 bind(Command::Find, cmd, Key::F),
                 bind(Command::FitToView, none, Key::F),
                 bind(Command::FitSelection, Modifiers::SHIFT, Key::F),
@@ -447,9 +461,15 @@ impl KeyMap {
                     && !binding.shortcut.modifiers.ctrl
                     && !binding.shortcut.modifiers.alt
                     && !is_function_key(binding.shortcut.logical_key);
+                // Alt+arrow moves the cursor by words in a text field.
                 let text_command = matches!(
                     binding.command,
-                    Command::SelectAll | Command::Cut | Command::Copy | Command::Paste
+                    Command::SelectAll
+                        | Command::Cut
+                        | Command::Copy
+                        | Command::Paste
+                        | Command::MoveUp
+                        | Command::MoveDown
                 );
                 if ((plain || text_command) && typing) || !enabled(binding.command) {
                     continue;

@@ -654,6 +654,9 @@ impl FastTickApp {
             Command::Save => self.active_edit_view().is_some(),
             Command::Undo => self.active_editor().is_some_and(|e| e.can_undo()),
             Command::Redo => self.active_editor().is_some_and(|e| e.can_redo()),
+            Command::MoveUp | Command::MoveDown => self
+                .active_edit_view()
+                .is_some_and(|v| crate::edit_ops::primary_node(&self.workspace, v).is_some()),
             Command::Cut | Command::Copy | Command::Duplicate | Command::Delete => self
                 .active_edit_view()
                 .is_some_and(|v| !crate::edit_ops::selected_nodes(&self.workspace, v).is_empty()),
@@ -875,6 +878,12 @@ impl FastTickApp {
             Command::Save => {
                 if let Some(view) = self.active_edit_view() {
                     self.save_view(ctx, view);
+                }
+            }
+            Command::MoveUp | Command::MoveDown => {
+                if let Some(view) = self.active_edit_view() {
+                    let delta = if command == Command::MoveUp { -1 } else { 1 };
+                    self.run_edit(ctx, view, EditOp::MoveSibling(delta));
                 }
             }
             Command::AddNode => {
@@ -2103,6 +2112,8 @@ impl FastTickApp {
             ui.separator();
             self.menu_item(ui, Command::SelectAll);
             self.menu_item(ui, Command::AddNode);
+            self.menu_item(ui, Command::MoveUp);
+            self.menu_item(ui, Command::MoveDown);
             self.menu_item(ui, Command::Find);
         });
         ui.menu_button("View", |ui| {
