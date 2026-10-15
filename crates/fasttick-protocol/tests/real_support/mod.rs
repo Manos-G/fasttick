@@ -335,7 +335,9 @@ pub fn sync_notifications(client: &mut Client, uid: u16) {
     client
         .insert_hook(&Hook::replace(uid, NodeStatus::Skipped))
         .expect("HOOK_INSERT");
-    wait_hit(client, uid);
+    // Send requests during the wait: with a short heartbeat timeout, the
+    // publisher would disable the hook after some silence.
+    wait_hit_with_heartbeat(client, uid);
     client
         .remove_hook(uid, HookPosition::Pre)
         .expect("HOOK_REMOVE");

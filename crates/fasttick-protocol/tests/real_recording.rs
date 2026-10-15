@@ -148,7 +148,9 @@ fn recording_start_stop_and_transitions() {
         assert_eq!(live.client.transitions().unwrap(), []);
     }
 
-    // A new start clears the buffer and starts the time again.
+    // A new start gives a later start time, and the offsets start again
+    // from zero (see `starting_a_recording_clears_the_buffer` for the
+    // buffer).
     let second_start = live.client.start_recording().unwrap();
     let restarted = Instant::now();
     assert!(second_start > start_us, "{second_start} <= {start_us}");
@@ -233,6 +235,47 @@ fn the_buffer_keeps_only_the_last_1000_transitions() {
     assert_eq!(live.client.transitions().unwrap(), []);
     live.client.remove_all_hooks().unwrap();
     live.client.stop_recording().unwrap();
+}
+
+#[test]
+fn starting_a_recording_clears_the_buffer() {
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
+    let mut live = Live::start(options(harness, LONG_RUNNING));
+    live.sync_notifications(live.uid("check_keep_going"));
+    let say = live.uid("say_cycle");
+    live.client.insert_hook(&Hook::breakpoint(say)).unwrap();
+    live.wait_hit(say);
+
+    // Record one cycle, from one stop at "say_cycle" to the next, and do
+    // not read it. The stop keeps the transitions in the buffer.
+    live.client.start_recording().unwrap();
+    live.client
+        .unlock_breakpoint(&UnlockRequest::resume(say))
+        .unwrap();
+    live.wait_hit(say);
+    live.client.stop_recording().unwrap();
+
+    // The tree is stopped, so a new recording gets no new transitions. A
+    // start clears the buffer (TOGGLE_RECORDING in
+    // serverLoop of the publisher), so the old cycle is gone too.
+    live.client.start_recording().unwrap();
+    assert_eq!(live.client.transitions().unwrap(), []);
+    live.client.stop_recording().unwrap();
+
+    // Check that the test is not vacuous: without a new start, the
+    // transitions of a cycle stay in the buffer after the stop.
+    live.client.start_recording().unwrap();
+    live.client
+        .unlock_breakpoint(&UnlockRequest::resume(say))
+        .unwrap();
+    live.wait_hit(say);
+    live.client.stop_recording().unwrap();
+    let kept = live.client.transitions().unwrap();
+    assert!(kept.len() > 20, "{} transitions", kept.len());
+    check_transitions(&live.tree, &kept);
+    live.client.remove_all_hooks().unwrap();
 }
 
 /// The state of each node before and after a recording, from STATUS.
