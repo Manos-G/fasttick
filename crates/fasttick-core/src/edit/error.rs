@@ -158,6 +158,11 @@ pub enum CommandError {
     /// A model has two ports with the same name.
     #[error("the model has two ports with the name \"{0}\"")]
     DuplicatePort(String),
+    /// The file changed outside the edit history (for example, it was
+    /// loaded again from the disk), so an undo or a redo step does not fit
+    /// it any more.
+    #[error("{0} changed outside the edit history")]
+    FileChanged(FileId),
     /// An unconnected-node edit does not match the project state.
     #[error("the unconnected nodes of tree \"{tree}\" in {file} do not match the edit")]
     UnconnectedMismatch {

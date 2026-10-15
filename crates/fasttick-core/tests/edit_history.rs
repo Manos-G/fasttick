@@ -668,3 +668,50 @@ fn model_changes_refresh_the_registry() {
     history.redo(&mut p).unwrap();
     assert!(p.lookup_model(f, "Beep").is_some());
 }
+
+#[test]
+fn undo_refuses_a_file_that_changed_outside_the_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.xml");
+    fs::write(&path, TEXT).unwrap();
+    let mut p = Project::open_xml(&path).unwrap();
+    let f = p.file_id_by_path(&path).unwrap();
+    let mut history = History::new();
+    set_msec(&mut history, &mut p, f, "1");
+    set_msec(&mut history, &mut p, f, "2");
+    history.undo(&mut p).unwrap();
+    // An edit that the history does not record.
+    let sleep = tag(&p, f, "Sleep");
+    let (_, applied) = run(&mut p, StructurePolicy::Enforce, |ed| {
+        ed.set_instance_name(f, sleep, Some("x"))
+    })
+    .unwrap();
+    assert!(!applied.is_empty());
+    let before = snapshot(&p);
+    let error = history.undo(&mut p).unwrap_err();
+    assert_eq!(error.error, CommandError::FileChanged(f));
+    assert_eq!(snapshot(&p), before);
+    assert!(!history.can_undo() && !history.can_redo());
+
+    // A reload gives a new document: the old steps do not fit it.
+    set_msec(&mut history, &mut p, f, "3");
+    p.save_file(f).unwrap();
+    set_msec(&mut history, &mut p, f, "4");
+    p.reload_file(f).unwrap();
+    assert_eq!(msec(&p, f), "3");
+    let error = history.undo(&mut p).unwrap_err();
+    assert_eq!(error.error, CommandError::FileChanged(f));
+    assert_eq!(msec(&p, f), "3");
+
+    // Redo checks too.
+    set_msec(&mut history, &mut p, f, "5");
+    history.undo(&mut p).unwrap();
+    let (_, _) = run(&mut p, StructurePolicy::Enforce, |ed| {
+        ed.set_instance_name(f, sleep, Some("y"))
+    })
+    .unwrap();
+    let error = history.redo(&mut p).unwrap_err();
+    assert_eq!(error.action, "redo");
+    assert_eq!(error.error, CommandError::FileChanged(f));
+    assert_eq!(msec(&p, f), "3");
+}

@@ -305,16 +305,33 @@ impl History {
     /// Undoes the last step and returns its label, or `None` if there is
     /// nothing to undo.
     ///
-    /// If the step cannot be applied (for example because a file of the
-    /// step was removed from the project), the project does not change, the
-    /// undo stack is cleared (the older steps depend on this one) and the
-    /// function returns the error.
+    /// The step must fit the files: each file that it changes must have
+    /// the generation that the step left. If a file changed outside the
+    /// history (for example [`Project::reload_file`], or a transaction that
+    /// was not recorded), the function clears the history and returns
+    /// [`CommandError::FileChanged`]. If the step cannot be applied for
+    /// another reason (for example because a file of the step was removed
+    /// from the project: [`CommandError::UnknownFile`]), the project does
+    /// not change, the undo stack is cleared (the older steps depend on this
+    /// one) and the function returns the error.
     pub fn undo(&mut self, project: &mut Project) -> Result<Option<String>, HistoryError> {
         let Some(step) = self.undo.pop_back() else {
             return Ok(None);
         };
         self.open = false;
         let label = step.transaction.label.clone();
+        if let Some(error) = check_files(project, &step.generations, |g| g.after) {
+            if matches!(error, CommandError::FileChanged(_)) {
+                self.clear();
+            } else {
+                self.undo.clear();
+            }
+            return Err(HistoryError {
+                action: "undo",
+                label,
+                error,
+            });
+        }
         match step.transaction.apply_tracked(project) {
             Ok((redo, _)) => {
                 set_generations(project, &step.generations, |g| g.before);
@@ -339,14 +356,27 @@ impl History {
     /// Applies the last undone step again and returns its label, or `None`
     /// if there is nothing to redo.
     ///
-    /// If the step cannot be applied, the project does not change, the redo
-    /// stack is cleared and the function returns the error.
+    /// The checks are the same as for [`History::undo`]. If the step
+    /// cannot be applied, the project does not change, the redo stack is
+    /// cleared and the function returns the error.
     pub fn redo(&mut self, project: &mut Project) -> Result<Option<String>, HistoryError> {
         let Some(step) = self.redo.pop() else {
             return Ok(None);
         };
         self.open = false;
         let label = step.transaction.label.clone();
+        if let Some(error) = check_files(project, &step.generations, |g| g.before) {
+            if matches!(error, CommandError::FileChanged(_)) {
+                self.clear();
+            } else {
+                self.redo.clear();
+            }
+            return Err(HistoryError {
+                action: "redo",
+                label,
+                error,
+            });
+        }
         match step.transaction.apply_tracked(project) {
             Ok((undo, _)) => {
                 set_generations(project, &step.generations, |g| g.after);
@@ -368,6 +398,22 @@ impl History {
             }
         }
     }
+}
+
+/// Checks that the files of a step are in the project and have the
+/// expected generations. A file with another generation changed outside
+/// the history ([`CommandError::FileChanged`]); the step must not be
+/// applied to it.
+fn check_files(
+    project: &Project,
+    generations: &[FileGeneration],
+    expected: impl Fn(&FileGeneration) -> u64,
+) -> Option<CommandError> {
+    generations.iter().find_map(|g| match project.file(g.file) {
+        None => Some(CommandError::UnknownFile(g.file)),
+        Some(f) if f.generation() != expected(g) => Some(CommandError::FileChanged(g.file)),
+        Some(_) => None,
+    })
 }
 
 /// True if a file of the step was saved after the step: then a new edit
