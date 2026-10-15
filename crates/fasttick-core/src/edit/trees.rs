@@ -54,7 +54,7 @@ impl Editor<'_> {
     }
 
     /// Checks that no tree in the project has this ID.
-    fn check_new_tree_id(&self, id: &str) -> Result<(), CommandError> {
+    pub(crate) fn check_new_tree_id(&self, id: &str) -> Result<(), CommandError> {
         check_tree_id(id)?;
         if self.project().find_trees(id).is_empty() {
             Ok(())

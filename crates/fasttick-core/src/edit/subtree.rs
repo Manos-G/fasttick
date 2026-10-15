@@ -163,6 +163,7 @@ impl Editor<'_> {
             if !refused.is_empty() {
                 return Err(CommandError::KeysNotRemappable(refused));
             }
+            ed.check_new_tree_id(tree_id)?;
             if ed
                 .synced()
                 .registry()

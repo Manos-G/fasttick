@@ -137,8 +137,8 @@ pub enum CommandError {
     /// so the explicit form cannot be used.
     #[error("the type ID \"{0}\" cannot be an XML element name, and its node kind is not known")]
     TypeNeedsKind(String),
-    /// The clipboard text is not valid XML.
-    #[error("the clipboard text is not valid XML: {0}")]
+    /// The clipboard text is not an XML fragment with elements.
+    #[error("the clipboard text cannot be pasted: {0}")]
     Clipboard(XmlError),
     /// The clipboard text has no element.
     #[error("the clipboard text contains no tree node")]
