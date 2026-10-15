@@ -410,8 +410,7 @@ impl FastTickApp {
                 };
                 self.add_log_document(path, session, loaded);
             }
-            RecentKind::Project => return Err(project_message(path)),
-            RecentKind::Tree => {
+            RecentKind::Project | RecentKind::Tree => {
                 let loaded = crate::jobs::read_tree(path)
                     .map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
                 self.add_tree_document(path, loaded);
@@ -432,11 +431,7 @@ impl FastTickApp {
         }
         match RecentKind::for_path(&path) {
             RecentKind::Log => self.jobs.load_log(ctx, path),
-            RecentKind::Project => {
-                let message = project_message(&path);
-                self.notify(ctx, NoticeLevel::Info, message);
-            }
-            RecentKind::Tree => self.jobs.load_tree(ctx, path),
+            RecentKind::Project | RecentKind::Tree => self.jobs.load_tree(ctx, path),
         }
     }
 
@@ -476,17 +471,9 @@ impl FastTickApp {
         }
         let title = file_name(path);
         let main = loaded.main_instance();
-        let doc = self.workspace.add_doc(
-            DocKind::TreeFile {
-                path: path.to_owned(),
-            },
-            title,
-            loaded.tree,
-            None,
-        );
-        if let Some(document) = self.workspace.doc_mut(doc) {
-            document.main_instance = main;
-        }
+        let doc = self
+            .workspace
+            .add_editor_doc(path.to_owned(), title, *loaded.editor);
         let view = self.workspace.open_view(doc, main, self.view_options())?;
         dock::add_document(&mut self.docks[Mode::Edit.index()], Tab::Document(view));
         self.settings.add_recent(path);
@@ -1952,13 +1939,6 @@ fn disabled_reason(command: Command) -> &'static str {
         Command::SaveAs => "Open a tree file first.",
         _ => "Open a document first.",
     }
-}
-
-fn project_message(path: &Path) -> String {
-    format!(
-        "{}: project files come with the tree editor. Open a tree XML file.",
-        path.display()
-    )
 }
 
 fn file_name(path: &Path) -> String {

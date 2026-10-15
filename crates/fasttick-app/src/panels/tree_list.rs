@@ -105,10 +105,24 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         return;
     }
     let current = view.root_instance;
-    let main = doc.main_instance;
     let doc_id = doc.id;
     let linking = doc.linking;
-    let list = rows(&doc.runtime, linking);
+    let (list, main) = match &doc.editor {
+        Some(editor) => (
+            editor
+                .trees()
+                .into_iter()
+                .map(|(index, tree_id)| TreeRow {
+                    instance: InstanceIndex(index),
+                    tree_id,
+                    path: String::new(),
+                    depth: 0,
+                })
+                .collect(),
+            InstanceIndex(editor.main_tree_index()),
+        ),
+        None => (rows(&doc.runtime, linking), doc.main_instance),
+    };
     ui.label(RichText::new(&doc.title).strong());
     ui.label(
         RichText::new(match linking {

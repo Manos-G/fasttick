@@ -25,6 +25,7 @@ pub mod canvas;
 pub mod dialogs;
 pub mod dock;
 pub mod documents;
+pub mod editor;
 pub mod fonts;
 pub mod jobs;
 pub mod live;

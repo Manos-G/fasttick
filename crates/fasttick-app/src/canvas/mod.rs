@@ -46,6 +46,7 @@ pub mod paint;
 pub mod synthetic;
 pub mod viewport;
 pub mod widget;
+pub mod xml_build;
 
 pub use categories::{BuiltinCategories, CategoryLookup, TableCategories};
 pub use layout::{LayoutDirection, TreeLayout, layout};
@@ -59,3 +60,4 @@ pub use viewport::Viewport;
 pub use widget::{
     CanvasEvent, CanvasOutput, CanvasState, CanvasStats, Detail, NodeMenu, TreeCanvas,
 };
+pub use xml_build::{ProjectCategories, category_of_kind};

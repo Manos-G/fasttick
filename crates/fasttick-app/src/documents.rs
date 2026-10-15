@@ -18,8 +18,11 @@ use crate::canvas::{
     BuiltinCategories, CanvasState, CanvasTree, EdgeStyle, Expansion, LayoutDirection, NodeSource,
     RuntimeBuildOptions, SubtreeLinking,
 };
+use crate::editor::EditorDoc;
 use crate::live::LiveController;
 use crate::replay::ReplayModel;
+use fasttick_core::project::FileId;
+use fasttick_core::xml::NodeId;
 
 /// The ID of a document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -34,7 +37,8 @@ pub struct ViewId(pub u64);
 /// The kind of a document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DocKind {
-    /// A tree XML file, read-only for now.
+    /// A tree XML file or a project file, open for editing. The path is
+    /// empty for a new file that was not saved yet.
     TreeFile {
         /// The file.
         path: PathBuf,
@@ -87,6 +91,10 @@ pub struct Document {
     pub linking: SubtreeLinking,
     /// The replay model (replay documents only).
     pub replay: Option<ReplayModel>,
+    /// The editor (edit documents only). For an edit document,
+    /// [`Document::runtime`] is an empty placeholder and an
+    /// [`InstanceIndex`] is a tree index of the main file.
+    pub editor: Option<Box<EditorDoc>>,
     /// The main tree: `main_tree_to_execute` of a tree file, else the
     /// first tree (the root instance of a runtime tree).
     pub main_instance: InstanceIndex,
@@ -115,6 +123,8 @@ pub struct View {
     /// The decoration key (live generation or replay position) that the
     /// canvas tree shows. `None` after the tree was built again.
     pub decorated: Option<u64>,
+    /// The editor revision that the canvas shows (edit documents only).
+    pub built_revision: u64,
 }
 
 /// All open documents and views.
@@ -224,9 +234,78 @@ impl Workspace {
             runtime,
             linking,
             replay,
+            editor: None,
             main_instance: InstanceIndex(0),
         });
         id
+    }
+
+    /// Adds an edit document. Returns its ID.
+    pub fn add_editor_doc(
+        &mut self,
+        path: PathBuf,
+        title: impl Into<String>,
+        editor: EditorDoc,
+    ) -> DocId {
+        let id = DocId(self.next());
+        let main = InstanceIndex(editor.main_tree_index());
+        self.docs.push(Document {
+            id,
+            kind: DocKind::TreeFile { path },
+            title: title.into(),
+            runtime: Arc::new(placeholder_runtime()),
+            linking: SubtreeLinking::ByTreeId,
+            replay: None,
+            editor: Some(Box::new(editor)),
+            main_instance: main,
+        });
+        id
+    }
+
+    /// Builds the canvas of each edit view again if its editor changed
+    /// after the last build. The selection and the viewport stay. A view
+    /// whose tree no longer exists shows the main tree.
+    pub fn refresh_editor_views(&mut self) {
+        let Workspace { docs, views, .. } = self;
+        for view in views.iter_mut() {
+            let Some(document) = docs.iter().find(|d| d.id == view.doc) else {
+                continue;
+            };
+            let Some(editor) = document.editor.as_deref() else {
+                continue;
+            };
+            if view.built_revision == editor.revision() {
+                continue;
+            }
+            if view.root_instance.0 >= editor.trees().len() {
+                view.root_instance = InstanceIndex(editor.main_tree_index());
+            }
+            let tree = editor.build_canvas(view.root_instance.0, &view.expansion);
+            view.canvas.replace_tree(tree, None);
+            view.built_revision = editor.revision();
+        }
+    }
+
+    /// The editor of a document, for changes.
+    pub fn editor_mut(&mut self, doc: DocId) -> Option<&mut EditorDoc> {
+        self.doc_mut(doc)?.editor.as_deref_mut()
+    }
+
+    /// Selects an element of an edit document in a view and moves the view
+    /// to it. Returns true if the node is on the canvas.
+    pub fn reveal_xml(&mut self, id: ViewId, file: FileId, node: NodeId, select: bool) -> bool {
+        self.refresh_editor_views();
+        let Some(view) = self.view_mut(id) else {
+            return false;
+        };
+        let Some(canvas_id) = view.canvas.tree().find_source(NodeSource::Xml(file, node)) else {
+            return false;
+        };
+        if select {
+            view.canvas.tree_mut().select_only(canvas_id);
+        }
+        view.canvas.focus_on(canvas_id, true);
+        true
     }
 
     /// Replaces the trees of a document (for example after a restart of
@@ -243,8 +322,7 @@ impl Workspace {
                 continue;
             };
             view.root_instance = InstanceIndex(0);
-            let options = build_options(document, view.root_instance);
-            view.expansion = CanvasTree::default_expansion(&document.runtime, options);
+            view.expansion = default_expansion(document, view.root_instance);
             let tree = build_tree(document, view.root_instance, &view.expansion);
             view.canvas = fresh_canvas(tree, &view.canvas);
             view.decorated = None;
@@ -259,9 +337,9 @@ impl Workspace {
         options: ViewOptions,
     ) -> Option<ViewId> {
         let document = self.doc(doc)?;
-        let build = build_options(document, root_instance);
-        let expansion = CanvasTree::default_expansion(&document.runtime, build);
+        let expansion = default_expansion(document, root_instance);
         let tree = build_tree(document, root_instance, &expansion);
+        let built_revision = document.editor.as_ref().map_or(0, |e| e.revision());
         let mut canvas = CanvasState::new(tree);
         canvas.set_direction(options.direction);
         canvas.set_edge_style(options.edge_style);
@@ -274,6 +352,7 @@ impl Workspace {
             expansion,
             canvas,
             decorated: None,
+            built_revision,
         });
         Some(id)
     }
@@ -289,6 +368,7 @@ impl Workspace {
             view.canvas.edge_style(),
         );
         let document = self.doc(doc)?;
+        let built_revision = document.editor.as_ref().map_or(0, |e| e.revision());
         let mut tree = build_tree(document, root, &expansion);
         tree.copy_decorations_from(view.canvas.tree());
         tree.clear_selection();
@@ -306,6 +386,7 @@ impl Workspace {
             expansion,
             canvas,
             decorated: None,
+            built_revision,
         });
         Some(new_id)
     }
@@ -334,8 +415,7 @@ impl Workspace {
             return;
         }
         view.root_instance = root_instance;
-        let options = build_options(document, root_instance);
-        view.expansion = CanvasTree::default_expansion(&document.runtime, options);
+        view.expansion = default_expansion(document, root_instance);
         let tree = build_tree(document, root_instance, &view.expansion);
         view.canvas = fresh_canvas(tree, &view.canvas);
         view.decorated = None;
@@ -360,9 +440,13 @@ impl Workspace {
         };
         let mut expansion = Expansion::none();
         if expanded {
-            for (index, node) in document.runtime.nodes.iter().enumerate() {
-                if node.is_subtree() {
-                    expansion.set(NodeSource::Runtime(NodeIndex(index)), true);
+            if let Some(editor) = &document.editor {
+                expansion = CanvasTree::all_project_subtrees(editor.project());
+            } else {
+                for (index, node) in document.runtime.nodes.iter().enumerate() {
+                    if node.is_subtree() {
+                        expansion.set(NodeSource::Runtime(NodeIndex(index)), true);
+                    }
                 }
             }
         }
@@ -560,14 +644,33 @@ pub fn build_options(document: &Document, root_instance: InstanceIndex) -> Runti
     }
 }
 
+/// The SubTree expansion of a new view. Edit views start with all
+/// SubTrees collapsed (inline trees are read-only there).
+pub fn default_expansion(document: &Document, root_instance: InstanceIndex) -> Expansion {
+    if document.editor.is_some() {
+        return Expansion::none();
+    }
+    CanvasTree::default_expansion(&document.runtime, build_options(document, root_instance))
+}
+
+/// The empty runtime tree of an edit document.
+fn placeholder_runtime() -> RuntimeTree {
+    // This text is valid runtime XML, so the parse cannot fail; the
+    // fallback keeps the code free of panics.
+    RuntimeTree::parse(r#"<root><BehaviorTree ID=""/></root>"#)
+        .or_else(|_| RuntimeTree::parse("<BehaviorTree/>"))
+        .unwrap_or_else(|_| unreachable!("constant runtime XML is valid"))
+}
+
 /// Builds the canvas tree of a view.
 pub fn build_tree(
     document: &Document,
     root_instance: InstanceIndex,
     expansion: &Expansion,
 ) -> CanvasTree {
-    // TODO(after the merge of `fasttick_core::models`): use the model
-    // registry of the project for the categories.
+    if let Some(editor) = &document.editor {
+        return editor.build_canvas(root_instance.0, expansion);
+    }
     CanvasTree::from_runtime(
         &document.runtime,
         build_options(document, root_instance),

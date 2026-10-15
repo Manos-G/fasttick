@@ -145,8 +145,9 @@ fn opening_the_sample_tree_shows_its_nodes() {
         assert_eq!(app.workspace().docs().len(), 1);
         let view = app.workspace().active().expect("an active view");
         assert_eq!(view.canvas.tree().title, "MainTree");
-        // MainTree with the two SubTrees expanded.
-        assert_eq!(view.canvas.tree().len(), 43);
+        // MainTree with its two SubTrees collapsed (edit views start
+        // collapsed; inline SubTree nodes are read-only).
+        assert_eq!(view.canvas.tree().len(), 36);
     }
     // The root is visible in the first view.
     tree_item(&harness, "main_sequence");
@@ -157,17 +158,17 @@ fn opening_the_sample_tree_shows_its_nodes() {
 
     // After "Fit to view" all nodes are on screen.
     command(&mut harness, Command::FitToView);
-    for label in [
-        "say_text",
-        "navigate",
-        "count_in_subtree",
-        "read_text_pose",
-        "long_wait",
-    ] {
+    for label in ["say_text", "navigate", "read_text_pose", "long_wait"] {
         tree_item(&harness, label);
     }
+    // "count_in_subtree" is in the collapsed SubTree "counting".
+    assert!(
+        harness
+            .query_by_role_and_label(Role::TreeItem, "count_in_subtree")
+            .is_none()
+    );
     let visible = harness.query_all_by_role(Role::TreeItem).count();
-    assert_eq!(visible, 43);
+    assert_eq!(visible, 36);
 }
 
 #[test]
@@ -286,19 +287,19 @@ fn selection_and_keyboard_navigation() {
             .canvas
             .tree()
             .selected_count(),
-        43
+        36
     );
 }
 
 #[test]
-fn double_click_collapses_a_subtree() {
+fn double_click_expands_a_subtree() {
     let mut harness = harness(light(vec![main_xml()]));
     command(&mut harness, Command::FitToView);
     command(&mut harness, Command::ZoomReset);
     let count = |h: &Harness<'static, FastTickApp>| {
         h.state().workspace().active().unwrap().canvas.tree().len()
     };
-    assert_eq!(count(&harness), 43);
+    assert_eq!(count(&harness), 36);
     let center = tree_item(&harness, "navigate").rect().center();
     for _ in 0..2 {
         for pressed in [true, false] {
@@ -311,8 +312,13 @@ fn double_click_collapses_a_subtree() {
         }
     }
     harness.run();
-    // "navigate" hides its 4 inner nodes.
-    assert_eq!(count(&harness), 39);
+    // "navigate" shows the 4 nodes of its tree inline, read-only.
+    assert_eq!(count(&harness), 40);
+    {
+        let app = harness.state();
+        let tree = app.workspace().active().unwrap().canvas.tree();
+        assert_eq!(tree.nodes().iter().filter(|n| n.inline).count(), 4);
+    }
     // The SubTree node stays where it was.
     let after = tree_item(&harness, "navigate").rect().center();
     assert!((after - center).length() < 1.0, "{center:?} -> {after:?}");

@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use fasttick_core::runtime::RuntimeTree;
 use fasttick_log::btlog::{BtLog, BtLogReader};
 use fasttick_log::export::{export_csv, export_json, export_rows};
 use fasttick_log::filter::TransitionFilter;
@@ -164,25 +163,18 @@ pub struct LoadingFile {
     pub progress: Arc<LoadProgress>,
 }
 
-/// A loaded tree file.
-#[derive(Debug, Clone)]
+/// A loaded tree file or project, ready for editing.
+#[derive(Debug)]
 pub struct LoadedTree {
-    /// The trees of the file.
-    pub tree: Arc<RuntimeTree>,
-    /// The value of `main_tree_to_execute`, if the root has one.
-    pub main_tree: Option<String>,
+    /// The editor state: the project, its history and its problems.
+    pub editor: Box<crate::editor::EditorDoc>,
 }
 
 impl LoadedTree {
-    /// The instance of the main tree: the tree that
-    /// `main_tree_to_execute` names, else the first tree.
+    /// The index of the main tree: the tree that `main_tree_to_execute`
+    /// names, else the first tree.
     pub fn main_instance(&self) -> fasttick_core::runtime::InstanceIndex {
-        let index = self
-            .main_tree
-            .as_deref()
-            .and_then(|id| self.tree.instances.iter().position(|i| i.tree_id == id))
-            .unwrap_or(0);
-        fasttick_core::runtime::InstanceIndex(index)
+        fasttick_core::runtime::InstanceIndex(self.editor.main_tree_index())
     }
 }
 
@@ -525,26 +517,10 @@ pub fn read_tree(path: &Path) -> Result<LoadedTree, String> {
             MAX_TREE_FILE / (1024 * 1024)
         ));
     }
-    let bytes = std::fs::read(path).map_err(|err| err.to_string())?;
-    let text = String::from_utf8(bytes).map_err(|_| "the file is not UTF-8 text".to_owned())?;
-    let tree = RuntimeTree::parse(&text).map_err(|err| err.to_string())?;
+    let editor = crate::editor::EditorDoc::open(path)?;
     Ok(LoadedTree {
-        tree: Arc::new(tree),
-        main_tree: main_tree_id(&text),
+        editor: Box::new(editor),
     })
-}
-
-/// The `main_tree_to_execute` attribute of the root element (BT.CPP
-/// `XMLParser`: the tree that `createTree` runs when no ID is given).
-///
-/// TODO(after the merge of `fasttick_core::bt`): read it from `BtFile`.
-fn main_tree_id(text: &str) -> Option<String> {
-    let doc = fasttick_core::xml::Document::parse(text).ok()?;
-    let root = doc.document_element()?;
-    doc.attribute(root, "main_tree_to_execute")
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(str::to_owned)
 }
 
 /// Reads a log file and builds its replay index (blocking). A SQLite log
@@ -670,8 +646,7 @@ mod tests {
             JobResult::Tree { path, result } => {
                 assert_eq!(path, tree_path);
                 let loaded = result.unwrap();
-                assert_eq!(loaded.tree.len(), 1);
-                assert_eq!(loaded.main_tree, None);
+                assert_eq!(loaded.editor.trees().len(), 1);
                 assert_eq!(loaded.main_instance().0, 0);
             }
             other => panic!("{other:?}"),
@@ -841,14 +816,17 @@ mod tests {
         )
         .unwrap();
         let loaded = read_tree(&path).unwrap();
-        assert_eq!(loaded.main_tree.as_deref(), Some("Second"));
         assert_eq!(loaded.main_instance().0, 1);
         // An unknown name gives the first tree.
-        let unknown = LoadedTree {
-            main_tree: Some("Nope".into()),
-            ..loaded
-        };
-        assert_eq!(unknown.main_instance().0, 0);
+        std::fs::write(
+            &path,
+            r#"<root BTCPP_format="4" main_tree_to_execute="Nope">
+                <BehaviorTree ID="First"><AlwaysSuccess/></BehaviorTree>
+                <BehaviorTree ID="Second"><AlwaysFailure/></BehaviorTree>
+            </root>"#,
+        )
+        .unwrap();
+        assert_eq!(read_tree(&path).unwrap().main_instance().0, 0);
     }
 
     #[test]

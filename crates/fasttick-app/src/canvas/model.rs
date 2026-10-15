@@ -11,8 +11,9 @@
 //! - [`CanvasTree::from_runtime`]: the flat runtime XML of an executor or a
 //!   log, or an authoring file that was read with
 //!   [`RuntimeTree::parse`](fasttick_core::runtime::RuntimeTree::parse).
-//! - Later: a tree of an editable `BtFile`. Use [`CanvasTreeBuilder`] and
-//!   [`NodeSource::Xml`] for that.
+//! - [`CanvasTree::from_project`] (in `xml_build.rs`): one tree of an
+//!   editable file of a [`fasttick_core::project::Project`]. Its nodes use
+//!   [`NodeSource::Xml`].
 //!
 //! A `<SubTree>` node can be expanded inline (the root of its tree becomes
 //! its only child) or collapsed. The builder takes the set of expanded
@@ -21,6 +22,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
+use fasttick_core::project::FileId;
 use fasttick_core::runtime::{InstanceIndex, NodeIndex, RuntimeTree, Uid};
 use fasttick_core::status::NodeStatus;
 use fasttick_core::xml::NodeId;
@@ -101,8 +103,8 @@ impl NodeCategory {
 pub enum NodeSource {
     /// A node of a [`RuntimeTree`].
     Runtime(NodeIndex),
-    /// An element of an `xml::Document` (edit mode).
-    Xml(NodeId),
+    /// An element of a file of a project (edit mode).
+    Xml(FileId, NodeId),
 }
 
 /// One line of the port summary: a port name and its value.
@@ -223,6 +225,10 @@ pub struct CanvasNode {
     pub subtree: Option<SubtreeInfo>,
     /// The full path (for example `sub_a/fb`), if the source has one.
     pub path: String,
+    /// True for a node that the canvas shows inside an expanded SubTree of
+    /// an editable tree. Such nodes belong to another tree and are
+    /// read-only in this view.
+    pub inline: bool,
     /// The decorations.
     pub deco: Decorations,
     /// Display text and size. Empty until the canvas measures the tree.
@@ -245,6 +251,7 @@ impl CanvasNode {
             ports: Vec::new(),
             subtree: None,
             path: String::new(),
+            inline: false,
             deco: Decorations::default(),
             card: CardText::default(),
         }
