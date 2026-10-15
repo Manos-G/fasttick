@@ -496,9 +496,9 @@ impl CanvasTree {
                 None
             };
             let target_id = target.map(|t| tree.instances[t.0].tree_id.clone());
-            let cycle = target_id
-                .as_ref()
-                .is_some_and(|id| linker.linking == SubtreeLinking::ByTreeId && ancestry.contains(id));
+            let cycle = target_id.as_ref().is_some_and(|id| {
+                linker.linking == SubtreeLinking::ByTreeId && ancestry.contains(id)
+            });
             let target_root = target
                 .filter(|_| !cycle)
                 .and_then(|t| tree.instances[t.0].root);
@@ -964,7 +964,13 @@ mod tests {
         let labels: Vec<&str> = canvas.nodes().iter().map(|n| n.label.as_str()).collect();
         assert_eq!(
             labels,
-            ["root_sequence", "hello", "sub_a", "Inverter", "AlwaysFailure"]
+            [
+                "root_sequence",
+                "hello",
+                "sub_a",
+                "Inverter",
+                "AlwaysFailure"
+            ]
         );
         let root = &canvas.nodes()[0];
         assert_eq!(root.category, NodeCategory::Control);
@@ -1134,7 +1140,10 @@ mod tests {
         assert_eq!(second, CanvasNodeId(2));
         let third = canvas.navigate(second, NavStep::NextSibling).unwrap();
         assert_eq!(canvas.navigate(third, NavStep::NextSibling), None);
-        assert_eq!(canvas.navigate(third, NavStep::PreviousSibling), Some(second));
+        assert_eq!(
+            canvas.navigate(third, NavStep::PreviousSibling),
+            Some(second)
+        );
         assert_eq!(canvas.navigate(root, NavStep::NextSibling), None);
         assert_eq!(canvas.navigate(CanvasNodeId(99), NavStep::Parent), None);
     }
@@ -1143,17 +1152,32 @@ mod tests {
     fn builder_keeps_depth_first_structure() {
         let mut builder = CanvasTreeBuilder::new();
         assert!(builder.is_empty());
-        let root = builder.push(None, CanvasNode::new(NodeSource::Runtime(NodeIndex(0)), "r", "Sequence"));
-        let a = builder.push(Some(root), CanvasNode::new(NodeSource::Runtime(NodeIndex(1)), "a", "A"));
-        builder.push(Some(a), CanvasNode::new(NodeSource::Runtime(NodeIndex(2)), "b", "B"));
+        let root = builder.push(
+            None,
+            CanvasNode::new(NodeSource::Runtime(NodeIndex(0)), "r", "Sequence"),
+        );
+        let a = builder.push(
+            Some(root),
+            CanvasNode::new(NodeSource::Runtime(NodeIndex(1)), "a", "A"),
+        );
+        builder.push(
+            Some(a),
+            CanvasNode::new(NodeSource::Runtime(NodeIndex(2)), "b", "B"),
+        );
         // An out-of-range parent becomes no parent.
-        builder.push(Some(CanvasNodeId(42)), CanvasNode::new(NodeSource::Runtime(NodeIndex(3)), "c", "C"));
+        builder.push(
+            Some(CanvasNodeId(42)),
+            CanvasNode::new(NodeSource::Runtime(NodeIndex(3)), "c", "C"),
+        );
         assert_eq!(builder.len(), 4);
         let tree = builder.finish("T");
         assert_eq!(tree.get(a).unwrap().children, vec![CanvasNodeId(2)]);
         assert_eq!(tree.get(CanvasNodeId(2)).unwrap().depth, 2);
         assert_eq!(tree.level_count(), 3);
-        assert_eq!(tree.find_source(NodeSource::Runtime(NodeIndex(2))), Some(CanvasNodeId(2)));
+        assert_eq!(
+            tree.find_source(NodeSource::Runtime(NodeIndex(2))),
+            Some(CanvasNodeId(2))
+        );
         assert!(tree.get(CanvasNodeId(3)).unwrap().parent.is_none());
     }
 

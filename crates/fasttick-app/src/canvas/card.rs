@@ -314,7 +314,10 @@ mod tests {
     #[test]
     fn elide_keeps_short_text() {
         let mut m = FixedMeasure(7.0);
-        assert_eq!(elide(&mut m, "hello", TextKind::Label, 100.0), ("hello".into(), 35.0));
+        assert_eq!(
+            elide(&mut m, "hello", TextKind::Label, 100.0),
+            ("hello".into(), 35.0)
+        );
         let (text, width) = elide(&mut m, "a long label text", TextKind::Label, 50.0);
         assert!(text.ends_with(ELLIPSIS));
         assert!(width <= 50.0, "{width}");
@@ -372,7 +375,11 @@ mod tests {
             + m.width(name, TextKind::PortName)
             + m.width(PORT_SEPARATOR, TextKind::PortName)
             + m.width(value, TextKind::PortValue);
-        assert!(port_end <= card.size.x - PAD_X + 0.5, "{port_end} > {}", card.size.x);
+        assert!(
+            port_end <= card.size.x - PAD_X + 0.5,
+            "{port_end} > {}",
+            card.size.x
+        );
         assert!(geometry.port_pos(0).y > geometry.separator_y());
         assert!(geometry.port_pos(0).y + PORT_LINE <= card.size.y);
     }

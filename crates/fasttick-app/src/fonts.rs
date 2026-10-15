@@ -145,15 +145,17 @@ pub fn definitions(monospace: Option<Vec<u8>>) -> FontDefinitions {
             vec!["roboto".to_owned()]
         },
     );
-    fonts
-        .families
-        .insert(FontFamily::Name(MEDIUM.into()), with_fallback("roboto-medium"));
+    fonts.families.insert(
+        FontFamily::Name(MEDIUM.into()),
+        with_fallback("roboto-medium"),
+    );
     fonts
         .families
         .insert(FontFamily::Name(BOLD.into()), with_fallback("roboto-bold"));
-    fonts
-        .families
-        .insert(FontFamily::Name(ITALIC.into()), with_fallback("roboto-italic"));
+    fonts.families.insert(
+        FontFamily::Name(ITALIC.into()),
+        with_fallback("roboto-italic"),
+    );
     fonts
 }
 
@@ -223,6 +225,9 @@ mod tests {
         std::fs::write(dir.path().join("LiberationMono-Regular.ttf"), b"x").unwrap();
         let found = find_font_in(&[dir.path().to_owned()], MONOSPACE_FILES).unwrap();
         assert_eq!(found.file_name().unwrap(), "LiberationMono-Regular.ttf");
-        assert_eq!(find_font_in(&[dir.path().join("missing")], MONOSPACE_FILES), None);
+        assert_eq!(
+            find_font_in(&[dir.path().join("missing")], MONOSPACE_FILES),
+            None
+        );
     }
 }

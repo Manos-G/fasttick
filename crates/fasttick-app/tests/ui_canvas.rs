@@ -3,7 +3,7 @@
 use egui::accesskit::Role;
 use egui::{Event, Modifiers, PointerButton, Pos2, Vec2, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use fasttick_app::canvas::{
     BuiltinCategories, CanvasEvent, CanvasState, CanvasTree, Expansion, RuntimeBuildOptions,
     TreeCanvas, Viewport,
@@ -50,7 +50,8 @@ fn build(runtime: &RuntimeTree, expansion: &Expansion) -> CanvasTree {
 
 fn harness() -> Harness<'static, TestState> {
     let runtime = RuntimeTree::parse(XML).unwrap();
-    let expansion = CanvasTree::default_expansion(&runtime, RuntimeBuildOptions::for_tree(&runtime));
+    let expansion =
+        CanvasTree::default_expansion(&runtime, RuntimeBuildOptions::for_tree(&runtime));
     let canvas = CanvasState::new(build(&runtime, &expansion));
     let state = TestState {
         canvas,
@@ -84,7 +85,10 @@ fn harness() -> Harness<'static, TestState> {
 }
 
 fn item_center(harness: &Harness<'static, TestState>, label: &'static str) -> Pos2 {
-    harness.get_by_role_and_label(Role::TreeItem, label).rect().center()
+    harness
+        .get_by_role_and_label(Role::TreeItem, label)
+        .rect()
+        .center()
 }
 
 fn click_at(harness: &Harness<'static, TestState>, pos: Pos2, modifiers: Modifiers) {
@@ -113,14 +117,30 @@ fn selected_labels(harness: &Harness<'static, TestState>) -> Vec<String> {
 fn shows_all_nodes_with_categories() {
     let harness = harness();
     // A small tree fits the view; all nodes are visible.
-    for label in ["root", "battery", "choose", "move", "recover", "recover_steps", "wait", "ok", "say"] {
+    for label in [
+        "root",
+        "battery",
+        "choose",
+        "move",
+        "recover",
+        "recover_steps",
+        "wait",
+        "ok",
+        "say",
+    ] {
         harness.get_by_role_and_label(Role::TreeItem, label);
     }
     assert_eq!(harness.query_all_by_role(Role::TreeItem).count(), 9);
     let canvas = harness.get_by_role(Role::Tree);
-    assert_eq!(canvas.label().as_deref(), Some("Tree canvas: Main"));
+    assert_eq!(
+        canvas.accesskit_node().label().as_deref(),
+        Some("Tree canvas: Main")
+    );
     let choose = harness.get_by_role_and_label(Role::TreeItem, "choose");
-    assert_eq!(choose.description().as_deref(), Some("Fallback (Control)"));
+    assert_eq!(
+        choose.accesskit_node().description().as_deref(),
+        Some("Fallback (Control)")
+    );
     // The node items are inside the canvas.
     let rect = canvas.rect();
     for node in harness.query_all_by_role(Role::TreeItem) {
@@ -137,12 +157,20 @@ fn click_shift_click_ctrl_click() {
     click_at(&harness, item_center(&harness, "say"), Modifiers::SHIFT);
     harness.run();
     assert_eq!(selected_labels(&harness), ["battery", "say"]);
-    click_at(&harness, item_center(&harness, "battery"), Modifiers::COMMAND);
+    click_at(
+        &harness,
+        item_center(&harness, "battery"),
+        Modifiers::COMMAND,
+    );
     harness.run();
     assert_eq!(selected_labels(&harness), ["say"]);
     // A click on the background clears the selection.
     let canvas = harness.get_by_role(Role::Tree).rect();
-    click_at(&harness, canvas.left_bottom() + vec2(5.0, -5.0), Modifiers::NONE);
+    click_at(
+        &harness,
+        canvas.left_bottom() + vec2(5.0, -5.0),
+        Modifiers::NONE,
+    );
     harness.run();
     assert!(selected_labels(&harness).is_empty());
     assert!(
@@ -156,7 +184,7 @@ fn click_shift_click_ctrl_click() {
     click_at(&harness, item_center(&harness, "move"), Modifiers::NONE);
     harness.run();
     let node = harness.get_by_role_and_label(Role::TreeItem, "move");
-    assert_eq!(node.is_selected(), Some(true));
+    assert_eq!(node.accesskit_node().is_selected(), Some(true));
 }
 
 #[test]
@@ -197,7 +225,10 @@ fn zoom_with_ctrl_wheel_and_pan_with_middle_drag() {
     harness.event(Event::Zoom(1.5));
     harness.run();
     let after = harness.state().canvas.viewport();
-    assert!((after.zoom - before.zoom * 1.5).abs() < 1e-3, "{before:?} {after:?}");
+    assert!(
+        (after.zoom - before.zoom * 1.5).abs() < 1e-3,
+        "{before:?} {after:?}"
+    );
     // The node under the pointer stays in place.
     let moved = item_center(&harness, "choose");
     assert!((moved - anchor).length() < 1.0, "{anchor:?} -> {moved:?}");
@@ -268,7 +299,7 @@ fn enter_and_double_click_toggle_the_subtree() {
     assert_eq!(harness.state().canvas.tree().len(), 6);
     assert!(harness.query_by_label("wait").is_none());
     let collapsed = harness.get_by_role_and_label(Role::TreeItem, "recover");
-    assert_eq!(collapsed.data().is_expanded(), Some(false));
+    assert_eq!(collapsed.accesskit_node().data().is_expanded(), Some(false));
     // The node did not move.
     assert!((item_center(&harness, "recover") - center).length() < 1.0);
     // Enter expands it again.
@@ -303,17 +334,25 @@ fn status_and_focus_on() {
     }
     harness.run();
     let node = harness.get_by_role_and_label(Role::TreeItem, "move");
-    assert_eq!(node.description().as_deref(), Some("MoveBase (Action), RUNNING"));
+    assert_eq!(
+        node.accesskit_node().description().as_deref(),
+        Some("MoveBase (Action), RUNNING")
+    );
 
     // focus_on centres the node and selects it, with an animation.
     let state = harness.state_mut();
-    state.canvas.set_viewport(Viewport::new(Vec2::new(4000.0, 0.0), 0.5));
+    state
+        .canvas
+        .set_viewport(Viewport::new(Vec2::new(4000.0, 0.0), 0.5));
     let id = state.canvas.tree().find_uid(Uid(8)).unwrap();
     state.canvas.focus_on(id, true);
     harness.run();
     let canvas = harness.get_by_role(Role::Tree).rect();
     let wait = item_center(&harness, "wait");
-    assert!((wait - canvas.center()).length() < 1.0, "{wait:?} {canvas:?}");
+    assert!(
+        (wait - canvas.center()).length() < 1.0,
+        "{wait:?} {canvas:?}"
+    );
     assert_eq!(selected_labels(&harness), ["wait"]);
     assert_eq!(harness.state().canvas.viewport().zoom, 1.0);
 }

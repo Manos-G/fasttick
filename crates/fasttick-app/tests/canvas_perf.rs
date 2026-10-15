@@ -84,10 +84,7 @@ fn frame_time_with_5000_nodes() {
     let bounds = state.layout().bounds;
     let canvas = vec2(SIZE.x, SIZE.y);
     let cases: Vec<(&str, Viewport)> = vec![
-        (
-            "fit (all nodes)",
-            Viewport::fit(bounds, canvas, 32.0, 1.0),
-        ),
+        ("fit (all nodes)", Viewport::fit(bounds, canvas, 32.0, 1.0)),
         (
             "zoom 0.01 (all, boxes)",
             Viewport::centered_on(bounds.center(), canvas, 0.01),

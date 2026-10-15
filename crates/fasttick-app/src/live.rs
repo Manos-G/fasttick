@@ -57,7 +57,8 @@ impl LiveController {
                 ..SessionConfig::default()
             };
             let waker_ctx = ctx.clone();
-            let waker: fasttick_protocol::session::Waker = Box::new(move || waker_ctx.request_repaint());
+            let waker: fasttick_protocol::session::Waker =
+                Box::new(move || waker_ctx.request_repaint());
             self.session = Some(LiveSession::spawn(config, Some(waker)));
         } else if let Some((handle, _)) = &self.session {
             handle.send(SessionCommand::SetPollInterval(interval));
@@ -81,9 +82,9 @@ impl LiveController {
     /// Changes the status poll interval.
     pub fn set_poll_interval(&mut self, poll_interval_ms: u32) {
         if let Some((handle, _)) = &self.session {
-            handle.send(SessionCommand::SetPollInterval(Duration::from_millis(u64::from(
-                poll_interval_ms.max(10),
-            ))));
+            handle.send(SessionCommand::SetPollInterval(Duration::from_millis(
+                u64::from(poll_interval_ms.max(10)),
+            )));
         }
     }
 
@@ -126,7 +127,9 @@ impl LiveController {
                 Some(e) => format!("Connected to {e}"),
                 None => "Connected".to_owned(),
             },
-            ConnectionState::Reconnecting { attempt } => format!("Reconnecting (attempt {attempt})"),
+            ConnectionState::Reconnecting { attempt } => {
+                format!("Reconnecting (attempt {attempt})")
+            }
         }
     }
 }

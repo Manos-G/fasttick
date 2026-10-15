@@ -75,7 +75,10 @@ pub fn shortcut_list(ui: &mut Ui, keymap: &KeyMap) {
     let order = ["File", "Edit", "View", "Mode", "Live", "Help"];
     for binding in keymap.bindings() {
         let group = binding.command.group();
-        let rank = order.iter().position(|g| *g == group).unwrap_or(order.len());
+        let rank = order
+            .iter()
+            .position(|g| *g == group)
+            .unwrap_or(order.len());
         let text = ui.ctx().format_shortcut(&binding.shortcut);
         groups
             .entry(rank)
@@ -151,7 +154,8 @@ pub fn connect(ctx: &egui::Context, form: &mut ConnectForm) -> ConnectChoice {
                 .spacing([10.0, 8.0])
                 .show(ui, |ui| {
                     ui.label("Host");
-                    let host = ui.add(egui::TextEdit::singleline(&mut form.host).desired_width(200.0));
+                    let host =
+                        ui.add(egui::TextEdit::singleline(&mut form.host).desired_width(200.0));
                     if host.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         choice = ConnectChoice::Connect;
                     }

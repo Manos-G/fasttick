@@ -80,11 +80,17 @@ pub fn paint_icon(ui: &Ui, rect: Rect, icon: Icon, color: Color32) {
             let body = Rect::from_center_size(c + vec2(0.0, s * 0.1), vec2(s * 1.5, s * 1.0));
             painter.rect_stroke(body, CornerRadius::same(2), stroke, StrokeKind::Middle);
             painter.line_segment(
-                [body.left_top() + vec2(0.0, 0.0), body.left_top() + vec2(s * 0.5, -s * 0.3)],
+                [
+                    body.left_top() + vec2(0.0, 0.0),
+                    body.left_top() + vec2(s * 0.5, -s * 0.3),
+                ],
                 stroke,
             );
             painter.line_segment(
-                [body.left_top() + vec2(s * 0.5, -s * 0.3), body.left_top() + vec2(s * 0.7, 0.0)],
+                [
+                    body.left_top() + vec2(s * 0.5, -s * 0.3),
+                    body.left_top() + vec2(s * 0.7, 0.0),
+                ],
                 stroke,
             );
         }
@@ -120,7 +126,11 @@ pub fn paint_icon(ui: &Ui, rect: Rect, icon: Icon, color: Color32) {
 /// also the accessibility label.
 pub fn icon_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool) -> Response {
     let size = Vec2::splat(ui.spacing().interact_size.y);
-    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
     if ui.is_rect_visible(rect) {
@@ -200,10 +210,14 @@ pub fn segmented<T: PartialEq + Copy>(
             visuals.text_color()
         };
         if selected {
-            ui.painter().rect_filled(rect, CornerRadius::same(6), accent);
-        } else if response.hovered() {
             ui.painter()
-                .rect_filled(rect, CornerRadius::same(6), visuals.widgets.hovered.weak_bg_fill);
+                .rect_filled(rect, CornerRadius::same(6), accent);
+        } else if response.hovered() {
+            ui.painter().rect_filled(
+                rect,
+                CornerRadius::same(6),
+                visuals.widgets.hovered.weak_bg_fill,
+            );
         }
         let pos = rect.center() - galley.size() * 0.5;
         ui.painter().galley(pos, galley, text_color);
@@ -231,7 +245,10 @@ pub fn logo(ui: &mut Ui, accent: Color32) -> Response {
     let right = Rect::from_center_size(c + vec2(s * 0.48, s * 0.5), vec2(s * 0.62, s * 0.42));
     let bus = c.y + s * 0.02;
     painter.line_segment([root.center_bottom(), pos2(c.x, bus)], stroke);
-    painter.line_segment([pos2(left.center().x, bus), pos2(right.center().x, bus)], stroke);
+    painter.line_segment(
+        [pos2(left.center().x, bus), pos2(right.center().x, bus)],
+        stroke,
+    );
     painter.line_segment([pos2(left.center().x, bus), left.center_top()], stroke);
     painter.line_segment([pos2(right.center().x, bus), right.center_top()], stroke);
     painter.rect_filled(root, CornerRadius::same(2), accent);

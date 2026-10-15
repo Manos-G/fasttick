@@ -277,9 +277,7 @@ impl FastTickApp {
     }
 
     fn find_open_view(&self, path: &Path) -> Option<ViewId> {
-        let doc = self
-            .workspace
-            .find_doc(|d| d.kind.path() == Some(path))?;
+        let doc = self.workspace.find_doc(|d| d.kind.path() == Some(path))?;
         self.workspace.views_of(doc).next().map(|v| v.id)
     }
 
@@ -534,8 +532,9 @@ impl FastTickApp {
             self.live_doc = None;
         }
         if self.workspace.active_view.is_none() {
-            self.workspace.active_view =
-                dock::document_views(&self.docks[self.mode.index()]).first().copied();
+            self.workspace.active_view = dock::document_views(&self.docks[self.mode.index()])
+                .first()
+                .copied();
         }
     }
 
@@ -603,7 +602,9 @@ impl FastTickApp {
                     }
                 },
                 JobResult::Saved { path, result } => match result {
-                    Ok(()) => self.notify(ctx, NoticeLevel::Info, format!("Saved {}", path.display())),
+                    Ok(()) => {
+                        self.notify(ctx, NoticeLevel::Info, format!("Saved {}", path.display()))
+                    }
                     Err(message) => self.notify(
                         ctx,
                         NoticeLevel::Error,
@@ -674,7 +675,11 @@ impl FastTickApp {
                     }
                 }
                 SessionEvent::ExecutorRestarted { .. } => {
-                    self.notify(ctx, NoticeLevel::Info, "The executor restarted. FastTick reads its tree again.");
+                    self.notify(
+                        ctx,
+                        NoticeLevel::Info,
+                        "The executor restarted. FastTick reads its tree again.",
+                    );
                 }
                 SessionEvent::Error(message) => {
                     self.notify(ctx, NoticeLevel::Error, message);
@@ -699,7 +704,8 @@ impl FastTickApp {
                 AppAction::OpenTreeInNewTab(doc, instance) => {
                     let mode = self.workspace.doc(doc).map(|d| d.mode());
                     if let Some(mode) = mode
-                        && let Some(view) = self.workspace.open_view(doc, instance, self.view_options())
+                        && let Some(view) =
+                            self.workspace.open_view(doc, instance, self.view_options())
                     {
                         dock::add_document(&mut self.docks[mode.index()], Tab::Document(view));
                         self.focus_view(view);
@@ -735,8 +741,7 @@ impl FastTickApp {
 
         egui::Panel::top("fasttick_top_bar")
             .frame(
-                egui::Frame::side_top_panel(ui.style())
-                    .inner_margin(egui::Margin::symmetric(8, 4)),
+                egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 4)),
             )
             .show(ui, |ui| self.top_bar(ui, &palette));
         egui::Panel::bottom("fasttick_status_bar")
@@ -746,7 +751,11 @@ impl FastTickApp {
             )
             .show(ui, |ui| self.status_bar(ui, &palette));
         egui::CentralPanel::no_frame()
-            .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill).inner_margin(4))
+            .frame(
+                egui::Frame::NONE
+                    .fill(ui.visuals().panel_fill)
+                    .inner_margin(4),
+            )
             .show(ui, |ui| self.dock_area(ui, &palette));
 
         self.dialogs(&ctx, &palette);
@@ -798,7 +807,11 @@ impl FastTickApp {
                     if widgets::segmented(
                         ui,
                         &mut mode,
-                        &[(Mode::Edit, "Edit"), (Mode::Live, "Live"), (Mode::Replay, "Replay")],
+                        &[
+                            (Mode::Edit, "Edit"),
+                            (Mode::Live, "Live"),
+                            (Mode::Replay, "Replay"),
+                        ],
                         " mode",
                         palette.accent,
                     ) {
@@ -807,7 +820,8 @@ impl FastTickApp {
                 });
             },
         );
-        let right = egui::Rect::from_min_max(egui::pos2(switcher.max.x + 8.0, full.min.y), full.max);
+        let right =
+            egui::Rect::from_min_max(egui::pos2(switcher.max.x + 8.0, full.min.y), full.max);
         ui.scope_builder(
             egui::UiBuilder::new()
                 .max_rect(right)
@@ -939,7 +953,11 @@ impl FastTickApp {
                 .and_then(|v| self.workspace.view(v))
                 .map_or(self.settings.layout_direction, |v| v.canvas.direction());
             ui.menu_button("Layout", |ui| {
-                self.radio_item(ui, Command::LayoutTopDown, direction == LayoutDirection::TopDown);
+                self.radio_item(
+                    ui,
+                    Command::LayoutTopDown,
+                    direction == LayoutDirection::TopDown,
+                );
                 self.radio_item(
                     ui,
                     Command::LayoutLeftRight,
@@ -949,9 +967,15 @@ impl FastTickApp {
                 self.menu_item(ui, Command::ToggleLayout);
             });
             ui.menu_button("Edges", |ui| {
-                for style in [crate::canvas::EdgeStyle::Orthogonal, crate::canvas::EdgeStyle::Curved] {
+                for style in [
+                    crate::canvas::EdgeStyle::Orthogonal,
+                    crate::canvas::EdgeStyle::Curved,
+                ] {
                     if ui
-                        .add(egui::Button::selectable(self.settings.edge_style == style, style.name()))
+                        .add(egui::Button::selectable(
+                            self.settings.edge_style == style,
+                            style.name(),
+                        ))
                         .clicked()
                     {
                         self.settings.edge_style = style;
@@ -1045,7 +1069,10 @@ impl FastTickApp {
                     let stats = view.canvas.stats();
                     ui.label(small(view.canvas.direction().name().to_owned()));
                     ui.separator();
-                    ui.label(small(format!("Zoom {:.0} %", view.canvas.viewport().zoom * 100.0)));
+                    ui.label(small(format!(
+                        "Zoom {:.0} %",
+                        view.canvas.viewport().zoom * 100.0
+                    )));
                     ui.separator();
                     ui.label(small(format!(
                         "{} nodes, {} visible",
@@ -1066,7 +1093,8 @@ impl FastTickApp {
         let mut style = egui_dock::Style::from_egui(ui.style());
         style.tab_bar.height = 28.0;
         style.tab.tab_body.inner_margin = egui::Margin::same(8);
-        style.tab.tab_body.stroke = egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
+        style.tab.tab_body.stroke =
+            egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
         style.separator.width = 1.0;
         style.separator.extra = 4.0;
         style.tab_bar.corner_radius = egui::CornerRadius::same(4);
@@ -1174,7 +1202,14 @@ impl Viewer<'_> {
         };
         let doc_id = doc.id;
         let is_live = self.live_doc == Some(doc_id);
-        let replay = doc.replay.as_ref().map(|r| (r.position, r.index.len(), r.index.time_of_index(r.position.saturating_sub(1)), r.index.last_time()));
+        let replay = doc.replay.as_ref().map(|r| {
+            (
+                r.position,
+                r.index.len(),
+                r.index.time_of_index(r.position.saturating_sub(1)),
+                r.index.last_time(),
+            )
+        });
 
         if is_live {
             self.live_strip(ui, view_id);
@@ -1182,8 +1217,14 @@ impl Viewer<'_> {
         if let Some((position, len, time, last)) = replay {
             egui::Panel::bottom(Id::new(("replay_strip", view_id)))
                 .resizable(false)
-                .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 4)).fill(ui.visuals().panel_fill))
-                .show(ui, |ui| replay_strip(ui, doc_id, position, len, time, last, self.actions));
+                .frame(
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin::symmetric(8, 4))
+                        .fill(ui.visuals().panel_fill),
+                )
+                .show(ui, |ui| {
+                    replay_strip(ui, doc_id, position, len, time, last, self.actions)
+                });
         }
 
         let Some(view) = self.workspace.view_mut(view_id) else {
@@ -1192,12 +1233,17 @@ impl Viewer<'_> {
         let output = TreeCanvas::new(&mut view.canvas, self.palette)
             .id_salt(("canvas", view_id.0))
             .show(ui);
-        if output.response.clicked() || output.response.drag_started() || output.response.secondary_clicked() {
+        if output.response.clicked()
+            || output.response.drag_started()
+            || output.response.secondary_clicked()
+        {
             self.workspace.active_view = Some(view_id);
         }
         for event in output.events {
             match event {
-                CanvasEvent::ToggleSubtree(source) => self.workspace.toggle_subtree(view_id, source),
+                CanvasEvent::ToggleSubtree(source) => {
+                    self.workspace.toggle_subtree(view_id, source)
+                }
                 CanvasEvent::SetAllSubtrees(expanded) => {
                     self.workspace.set_all_subtrees(view_id, expanded);
                 }
@@ -1211,7 +1257,11 @@ impl Viewer<'_> {
     fn live_strip(&mut self, ui: &mut Ui, view_id: ViewId) {
         egui::Panel::top(Id::new(("live_strip", view_id)))
             .resizable(false)
-            .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 4)).fill(ui.visuals().panel_fill))
+            .frame(
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin::symmetric(8, 4))
+                    .fill(ui.visuals().panel_fill),
+            )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let color = match self.live.state() {
@@ -1256,7 +1306,8 @@ fn replay_strip(
         if widgets::icon_button(ui, Icon::Previous, "One transition back", position > 0).clicked() {
             target = Some(position.saturating_sub(1));
         }
-        if widgets::icon_button(ui, Icon::Next, "One transition forward", position < len).clicked() {
+        if widgets::icon_button(ui, Icon::Next, "One transition forward", position < len).clicked()
+        {
             target = Some(position + 1);
         }
         if widgets::icon_button(ui, Icon::Last, "Go to the end", position < len).clicked() {

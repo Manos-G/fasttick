@@ -6,8 +6,8 @@
 //! repaint when it is done, so the UI does not need to poll.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use fasttick_core::runtime::RuntimeTree;
 use fasttick_log::btlog::BtLog;
@@ -101,7 +101,12 @@ impl Jobs {
         self.dialog_open
     }
 
-    fn spawn(&mut self, ctx: &egui::Context, name: &str, job: impl FnOnce() -> JobResult + Send + 'static) {
+    fn spawn(
+        &mut self,
+        ctx: &egui::Context,
+        name: &str,
+        job: impl FnOnce() -> JobResult + Send + 'static,
+    ) {
         let sender = self.sender.clone();
         let ctx = ctx.clone();
         let spawned = std::thread::Builder::new()
@@ -118,7 +123,12 @@ impl Jobs {
 
     /// Opens a file dialog on a worker thread. Does nothing while another
     /// dialog is open.
-    pub fn pick_file(&mut self, ctx: &egui::Context, purpose: DialogPurpose, start: Option<PathBuf>) {
+    pub fn pick_file(
+        &mut self,
+        ctx: &egui::Context,
+        purpose: DialogPurpose,
+        start: Option<PathBuf>,
+    ) {
         if self.dialog_open {
             return;
         }
@@ -227,7 +237,11 @@ mod tests {
         let ctx = egui::Context::default();
         let dir = tempfile::tempdir().unwrap();
         let tree_path = dir.path().join("t.xml");
-        std::fs::write(&tree_path, r#"<root><BehaviorTree ID="T"><AlwaysSuccess/></BehaviorTree></root>"#).unwrap();
+        std::fs::write(
+            &tree_path,
+            r#"<root><BehaviorTree ID="T"><AlwaysSuccess/></BehaviorTree></root>"#,
+        )
+        .unwrap();
         let mut jobs = Jobs::default();
         jobs.load_tree(&ctx, tree_path.clone());
         assert_eq!(jobs.running(), 1);
@@ -241,25 +255,38 @@ mod tests {
         assert_eq!(jobs.running(), 0);
 
         jobs.load_tree(&ctx, dir.path().join("missing.xml"));
-        assert!(matches!(wait(&mut jobs), JobResult::Tree { result: Err(_), .. }));
+        assert!(matches!(
+            wait(&mut jobs),
+            JobResult::Tree { result: Err(_), .. }
+        ));
 
         let bad = dir.path().join("bad.xml");
         std::fs::write(&bad, "<root>").unwrap();
         jobs.load_tree(&ctx, bad);
-        assert!(matches!(wait(&mut jobs), JobResult::Tree { result: Err(_), .. }));
+        assert!(matches!(
+            wait(&mut jobs),
+            JobResult::Tree { result: Err(_), .. }
+        ));
 
         let out = dir.path().join("copy.xml");
         jobs.save_text(&ctx, out.clone(), "abc".into());
-        assert!(matches!(wait(&mut jobs), JobResult::Saved { result: Ok(()), .. }));
+        assert!(matches!(
+            wait(&mut jobs),
+            JobResult::Saved { result: Ok(()), .. }
+        ));
         assert_eq!(std::fs::read_to_string(out).unwrap(), "abc");
 
         jobs.load_log(&ctx, dir.path().join("none.btlog"));
-        assert!(matches!(wait(&mut jobs), JobResult::Log { result: Err(_), .. }));
+        assert!(matches!(
+            wait(&mut jobs),
+            JobResult::Log { result: Err(_), .. }
+        ));
     }
 
     #[test]
     fn reads_the_harness_log() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/harness/main.btlog");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/harness/main.btlog");
         let loaded = read_log(&path).unwrap();
         assert!(!loaded.log.tree.is_empty());
         assert!(!loaded.index.is_empty());

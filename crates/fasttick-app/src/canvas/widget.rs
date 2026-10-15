@@ -107,11 +107,21 @@ enum PendingView {
     /// The first view of a tree: fit if the cards stay readable, else
     /// show the root at a readable zoom.
     Initial,
-    Fit { animate: bool },
-    Focus { id: CanvasNodeId, animate: bool },
-    Reveal { id: CanvasNodeId },
+    Fit {
+        animate: bool,
+    },
+    Focus {
+        id: CanvasNodeId,
+        animate: bool,
+    },
+    Reveal {
+        id: CanvasNodeId,
+    },
     /// Keep a node at the same place on the screen after a rebuild.
-    Anchor { source: NodeSource, offset: Vec2 },
+    Anchor {
+        source: NodeSource,
+        offset: Vec2,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -542,7 +552,12 @@ const READABLE_ZOOM: f32 = 0.85;
 /// labels are readable; else the root at [`READABLE_ZOOM`], at the top
 /// (top-down) or at the left (left-right) of the canvas.
 fn initial_view(layout: &TreeLayout, direction: LayoutDirection, size: Vec2) -> Viewport {
-    let fit = Viewport::fit(layout.bounds, size, viewport::FIT_MARGIN, viewport::FIT_MAX_ZOOM);
+    let fit = Viewport::fit(
+        layout.bounds,
+        size,
+        viewport::FIT_MARGIN,
+        viewport::FIT_MAX_ZOOM,
+    );
     if Detail::for_zoom(fit.zoom) == Detail::Full {
         return fit;
     }
@@ -962,9 +977,7 @@ fn handle_input(
         if escape && state.clear_selection() {
             events.push(CanvasEvent::SelectionChanged);
         }
-        if enter
-            && let Some(node) = state.primary.and_then(|id| state.tree.get(id))
-        {
+        if enter && let Some(node) = state.primary.and_then(|id| state.tree.get(id)) {
             if node.subtree.as_ref().is_some_and(|s| s.can_expand) {
                 events.push(CanvasEvent::ToggleSubtree(node.source));
             } else if let Some(id) = state.primary {
@@ -1089,7 +1102,11 @@ fn paint_canvas(
     shapes.clear();
 
     // Background and dots.
-    shapes.push(Shape::rect_filled(rect, CornerRadius::ZERO, palette.background));
+    shapes.push(Shape::rect_filled(
+        rect,
+        CornerRadius::ZERO,
+        palette.background,
+    ));
     background_dots(&mut shapes, rect, state.viewport, palette.grid);
 
     // Margin for markers outside the cards.
@@ -1128,7 +1145,16 @@ fn paint_canvas(
     let visible = std::mem::take(&mut state.visible);
     for &index in &visible {
         paint_card(
-            state, ui, &mut shapes, origin, index, palette, detail, text_zoom, ppp, has_focus,
+            state,
+            ui,
+            &mut shapes,
+            origin,
+            index,
+            palette,
+            detail,
+            text_zoom,
+            ppp,
+            has_focus,
         );
     }
     state.visible = visible;
@@ -1138,7 +1164,11 @@ fn paint_canvas(
         let band = state
             .viewport
             .rect_to_screen(origin, hit::rect_from_corners(start, end));
-        shapes.push(Shape::rect_filled(band, CornerRadius::same(2), palette.band_fill));
+        shapes.push(Shape::rect_filled(
+            band,
+            CornerRadius::same(2),
+            palette.band_fill,
+        ));
         shapes.push(Shape::rect_stroke(
             band,
             CornerRadius::same(2),
@@ -1316,7 +1346,10 @@ fn paint_card(
         shapes.push(Shape::rect_filled(screen, r, fill));
         let band_width = card::BAND * zoom;
         if band_width >= 0.75 {
-            let band = Rect::from_min_max(screen.min, pos2(screen.min.x + band_width.max(1.0), screen.max.y));
+            let band = Rect::from_min_max(
+                screen.min,
+                pos2(screen.min.x + band_width.max(1.0), screen.max.y),
+            );
             shapes.push(Shape::rect_filled(band, CornerRadius::ZERO, category_color));
         }
         if deco.selected {
@@ -1332,7 +1365,11 @@ fn paint_card(
 
     let geometry = CardGeometry::of(&node.card);
     let card_fill = if deco.status == NodeStatus::Running {
-        mix(palette.card, palette.running, if palette.dark { 0.12 } else { 0.08 })
+        mix(
+            palette.card,
+            palette.running,
+            if palette.dark { 0.12 } else { 0.08 },
+        )
     } else {
         palette.card
     };
@@ -1343,7 +1380,11 @@ fn paint_card(
         for step in [2.0, 1.0] {
             let offset = vec2(4.0, 4.0) * step * zoom;
             let behind = screen.translate(offset);
-            shapes.push(Shape::rect_filled(behind, r, palette.card.gamma_multiply(alpha)));
+            shapes.push(Shape::rect_filled(
+                behind,
+                r,
+                palette.card.gamma_multiply(alpha),
+            ));
             shapes.push(Shape::rect_stroke(
                 behind,
                 r,
@@ -1359,7 +1400,11 @@ fn paint_card(
         r,
         palette.shadow.gamma_multiply(alpha),
     ));
-    shapes.push(Shape::rect_filled(screen, r, card_fill.gamma_multiply(alpha)));
+    shapes.push(Shape::rect_filled(
+        screen,
+        r,
+        card_fill.gamma_multiply(alpha),
+    ));
     let band = Rect::from_min_max(
         screen.min,
         pos2(screen.min.x + card::BAND * zoom, screen.max.y),
@@ -1404,7 +1449,12 @@ fn paint_card(
     shapes.push(Shape::rect_filled(
         glyph_box,
         radius(4.0 * zoom),
-        mix(palette.card, category_color, if palette.dark { 0.22 } else { 0.14 }).gamma_multiply(alpha),
+        mix(
+            palette.card,
+            category_color,
+            if palette.dark { 0.22 } else { 0.14 },
+        )
+        .gamma_multiply(alpha),
     ));
     paint::category_glyph(
         shapes,
@@ -1425,14 +1475,17 @@ fn paint_card(
             state.galleys.get(index, SLOT_LABEL, || {
                 painter.layout_job(LayoutJob::simple_singleline(
                     node.card.label.clone(),
-                    state.fonts.font(TextKind::Label, card::LABEL_SIZE * text_zoom),
+                    state
+                        .fonts
+                        .font(TextKind::Label, card::LABEL_SIZE * text_zoom),
                     text_color,
                 ))
             })
         } else {
             // Small cards: a readable minimum size, cut to the free width.
             let size = (card::LABEL_SIZE * text_zoom).max(LABEL_MIN_PX);
-            let free = (node.card.size.x - card::TEXT_LEFT - card::PAD_X - card::BADGE - 2.0) * zoom;
+            let free =
+                (node.card.size.x - card::TEXT_LEFT - card::PAD_X - card::BADGE - 2.0) * zoom;
             state.galleys.get(index, SLOT_LABEL_SMALL, || {
                 let mut job = LayoutJob::simple_singleline(
                     node.label.clone(),
@@ -1457,7 +1510,9 @@ fn paint_card(
             let galley = state.galleys.get(index, SLOT_TYPE, || {
                 painter.layout_job(LayoutJob::simple_singleline(
                     type_line.clone(),
-                    state.fonts.font(TextKind::Type, card::TYPE_SIZE * text_zoom),
+                    state
+                        .fonts
+                        .font(TextKind::Type, card::TYPE_SIZE * text_zoom),
                     weak,
                 ))
             });
@@ -1478,7 +1533,9 @@ fn paint_card(
                 let galley = state.galleys.get(index, SLOT_PORT + line as u64, || {
                     let mut job = LayoutJob::default();
                     let name_format = TextFormat {
-                        font_id: state.fonts.font(TextKind::PortName, card::PORT_SIZE * text_zoom),
+                        font_id: state
+                            .fonts
+                            .font(TextKind::PortName, card::PORT_SIZE * text_zoom),
                         color: weak,
                         ..TextFormat::default()
                     };
@@ -1488,7 +1545,9 @@ fn paint_card(
                         value,
                         0.0,
                         TextFormat {
-                            font_id: state.fonts.font(TextKind::PortValue, card::PORT_SIZE * text_zoom),
+                            font_id: state
+                                .fonts
+                                .font(TextKind::PortValue, card::PORT_SIZE * text_zoom),
                             color: if is_reference(value) {
                                 reference_color
                             } else {
@@ -1507,7 +1566,10 @@ fn paint_card(
                 let galley = state.galleys.get(index, SLOT_MORE, || {
                     painter.layout_job(LayoutJob::simple_singleline(
                         more.clone(),
-                        FontId::new(TextKind::Note.size() * text_zoom, state.fonts.italic.clone()),
+                        FontId::new(
+                            TextKind::Note.size() * text_zoom,
+                            state.fonts.italic.clone(),
+                        ),
                         weak,
                     ))
                 });
@@ -1529,11 +1591,9 @@ fn paint_card(
         ));
         let max_bar = (node.card.size.x - card::BAND - 2.0 * card::PAD_X) * zoom;
         for line in 0..geometry.port_lines {
-            let chars = node
-                .card
-                .ports
-                .get(line)
-                .map_or(8, |(name, value)| name.chars().count() + value.chars().count() + 2);
+            let chars = node.card.ports.get(line).map_or(8, |(name, value)| {
+                name.chars().count() + value.chars().count() + 2
+            });
             let width = (chars as f32 * 6.0 * zoom).min(max_bar);
             let top = local(geometry.port_pos(line));
             let bar = Rect::from_min_size(
@@ -1548,20 +1608,40 @@ fn paint_card(
     let badge_center = local(geometry.badge_center(node.card.size.x));
     match (deco.status, deco.previous_status) {
         (NodeStatus::Idle, Some(previous)) => {
-            paint::status_badge(shapes, badge_center, card::BADGE * zoom, previous, true, palette);
+            paint::status_badge(
+                shapes,
+                badge_center,
+                card::BADGE * zoom,
+                previous,
+                true,
+                palette,
+            );
         }
         (status, _) => {
-            paint::status_badge(shapes, badge_center, card::BADGE * zoom, status, false, palette);
+            paint::status_badge(
+                shapes,
+                badge_center,
+                card::BADGE * zoom,
+                status,
+                false,
+                palette,
+            );
         }
     }
 
     // Collapsed SubTree: the number of hidden nodes.
-    if let Some(info) = node.subtree.as_ref().filter(|_| node.is_collapsed_subtree()) {
+    if let Some(info) = node
+        .subtree
+        .as_ref()
+        .filter(|_| node.is_collapsed_subtree())
+    {
         let text = format!("+{}", info.inner_count);
         let galley = state.galleys.get(index, SLOT_CHIP, || {
             painter.layout_job(LayoutJob::simple_singleline(
                 text,
-                state.fonts.font(TextKind::Note, TextKind::Note.size() * text_zoom),
+                state
+                    .fonts
+                    .font(TextKind::Note, TextKind::Note.size() * text_zoom),
                 palette.on_color,
             ))
         });
@@ -1597,7 +1677,14 @@ fn paint_card(
             screen.min.x + (card::BAND + card::PAD_X) * zoom + size.x * 0.5 + 4.0 * zoom,
             screen.min.y,
         );
-        paint::pill(shapes, center, galley, color, palette.on_color, vec2(4.0, 1.0) * zoom);
+        paint::pill(
+            shapes,
+            center,
+            galley,
+            color,
+            palette.on_color,
+            vec2(4.0, 1.0) * zoom,
+        );
     }
 
     // Breakpoint marker (left of the card, at the header).
@@ -1629,7 +1716,12 @@ fn paint_card(
             shapes.push(Shape::rect_stroke(
                 screen.expand(3.0),
                 radius(6.0 * zoom + 3.0),
-                Stroke::new(5.0, palette.accent.gamma_multiply(if has_focus { 0.22 } else { 0.12 })),
+                Stroke::new(
+                    5.0,
+                    palette
+                        .accent
+                        .gamma_multiply(if has_focus { 0.22 } else { 0.12 }),
+                ),
                 StrokeKind::Outside,
             ));
         }
@@ -1721,11 +1813,14 @@ fn show_tooltip(state: &CanvasState, ui: &Ui, response: &Response, canvas: Id, n
         ui.set_max_width(360.0);
         ui.label(egui::RichText::new(&node.label).strong().size(14.0));
         ui.label(
-            egui::RichText::new(format!("{}  ·  {}", node.type_id, node.category.name()))
-                .weak(),
+            egui::RichText::new(format!("{}  ·  {}", node.type_id, node.category.name())).weak(),
         );
         if node.category_inferred {
-            ui.label(egui::RichText::new("Category inferred: no model is known for this type.").small().weak());
+            ui.label(
+                egui::RichText::new("Category inferred: no model is known for this type.")
+                    .small()
+                    .weak(),
+            );
         }
         egui::Grid::new(canvas.with("tooltip_grid"))
             .num_columns(2)
@@ -1776,7 +1871,11 @@ fn show_tooltip(state: &CanvasState, ui: &Ui, response: &Response, canvas: Id, n
             }
         }
         if node.subtree.as_ref().is_some_and(|s| s.can_expand) {
-            ui.label(egui::RichText::new("Double-click to expand or collapse.").small().weak());
+            ui.label(
+                egui::RichText::new("Double-click to expand or collapse.")
+                    .small()
+                    .weak(),
+            );
         }
     });
 }
@@ -1790,9 +1889,15 @@ mod tests {
 
     fn chain_tree(n: usize) -> CanvasTree {
         let mut builder = CanvasTreeBuilder::new();
-        let root = builder.push(None, CanvasNode::new(NodeSource::Runtime(NodeIndex(0)), "root", "Sequence"));
+        let root = builder.push(
+            None,
+            CanvasNode::new(NodeSource::Runtime(NodeIndex(0)), "root", "Sequence"),
+        );
         for i in 1..n {
-            builder.push(Some(root), CanvasNode::new(NodeSource::Runtime(NodeIndex(i)), format!("n{i}"), "Action"));
+            builder.push(
+                Some(root),
+                CanvasNode::new(NodeSource::Runtime(NodeIndex(i)), format!("n{i}"), "Action"),
+            );
         }
         builder.finish("T")
     }
@@ -1812,6 +1917,7 @@ mod tests {
         assert!(!state.needs_layout());
         let size = vec2(800.0, 600.0);
         state.size = size;
+        state.fit_to_view(false);
         state.apply_pending(size);
         // The fit happened without animation.
         let bounds = state.layout().bounds;
@@ -1830,6 +1936,40 @@ mod tests {
         let center = state.layout().rect(CanvasNodeId(5)).unwrap().center();
         let on_screen = state.viewport().to_screen(Pos2::ZERO, center);
         assert!((on_screen - pos2(400.0, 300.0)).length() < 0.01);
+    }
+
+    #[test]
+    fn initial_view_keeps_cards_readable() {
+        let size = vec2(800.0, 600.0);
+        // A small tree fits.
+        let mut small = CanvasState::new(chain_tree(3));
+        small.prepare_with(&mut FixedMeasure(7.0));
+        small.apply_pending(size);
+        let screen = small
+            .viewport()
+            .rect_to_screen(Pos2::ZERO, small.layout().bounds);
+        assert!(Rect::from_min_size(Pos2::ZERO, size).contains_rect(screen));
+        // A wide tree shows the root at a readable zoom, at the top.
+        let mut wide = CanvasState::new(chain_tree(40));
+        wide.prepare_with(&mut FixedMeasure(7.0));
+        wide.apply_pending(size);
+        assert_eq!(wide.viewport().zoom, READABLE_ZOOM);
+        let root = wide
+            .viewport()
+            .rect_to_screen(Pos2::ZERO, wide.layout().rects[0]);
+        assert!((root.center().x - 400.0).abs() < 0.01);
+        assert!((root.min.y - viewport::FIT_MARGIN).abs() < 0.01);
+        // Left-right: the root at the left.
+        wide.set_direction(LayoutDirection::LeftRight);
+        wide.prepare_with(&mut FixedMeasure(7.0));
+        wide.apply_pending(size);
+        let root = wide
+            .viewport()
+            .rect_to_screen(Pos2::ZERO, wide.layout().rects[0]);
+        if wide.viewport().zoom == READABLE_ZOOM {
+            assert!((root.min.x - viewport::FIT_MARGIN).abs() < 0.01);
+            assert!((root.center().y - 300.0).abs() < 0.01);
+        }
     }
 
     #[test]
@@ -1852,7 +1992,10 @@ mod tests {
         assert!(state.viewport().zoom < 1.0);
         // An invalid viewport is ignored.
         let before = state.viewport();
-        state.set_viewport(Viewport { pan: Vec2::ZERO, zoom: f32::NAN });
+        state.set_viewport(Viewport {
+            pan: Vec2::ZERO,
+            zoom: f32::NAN,
+        });
         assert_eq!(state.viewport(), before);
     }
 
@@ -1862,20 +2005,26 @@ mod tests {
         state.prepare_with(&mut FixedMeasure(7.0));
         state.size = vec2(800.0, 600.0);
         state.apply_pending(state.size);
-        assert!(click_select(&mut state, Some(CanvasNodeId(2)), SelectMode::Replace));
+        assert!(click_select(
+            &mut state,
+            Some(CanvasNodeId(2)),
+            SelectMode::Replace
+        ));
         let anchor = state.tree().get(CanvasNodeId(2)).unwrap().source;
-        let before = state
-            .viewport()
-            .to_screen(Pos2::ZERO, state.layout().rect(CanvasNodeId(2)).unwrap().min);
+        let before = state.viewport().to_screen(
+            Pos2::ZERO,
+            state.layout().rect(CanvasNodeId(2)).unwrap().min,
+        );
 
         // A new tree with one more node: the layout moves the anchor.
         state.replace_tree(chain_tree(9), Some(anchor));
         assert!(state.needs_layout());
         state.prepare_with(&mut FixedMeasure(7.0));
         state.apply_pending(state.size);
-        let after = state
-            .viewport()
-            .to_screen(Pos2::ZERO, state.layout().rect(CanvasNodeId(2)).unwrap().min);
+        let after = state.viewport().to_screen(
+            Pos2::ZERO,
+            state.layout().rect(CanvasNodeId(2)).unwrap().min,
+        );
         assert!((after - before).length() < 0.01);
         assert!(state.tree().is_selected(CanvasNodeId(2)));
         assert_eq!(state.primary(), Some(CanvasNodeId(2)));
@@ -1884,10 +2033,22 @@ mod tests {
     #[test]
     fn click_selection_modes() {
         let mut state = CanvasState::new(chain_tree(4));
-        assert!(click_select(&mut state, Some(CanvasNodeId(1)), SelectMode::Replace));
-        assert!(click_select(&mut state, Some(CanvasNodeId(2)), SelectMode::Add));
+        assert!(click_select(
+            &mut state,
+            Some(CanvasNodeId(1)),
+            SelectMode::Replace
+        ));
+        assert!(click_select(
+            &mut state,
+            Some(CanvasNodeId(2)),
+            SelectMode::Add
+        ));
         assert_eq!(state.tree().selected_count(), 2);
-        assert!(click_select(&mut state, Some(CanvasNodeId(2)), SelectMode::Toggle));
+        assert!(click_select(
+            &mut state,
+            Some(CanvasNodeId(2)),
+            SelectMode::Toggle
+        ));
         assert_eq!(state.tree().selected_count(), 1);
         // The primary node was deselected.
         assert_eq!(state.primary(), None);

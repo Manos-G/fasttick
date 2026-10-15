@@ -94,10 +94,18 @@ mod tests {
     fn culling_reuses_the_buffer() {
         let r = rects();
         let mut out = vec![99, 98];
-        visible_into(&r, Rect::from_min_size(pos2(140.0, -5.0), vec2(20.0, 20.0)), &mut out);
+        visible_into(
+            &r,
+            Rect::from_min_size(pos2(140.0, -5.0), vec2(20.0, 20.0)),
+            &mut out,
+        );
         assert_eq!(out, vec![1]);
         let capacity = out.capacity();
-        visible_into(&r, Rect::from_min_size(pos2(0.0, 0.0), vec2(1.0, 1.0)), &mut out);
+        visible_into(
+            &r,
+            Rect::from_min_size(pos2(0.0, 0.0), vec2(1.0, 1.0)),
+            &mut out,
+        );
         assert_eq!(out, vec![0]);
         assert_eq!(out.capacity(), capacity);
     }

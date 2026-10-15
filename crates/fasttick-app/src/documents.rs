@@ -379,28 +379,41 @@ impl Workspace {
             }
         }
         view.expansion = expansion;
-        let anchor = view.canvas.tree().root().and_then(|r| view.canvas.tree().get(r)).map(|n| n.source);
+        let anchor = view
+            .canvas
+            .tree()
+            .root()
+            .and_then(|r| view.canvas.tree().get(r))
+            .map(|n| n.source);
         let tree = build_tree(document, view.root_instance, &view.expansion);
         view.canvas.replace_tree(tree, anchor);
         view.canvas.fit_to_view(true);
     }
 
-    /// Expands the SubTree nodes on the path to an instance and focuses the
-    /// SubTree node of the instance (runtime trees only).
+    /// Expands the SubTree node of an instance and all SubTree nodes above
+    /// it, and focuses the SubTree node (runtime trees only).
     pub fn reveal_instance(&mut self, id: ViewId, instance: InstanceIndex) {
         let Some((view, document)) = self.view_and_doc_mut(id) else {
             return;
         };
         let runtime = &document.runtime;
-        let Some(target) = runtime.instances.get(instance.0).and_then(|i| i.parent_node) else {
+        let Some(target) = runtime
+            .instances
+            .get(instance.0)
+            .and_then(|i| i.parent_node)
+        else {
             // The root instance: focus the root.
             if let Some(root) = view.canvas.tree().root() {
                 view.canvas.focus_on(root, true);
             }
             return;
         };
-        // Expand all SubTree nodes above the target.
+        // Expand the target and all SubTree nodes above it.
         let mut changed = false;
+        if !view.expansion.is_expanded(NodeSource::Runtime(target)) {
+            view.expansion.set(NodeSource::Runtime(target), true);
+            changed = true;
+        }
         let mut current = runtime.node(target).instance;
         while let Some(parent) = runtime.instances.get(current.0).and_then(|i| i.parent_node) {
             let source = NodeSource::Runtime(parent);
@@ -460,7 +473,11 @@ pub fn build_options(document: &Document, root_instance: InstanceIndex) -> Runti
 }
 
 /// Builds the canvas tree of a view.
-pub fn build_tree(document: &Document, root_instance: InstanceIndex, expansion: &Expansion) -> CanvasTree {
+pub fn build_tree(
+    document: &Document,
+    root_instance: InstanceIndex,
+    expansion: &Expansion,
+) -> CanvasTree {
     // TODO(after the merge of `fasttick_core::models`): use the model
     // registry of the project for the categories.
     CanvasTree::from_runtime(
@@ -507,7 +524,9 @@ mod tests {
             runtime,
             None,
         );
-        let view = ws.open_view(doc, InstanceIndex(0), ViewOptions::default()).unwrap();
+        let view = ws
+            .open_view(doc, InstanceIndex(0), ViewOptions::default())
+            .unwrap();
         (ws, doc, view)
     }
 
@@ -570,7 +589,9 @@ mod tests {
                 start_time_us: 0,
             }),
         );
-        let view = ws.open_view(doc, InstanceIndex(0), ViewOptions::default()).unwrap();
+        let view = ws
+            .open_view(doc, InstanceIndex(0), ViewOptions::default())
+            .unwrap();
         let tree = ws.view(view).unwrap().canvas.tree();
         let node3 = tree.get(tree.find_uid(Uid(3)).unwrap()).unwrap();
         assert_eq!(node3.deco.status, NodeStatus::Idle);
@@ -581,7 +602,11 @@ mod tests {
         assert_eq!(node3.deco.status, NodeStatus::Success);
         ws.set_replay_position(doc, 0);
         let tree = ws.view(view).unwrap().canvas.tree();
-        assert!(tree.nodes().iter().all(|n| n.deco.status == NodeStatus::Idle));
+        assert!(
+            tree.nodes()
+                .iter()
+                .all(|n| n.deco.status == NodeStatus::Idle)
+        );
         // Out of range clamps.
         ws.set_replay_position(doc, 999);
         assert_eq!(ws.doc(doc).unwrap().replay.as_ref().unwrap().position, 3);
@@ -591,8 +616,10 @@ mod tests {
     fn replace_runtime_rebuilds_views() {
         let (mut ws, doc, view) = workspace();
         let small = Arc::new(
-            RuntimeTree::parse(r#"<root><BehaviorTree ID="T"><AlwaysSuccess _uid="1"/></BehaviorTree></root>"#)
-                .unwrap(),
+            RuntimeTree::parse(
+                r#"<root><BehaviorTree ID="T"><AlwaysSuccess _uid="1"/></BehaviorTree></root>"#,
+            )
+            .unwrap(),
         );
         ws.replace_runtime(doc, small);
         assert_eq!(ws.view(view).unwrap().canvas.tree().len(), 1);

@@ -23,10 +23,8 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
             });
             ui.label(RichText::new("FastTick").size(26.0).strong());
             ui.label(
-                RichText::new(
-                    "Tree editor, live debugger and log replayer for BehaviorTree.CPP 4",
-                )
-                .weak(),
+                RichText::new("Tree editor, live debugger and log replayer for BehaviorTree.CPP 4")
+                    .weak(),
             );
             ui.add_space(20.0);
             match cx.mode {
@@ -42,7 +40,8 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
 
 fn action_button(ui: &mut Ui, cx: &mut PanelContext<'_>, command: Command, text: &str) {
     let shortcut = cx.keymap.shortcut_text(ui.ctx(), command);
-    let mut button = egui::Button::new(RichText::new(text).size(14.5)).min_size(egui::vec2(220.0, 34.0));
+    let mut button =
+        egui::Button::new(RichText::new(text).size(14.5)).min_size(egui::vec2(220.0, 34.0));
     if let Some(shortcut) = shortcut {
         button = button.shortcut_text(shortcut);
     }
@@ -66,41 +65,52 @@ fn replay_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
 fn live_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     ui.label("Connect to an executor that runs the BT.CPP publisher.");
     ui.add_space(8.0);
-    egui::Frame::group(ui.style()).inner_margin(12.0).show(ui, |ui| {
-        egui::Grid::new("start_connect")
-            .num_columns(2)
-            .spacing([10.0, 8.0])
-            .show(ui, |ui| {
-                ui.label("Host");
-                ui.add(egui::TextEdit::singleline(&mut cx.settings.live_host).desired_width(180.0));
-                ui.end_row();
-                ui.label("Port");
-                ui.add(egui::DragValue::new(&mut cx.settings.live_port).range(1..=65534));
-                ui.end_row();
-            });
-        ui.add_space(6.0);
-        let state = cx.live.state();
-        ui.horizontal(|ui| {
-            let connected = !matches!(state, ConnectionState::Disconnected);
-            if connected {
-                if ui.button("Disconnect").clicked() {
-                    cx.actions.push(AppAction::Command(Command::Disconnect));
-                }
-            } else if ui
-                .add(egui::Button::new(RichText::new("Connect").strong()).min_size(egui::vec2(120.0, 28.0)))
-                .clicked()
-            {
-                cx.actions.push(AppAction::Connect {
-                    host: cx.settings.live_host.trim().to_owned(),
-                    port: cx.settings.live_port,
+    egui::Frame::group(ui.style())
+        .inner_margin(12.0)
+        .show(ui, |ui| {
+            egui::Grid::new("start_connect")
+                .num_columns(2)
+                .spacing([10.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label("Host");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut cx.settings.live_host).desired_width(180.0),
+                    );
+                    ui.end_row();
+                    ui.label("Port");
+                    ui.add(egui::DragValue::new(&mut cx.settings.live_port).range(1..=65534));
+                    ui.end_row();
                 });
+            ui.add_space(6.0);
+            let state = cx.live.state();
+            ui.horizontal(|ui| {
+                let connected = !matches!(state, ConnectionState::Disconnected);
+                if connected {
+                    if ui.button("Disconnect").clicked() {
+                        cx.actions.push(AppAction::Command(Command::Disconnect));
+                    }
+                } else if ui
+                    .add(
+                        egui::Button::new(RichText::new("Connect").strong())
+                            .min_size(egui::vec2(120.0, 28.0)),
+                    )
+                    .clicked()
+                {
+                    cx.actions.push(AppAction::Connect {
+                        host: cx.settings.live_host.trim().to_owned(),
+                        port: cx.settings.live_port,
+                    });
+                }
+                ui.label(RichText::new(cx.live.state_text()).weak());
+            });
+            if let Some(message) = &cx.live.last_message {
+                ui.label(
+                    RichText::new(message)
+                        .small()
+                        .color(ui.visuals().warn_fg_color),
+                );
             }
-            ui.label(RichText::new(cx.live.state_text()).weak());
         });
-        if let Some(message) = &cx.live.last_message {
-            ui.label(RichText::new(message).small().color(ui.visuals().warn_fg_color));
-        }
-    });
 }
 
 fn recent(ui: &mut Ui, cx: &mut PanelContext<'_>) {

@@ -112,48 +112,55 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     ui.label(
         RichText::new(match linking {
             SubtreeLinking::ByTreeId => format!("{} trees", list.len()),
-            SubtreeLinking::ByInstance => format!("{} SubTree instances", list.len().saturating_sub(1)),
+            SubtreeLinking::ByInstance => {
+                format!("{} SubTree instances", list.len().saturating_sub(1))
+            }
         })
         .small()
         .weak(),
     );
     ui.separator();
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        for row in list {
-            ui.horizontal(|ui| {
-                ui.add_space(row.depth as f32 * 14.0);
-                let selected = linking == SubtreeLinking::ByTreeId && row.instance == current;
-                let mut text = RichText::new(&row.tree_id);
-                if row.instance == InstanceIndex(0) {
-                    text = text.strong();
-                }
-                let response = ui.selectable_label(selected, text);
-                let response = if row.path.is_empty() {
-                    response
-                } else {
-                    response.on_hover_text(&row.path)
-                };
-                if !row.path.is_empty() {
-                    ui.label(RichText::new(&row.path).small().weak());
-                }
-                if response.clicked() {
-                    match linking {
-                        SubtreeLinking::ByTreeId => {
-                            cx.actions.push(AppAction::SetViewRoot(view_id, row.instance));
-                        }
-                        SubtreeLinking::ByInstance => {
-                            cx.actions.push(AppAction::RevealInstance(view_id, row.instance));
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for row in list {
+                ui.horizontal(|ui| {
+                    ui.add_space(row.depth as f32 * 14.0);
+                    let selected = linking == SubtreeLinking::ByTreeId && row.instance == current;
+                    let mut text = RichText::new(&row.tree_id);
+                    if row.instance == InstanceIndex(0) {
+                        text = text.strong();
+                    }
+                    let response = ui.selectable_label(selected, text);
+                    let response = if row.path.is_empty() {
+                        response
+                    } else {
+                        response.on_hover_text(&row.path)
+                    };
+                    if !row.path.is_empty() {
+                        ui.label(RichText::new(&row.path).small().weak());
+                    }
+                    if response.clicked() {
+                        match linking {
+                            SubtreeLinking::ByTreeId => {
+                                cx.actions
+                                    .push(AppAction::SetViewRoot(view_id, row.instance));
+                            }
+                            SubtreeLinking::ByInstance => {
+                                cx.actions
+                                    .push(AppAction::RevealInstance(view_id, row.instance));
+                            }
                         }
                     }
-                }
-                response.context_menu(|ui| {
-                    if ui.button("Open in a new tab").clicked() {
-                        cx.actions.push(AppAction::OpenTreeInNewTab(doc_id, row.instance));
-                    }
+                    response.context_menu(|ui| {
+                        if ui.button("Open in a new tab").clicked() {
+                            cx.actions
+                                .push(AppAction::OpenTreeInNewTab(doc_id, row.instance));
+                        }
+                    });
                 });
-            });
-        }
-    });
+            }
+        });
 }
 
 #[cfg(test)]

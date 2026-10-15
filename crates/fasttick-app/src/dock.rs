@@ -153,7 +153,8 @@ pub fn contains(dock: &DockState<Tab>, tab: Tab) -> bool {
 /// and makes it active. If the dock has no central tab, the tab goes to
 /// the largest leaf.
 pub fn add_document(dock: &mut DockState<Tab>, tab: Tab) {
-    if let Some(path) = dock.find_tab_from(|t| matches!(t, Tab::Document(_)))
+    if let Some(path) = dock
+        .find_tab_from(|t| matches!(t, Tab::Document(_)))
         .or_else(|| dock.find_tab(&Tab::Start))
     {
         let node = path.node_path();
@@ -286,16 +287,29 @@ mod tests {
         add_document(&mut dock, Tab::Document(ViewId(1)));
         add_document(&mut dock, Tab::Document(ViewId(2)));
         let start = dock.find_tab(&Tab::Start).unwrap().node_path();
-        let first = dock.find_tab(&Tab::Document(ViewId(1))).unwrap().node_path();
-        let second = dock.find_tab(&Tab::Document(ViewId(2))).unwrap().node_path();
+        let first = dock
+            .find_tab(&Tab::Document(ViewId(1)))
+            .unwrap()
+            .node_path();
+        let second = dock
+            .find_tab(&Tab::Document(ViewId(2)))
+            .unwrap()
+            .node_path();
         assert_eq!(start, first);
         assert_eq!(first, second);
         assert_eq!(document_views(&dock), vec![ViewId(1), ViewId(2)]);
         assert_eq!(focused_view(&mut dock), Some(ViewId(2)));
 
         // Split view: a new leaf.
-        add_beside(&mut dock, Tab::Document(ViewId(2)), Tab::Document(ViewId(3)));
-        let third = dock.find_tab(&Tab::Document(ViewId(3))).unwrap().node_path();
+        add_beside(
+            &mut dock,
+            Tab::Document(ViewId(2)),
+            Tab::Document(ViewId(3)),
+        );
+        let third = dock
+            .find_tab(&Tab::Document(ViewId(3)))
+            .unwrap()
+            .node_path();
         assert_ne!(third, second);
 
         // Saving drops the documents.
@@ -333,19 +347,37 @@ mod tests {
         // Showing an open panel does not add a second one.
         show_panel(&mut dock, Tab::Blackboard);
         assert_eq!(
-            dock.iter_all_tabs().filter(|(_, t)| **t == Tab::Blackboard).count(),
+            dock.iter_all_tabs()
+                .filter(|(_, t)| **t == Tab::Blackboard)
+                .count(),
             1
         );
     }
 
     #[test]
     fn dock_serializes() {
-        let dock = default_dock(Mode::Live);
-        let text = serde_json::to_string(&dock).unwrap();
-        let back: DockState<Tab> = serde_json::from_str(&text).unwrap();
-        assert_eq!(
-            back.iter_all_tabs().map(|(_, t)| *t).collect::<Vec<_>>(),
-            dock.iter_all_tabs().map(|(_, t)| *t).collect::<Vec<_>>()
-        );
+        use std::collections::HashMap;
+        #[derive(Default)]
+        struct Memory(HashMap<String, String>);
+        impl eframe::Storage for Memory {
+            fn get_string(&self, key: &str) -> Option<String> {
+                self.0.get(key).cloned()
+            }
+            fn set_string(&mut self, key: &str, value: String) {
+                self.0.insert(key.to_owned(), value);
+            }
+            fn remove_string(&mut self, key: &str) {
+                self.0.remove(key);
+            }
+            fn flush(&mut self) {}
+        }
+        let mut dock = default_dock(Mode::Live);
+        add_document(&mut dock, Tab::Document(ViewId(4)));
+        let mut storage = Memory::default();
+        eframe::set_value(&mut storage, "dock", &without_documents(&dock));
+        let back: DockState<Tab> = eframe::get_value(&storage, "dock").unwrap();
+        let tabs = |d: &DockState<Tab>| d.iter_all_tabs().map(|(_, t)| *t).collect::<Vec<_>>();
+        assert_eq!(tabs(&back), tabs(&without_documents(&dock)));
+        assert!(!contains(&back, Tab::Document(ViewId(4))));
     }
 }

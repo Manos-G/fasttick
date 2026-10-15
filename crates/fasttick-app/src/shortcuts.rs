@@ -319,11 +319,7 @@ impl KeyMap {
     ///
     /// Shortcuts without Ctrl or Alt (for example `F` for "Fit to view")
     /// are ignored while a text field has the keyboard focus.
-    pub fn consume(
-        &self,
-        ctx: &egui::Context,
-        enabled: impl Fn(Command) -> bool,
-    ) -> Vec<Command> {
+    pub fn consume(&self, ctx: &egui::Context, enabled: impl Fn(Command) -> bool) -> Vec<Command> {
         let typing = ctx.text_edit_focused();
         // A binding with more modifiers goes first: egui matches Ctrl+S
         // also when Ctrl+Shift+S is pressed.
@@ -389,7 +385,10 @@ mod tests {
         }
         assert_eq!(
             map.shortcut(Command::OpenLog),
-            Some(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::O))
+            Some(KeyboardShortcut::new(
+                Modifiers::COMMAND | Modifiers::SHIFT,
+                Key::O
+            ))
         );
         assert_eq!(map.shortcut(Command::About), None);
     }
@@ -419,10 +418,22 @@ mod tests {
             press(&ctx, Modifiers::COMMAND | Modifiers::SHIFT, Key::S, &map),
             vec![Command::SaveAs]
         );
-        assert_eq!(press(&ctx, Modifiers::COMMAND, Key::S, &map), vec![Command::Save]);
-        assert_eq!(press(&ctx, Modifiers::NONE, Key::F, &map), vec![Command::FitToView]);
-        assert_eq!(press(&ctx, Modifiers::COMMAND, Key::F, &map), vec![Command::Find]);
-        assert_eq!(press(&ctx, Modifiers::NONE, Key::F1, &map), vec![Command::ShowShortcuts]);
+        assert_eq!(
+            press(&ctx, Modifiers::COMMAND, Key::S, &map),
+            vec![Command::Save]
+        );
+        assert_eq!(
+            press(&ctx, Modifiers::NONE, Key::F, &map),
+            vec![Command::FitToView]
+        );
+        assert_eq!(
+            press(&ctx, Modifiers::COMMAND, Key::F, &map),
+            vec![Command::Find]
+        );
+        assert_eq!(
+            press(&ctx, Modifiers::NONE, Key::F1, &map),
+            vec![Command::ShowShortcuts]
+        );
         assert!(press(&ctx, Modifiers::NONE, Key::G, &map).is_empty());
     }
 

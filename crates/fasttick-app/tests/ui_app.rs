@@ -25,8 +25,15 @@ fn main_xml() -> PathBuf {
 }
 
 fn harness(options: StartOptions) -> Harness<'static, FastTickApp> {
+    // The harness sets its own theme on the context after the app starts;
+    // give it the theme of the options.
+    let theme = match options.theme {
+        Some(ThemeChoice::Dark) => egui::Theme::Dark,
+        _ => egui::Theme::Light,
+    };
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1400.0, 900.0))
+        .with_theme(theme)
         .with_max_steps(64)
         .with_step_dt(1.0 / 30.0)
         .build_eframe(move |cc| FastTickApp::new(cc, options));
@@ -56,7 +63,10 @@ fn tree_item<'a>(
     harness.get_by_role_and_label(Role::TreeItem, label)
 }
 
-fn mode_button<'a>(harness: &'a Harness<'static, FastTickApp>, mode: Mode) -> egui_kittest::Node<'a> {
+fn mode_button<'a>(
+    harness: &'a Harness<'static, FastTickApp>,
+    mode: Mode,
+) -> egui_kittest::Node<'a> {
     let label = match mode {
         Mode::Edit => "Edit mode",
         Mode::Live => "Live mode",
@@ -72,7 +82,10 @@ fn main_window_renders() {
     let harness = harness(light(Vec::new()));
     for menu in ["File", "View", "Live", "Help"] {
         assert!(
-            harness.query_all_by_role_and_label(Role::Button, menu).count() >= 1,
+            harness
+                .query_all_by_role_and_label(Role::Button, menu)
+                .count()
+                >= 1,
             "menu {menu}"
         );
     }
@@ -83,13 +96,16 @@ fn main_window_renders() {
     harness.get_by_label("FastTick");
     harness.get_by_label_contains("Open tree XML");
     // The status bar.
-    harness.get_by_label("Edit mode");
+    harness.get_by_role_and_label(Role::Label, "Edit mode");
     harness.get_by_label("Not connected");
     harness.get_by_label("No document");
     // The default panels.
     let app = harness.state();
     for tab in [Tab::Start, Tab::Trees, Tab::Inspector, Tab::Problems] {
-        assert!(fasttick_app::dock::contains(app.dock(Mode::Edit), tab), "{tab:?}");
+        assert!(
+            fasttick_app::dock::contains(app.dock(Mode::Edit), tab),
+            "{tab:?}"
+        );
     }
 }
 
@@ -135,7 +151,13 @@ fn opening_the_sample_tree_shows_its_nodes() {
 
     // After "Fit to view" all nodes are on screen.
     command(&mut harness, Command::FitToView);
-    for label in ["say_text", "navigate", "count_in_subtree", "read_text_pose", "long_wait"] {
+    for label in [
+        "say_text",
+        "navigate",
+        "count_in_subtree",
+        "read_text_pose",
+        "long_wait",
+    ] {
         tree_item(&harness, label);
     }
     let visible = harness.query_all_by_role(Role::TreeItem).count();
@@ -146,7 +168,13 @@ fn opening_the_sample_tree_shows_its_nodes() {
 fn zoom_and_fit_change_the_viewport() {
     let mut harness = harness(light(vec![main_xml()]));
     let zoom = |h: &Harness<'static, FastTickApp>| {
-        h.state().workspace().active().unwrap().canvas.viewport().zoom
+        h.state()
+            .workspace()
+            .active()
+            .unwrap()
+            .canvas
+            .viewport()
+            .zoom
     };
     let start = zoom(&harness);
     harness.get_by_label("Zoom in").click();
@@ -162,13 +190,29 @@ fn zoom_and_fit_change_the_viewport() {
 
     harness.get_by_label("Fit to view").click();
     harness.run();
-    let fitted = harness.state().workspace().active().unwrap().canvas.viewport();
-    let bounds = harness.state().workspace().active().unwrap().canvas.layout().bounds;
+    let fitted = harness
+        .state()
+        .workspace()
+        .active()
+        .unwrap()
+        .canvas
+        .viewport();
+    let bounds = harness
+        .state()
+        .workspace()
+        .active()
+        .unwrap()
+        .canvas
+        .layout()
+        .bounds;
     assert!(fitted.zoom < start, "the main tree is wider than the view");
     // The whole tree is inside the canvas.
     let canvas = harness.get_by_role(Role::Tree).rect();
     let screen = fitted.rect_to_screen(canvas.min, bounds);
-    assert!(canvas.expand(1.0).contains_rect(screen), "{canvas:?} {screen:?}");
+    assert!(
+        canvas.expand(1.0).contains_rect(screen),
+        "{canvas:?} {screen:?}"
+    );
 
     // Ctrl+0: 100 %.
     tree_item(&harness, "main_sequence").click();
@@ -187,7 +231,10 @@ fn selection_and_keyboard_navigation() {
         let view = harness.state().workspace().active().unwrap();
         let selected: Vec<_> = view.canvas.tree().selected().collect();
         assert_eq!(selected.len(), 1);
-        assert_eq!(view.canvas.tree().get(selected[0]).unwrap().label, "main_sequence");
+        assert_eq!(
+            view.canvas.tree().get(selected[0]).unwrap().label,
+            "main_sequence"
+        );
     }
     // The inspector shows the selected node.
     harness.get_by_label("Read-only. Editing comes with the tree editor.");
@@ -210,7 +257,14 @@ fn selection_and_keyboard_navigation() {
     harness.key_press(egui::Key::Escape);
     harness.run();
     assert_eq!(
-        harness.state().workspace().active().unwrap().canvas.tree().selected_count(),
+        harness
+            .state()
+            .workspace()
+            .active()
+            .unwrap()
+            .canvas
+            .tree()
+            .selected_count(),
         0
     );
 
@@ -218,7 +272,14 @@ fn selection_and_keyboard_navigation() {
     harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
     harness.run();
     assert_eq!(
-        harness.state().workspace().active().unwrap().canvas.tree().selected_count(),
+        harness
+            .state()
+            .workspace()
+            .active()
+            .unwrap()
+            .canvas
+            .tree()
+            .selected_count(),
         43
     );
 }
@@ -280,9 +341,10 @@ fn dialogs_and_theme() {
     let mut harness = harness(light(Vec::new()));
     harness.key_press(egui::Key::F1);
     harness.run();
-    harness.get_by_label("Keyboard shortcuts");
-    harness.get_by_label("Fit to view");
-    harness.get_by_label("Ctrl+Shift+O");
+    // The window title and the entry of the Help group.
+    assert_eq!(harness.query_all_by_label("Keyboard shortcuts").count(), 2);
+    harness.get_by_role_and_label(Role::Label, "Fit to view");
+    harness.get_by_role_and_label(Role::Label, "Ctrl+Shift+O");
     harness.key_press(egui::Key::Escape);
     harness.run();
 
@@ -299,7 +361,9 @@ fn dialogs_and_theme() {
 
     command(&mut harness, Command::Connect);
     harness.get_by_label("Connect to an executor");
-    harness.get_by_role_and_label(Role::Button, "Cancel").click();
+    harness
+        .get_by_role_and_label(Role::Button, "Cancel")
+        .click();
     harness.run();
     assert!(harness.query_by_label("Connect to an executor").is_none());
 }
@@ -319,7 +383,11 @@ fn replay_log_shows_statuses() {
     // At the end of the log, the root finished with SUCCESS and is IDLE.
     {
         let view = harness.state().workspace().active().unwrap();
-        let root = view.canvas.tree().get(view.canvas.tree().root().unwrap()).unwrap();
+        let root = view
+            .canvas
+            .tree()
+            .get(view.canvas.tree().root().unwrap())
+            .unwrap();
         assert_eq!(root.deco.status, fasttick_core::status::NodeStatus::Idle);
         assert_eq!(
             root.deco.previous_status,

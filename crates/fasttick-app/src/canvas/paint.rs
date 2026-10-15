@@ -14,7 +14,13 @@ use crate::theme::CanvasPalette;
 
 /// Pushes a filled convex polygon given in unit coordinates (-1..1) around
 /// `center`, scaled by `radius`.
-fn unit_polygon(out: &mut Vec<Shape>, center: Pos2, radius: f32, points: &[(f32, f32)], fill: Color32) {
+fn unit_polygon(
+    out: &mut Vec<Shape>,
+    center: Pos2,
+    radius: f32,
+    points: &[(f32, f32)],
+    fill: Color32,
+) {
     let points = points
         .iter()
         .map(|(x, y)| center + vec2(*x, *y) * radius)
@@ -23,7 +29,13 @@ fn unit_polygon(out: &mut Vec<Shape>, center: Pos2, radius: f32, points: &[(f32,
 }
 
 /// Pushes an open polyline given in unit coordinates.
-fn unit_line(out: &mut Vec<Shape>, center: Pos2, radius: f32, points: &[(f32, f32)], stroke: Stroke) {
+fn unit_line(
+    out: &mut Vec<Shape>,
+    center: Pos2,
+    radius: f32,
+    points: &[(f32, f32)],
+    stroke: Stroke,
+) {
     let points: Vec<Pos2> = points
         .iter()
         .map(|(x, y)| center + vec2(*x, *y) * radius)
@@ -43,8 +55,20 @@ pub fn category_glyph(
     match category {
         NodeCategory::Action => {
             // A lightning bolt from two triangles.
-            unit_polygon(out, center, r, &[(0.32, -1.05), (-0.62, 0.18), (0.12, 0.18)], color);
-            unit_polygon(out, center, r, &[(-0.12, -0.18), (0.62, -0.18), (-0.32, 1.05)], color);
+            unit_polygon(
+                out,
+                center,
+                r,
+                &[(0.32, -1.05), (-0.62, 0.18), (0.12, 0.18)],
+                color,
+            );
+            unit_polygon(
+                out,
+                center,
+                r,
+                &[(-0.12, -0.18), (0.62, -0.18), (-0.32, 1.05)],
+                color,
+            );
         }
         NodeCategory::Condition => {
             // A decision diamond.
@@ -60,10 +84,20 @@ pub fn category_glyph(
             // A fork: a stem that splits into three branches.
             let stroke = Stroke::new((r * 0.26).max(0.8), color);
             unit_line(out, center, r, &[(0.0, -1.0), (0.0, -0.15)], stroke);
-            unit_line(out, center, r, &[(-0.8, 0.55), (-0.8, -0.15), (0.8, -0.15), (0.8, 0.55)], stroke);
+            unit_line(
+                out,
+                center,
+                r,
+                &[(-0.8, 0.55), (-0.8, -0.15), (0.8, -0.15), (0.8, 0.55)],
+                stroke,
+            );
             unit_line(out, center, r, &[(0.0, -0.15), (0.0, 0.55)], stroke);
             for x in [-0.8, 0.0, 0.8] {
-                out.push(Shape::circle_filled(center + vec2(x, 0.72) * r, r * 0.26, color));
+                out.push(Shape::circle_filled(
+                    center + vec2(x, 0.72) * r,
+                    r * 0.26,
+                    color,
+                ));
             }
         }
         NodeCategory::Decorator => {
@@ -101,12 +135,24 @@ pub fn category_glyph(
 
 /// The glyph of a status (check, cross, play, skip) in `color`. IDLE has
 /// no glyph.
-pub fn status_glyph(out: &mut Vec<Shape>, center: Pos2, radius: f32, status: NodeStatus, color: Color32) {
+pub fn status_glyph(
+    out: &mut Vec<Shape>,
+    center: Pos2,
+    radius: f32,
+    status: NodeStatus,
+    color: Color32,
+) {
     let width = (radius * 0.34).max(1.0);
     match status {
         NodeStatus::Idle => {}
         NodeStatus::Running => {
-            unit_polygon(out, center, radius, &[(-0.42, -0.72), (0.78, 0.0), (-0.42, 0.72)], color);
+            unit_polygon(
+                out,
+                center,
+                radius,
+                &[(-0.42, -0.72), (0.78, 0.0), (-0.42, 0.72)],
+                color,
+            );
         }
         NodeStatus::Success => {
             unit_line(
@@ -124,8 +170,20 @@ pub fn status_glyph(out: &mut Vec<Shape>, center: Pos2, radius: f32, status: Nod
         }
         NodeStatus::Skipped => {
             let stroke = Stroke::new(width * 0.9, color);
-            unit_line(out, center, radius, &[(-0.62, -0.55), (-0.1, 0.0), (-0.62, 0.55)], stroke);
-            unit_line(out, center, radius, &[(0.05, -0.55), (0.57, 0.0), (0.05, 0.55)], stroke);
+            unit_line(
+                out,
+                center,
+                radius,
+                &[(-0.62, -0.55), (-0.1, 0.0), (-0.62, 0.55)],
+                stroke,
+            );
+            unit_line(
+                out,
+                center,
+                radius,
+                &[(0.05, -0.55), (0.57, 0.0), (0.05, 0.55)],
+                stroke,
+            );
         }
     }
 }
@@ -185,7 +243,11 @@ pub fn breakpoint_marker(
             ));
         }
         BreakpointMarker::Hit => {
-            out.push(Shape::circle_filled(center, radius * 1.7, palette.running.gamma_multiply(0.35)));
+            out.push(Shape::circle_filled(
+                center,
+                radius * 1.7,
+                palette.running.gamma_multiply(0.35),
+            ));
             out.push(Shape::circle_filled(center, radius, color));
             // A pause sign: the executor waits here.
             let bar = vec2(radius * 0.22, radius * 0.95);
@@ -222,7 +284,11 @@ pub fn problem_marker(
                 &[(0.0, -1.0), (1.0, 0.78), (-1.0, 0.78)],
                 palette.warning,
             );
-            (palette.warning, Color32::from_rgb(0x2B, 0x22, 0x10), radius * 0.15)
+            (
+                palette.warning,
+                Color32::from_rgb(0x2B, 0x22, 0x10),
+                radius * 0.15,
+            )
         }
     };
     let _ = fill;
@@ -287,7 +353,10 @@ pub fn orthogonal_edge_points(
         return;
     }
     let bus = bus.clamp(sd.min(ed), sd.max(ed));
-    let r = radius.min(delta.abs() * 0.5).min((bus - sd).abs()).min((ed - bus).abs());
+    let r = radius
+        .min(delta.abs() * 0.5)
+        .min((bus - sd).abs())
+        .min((ed - bus).abs());
     let sign = delta.signum();
     points.push(map(sb, sd));
     if r < 0.5 {
@@ -295,9 +364,19 @@ pub fn orthogonal_edge_points(
         points.push(map(eb, bus));
     } else {
         // First corner: from going "down" to going "across".
-        corner(points, map(sb, bus - r), map(sb, bus), map(sb + sign * r, bus));
+        corner(
+            points,
+            map(sb, bus - r),
+            map(sb, bus),
+            map(sb + sign * r, bus),
+        );
         // Second corner: from "across" to "down".
-        corner(points, map(eb - sign * r, bus), map(eb, bus), map(eb, bus + r));
+        corner(
+            points,
+            map(eb - sign * r, bus),
+            map(eb, bus),
+            map(eb, bus + r),
+        );
     }
     points.push(map(eb, ed));
 }
@@ -366,14 +445,28 @@ mod tests {
     #[test]
     fn straight_edge_when_aligned() {
         let mut points = Vec::new();
-        orthogonal_edge_points(pos2(10.0, 0.0), pos2(10.0, 100.0), 50.0, true, 6.0, &mut points);
+        orthogonal_edge_points(
+            pos2(10.0, 0.0),
+            pos2(10.0, 100.0),
+            50.0,
+            true,
+            6.0,
+            &mut points,
+        );
         assert_eq!(points, vec![pos2(10.0, 0.0), pos2(10.0, 100.0)]);
     }
 
     #[test]
     fn orthogonal_edge_turns_at_the_bus() {
         let mut points = Vec::new();
-        orthogonal_edge_points(pos2(0.0, 0.0), pos2(100.0, 80.0), 40.0, true, 6.0, &mut points);
+        orthogonal_edge_points(
+            pos2(0.0, 0.0),
+            pos2(100.0, 80.0),
+            40.0,
+            true,
+            6.0,
+            &mut points,
+        );
         assert_eq!(points.first(), Some(&pos2(0.0, 0.0)));
         assert_eq!(points.last(), Some(&pos2(100.0, 80.0)));
         // All points are on the three legs of the route.
@@ -385,16 +478,35 @@ mod tests {
         }
         // Left-right: the same route with the axes swapped.
         let mut swapped = Vec::new();
-        orthogonal_edge_points(pos2(0.0, 0.0), pos2(80.0, 100.0), 40.0, false, 6.0, &mut swapped);
+        orthogonal_edge_points(
+            pos2(0.0, 0.0),
+            pos2(80.0, 100.0),
+            40.0,
+            false,
+            6.0,
+            &mut swapped,
+        );
         assert_eq!(swapped.len(), points.len());
         for (a, b) in points.iter().zip(&swapped) {
             assert!((a.x - b.y).abs() < 1e-3 && (a.y - b.x).abs() < 1e-3);
         }
         // A tiny radius gives sharp corners.
-        orthogonal_edge_points(pos2(0.0, 0.0), pos2(-50.0, 80.0), 40.0, true, 0.0, &mut points);
+        orthogonal_edge_points(
+            pos2(0.0, 0.0),
+            pos2(-50.0, 80.0),
+            40.0,
+            true,
+            0.0,
+            &mut points,
+        );
         assert_eq!(
             points,
-            vec![pos2(0.0, 0.0), pos2(0.0, 40.0), pos2(-50.0, 40.0), pos2(-50.0, 80.0)]
+            vec![
+                pos2(0.0, 0.0),
+                pos2(0.0, 40.0),
+                pos2(-50.0, 40.0),
+                pos2(-50.0, 80.0)
+            ]
         );
     }
 
@@ -415,7 +527,11 @@ mod tests {
             status_badge(&mut out, pos2(0.0, 0.0), 14.0, status, true, &palette);
             assert_eq!(out.is_empty(), status == NodeStatus::Idle);
         }
-        for marker in [BreakpointMarker::Enabled, BreakpointMarker::Disabled, BreakpointMarker::Hit] {
+        for marker in [
+            BreakpointMarker::Enabled,
+            BreakpointMarker::Disabled,
+            BreakpointMarker::Hit,
+        ] {
             out.clear();
             breakpoint_marker(&mut out, pos2(0.0, 0.0), 6.0, marker, &palette);
             assert!(!out.is_empty());
@@ -426,9 +542,20 @@ mod tests {
             assert!(out.len() >= 3);
         }
         out.clear();
-        dashed_rect(&mut out, Rect::from_min_size(Pos2::ZERO, vec2(50.0, 20.0)), Stroke::new(1.0, Color32::RED), 4.0, 3.0);
+        dashed_rect(
+            &mut out,
+            Rect::from_min_size(Pos2::ZERO, vec2(50.0, 20.0)),
+            Stroke::new(1.0, Color32::RED),
+            4.0,
+            3.0,
+        );
         assert!(out.len() > 4);
-        let curve = curved_edge(pos2(0.0, 0.0), pos2(10.0, 50.0), true, Stroke::new(1.0, Color32::RED));
+        let curve = curved_edge(
+            pos2(0.0, 0.0),
+            pos2(10.0, 50.0),
+            true,
+            Stroke::new(1.0, Color32::RED),
+        );
         assert!(matches!(curve, Shape::CubicBezier(_)));
     }
 }

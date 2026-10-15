@@ -77,14 +77,23 @@ pub fn install(ctx: &egui::Context, choice: ThemeChoice) {
         style.interaction.tooltip_delay = 0.35;
         use egui::{FontFamily, FontId, TextStyle};
         style.text_styles = [
-            (TextStyle::Small, FontId::new(11.0, FontFamily::Proportional)),
+            (
+                TextStyle::Small,
+                FontId::new(11.0, FontFamily::Proportional),
+            ),
             (TextStyle::Body, FontId::new(13.5, FontFamily::Proportional)),
-            (TextStyle::Button, FontId::new(13.5, FontFamily::Proportional)),
+            (
+                TextStyle::Button,
+                FontId::new(13.5, FontFamily::Proportional),
+            ),
             (
                 TextStyle::Heading,
                 FontId::new(18.0, FontFamily::Name(crate::fonts::MEDIUM.into())),
             ),
-            (TextStyle::Monospace, FontId::new(12.5, FontFamily::Monospace)),
+            (
+                TextStyle::Monospace,
+                FontId::new(12.5, FontFamily::Monospace),
+            ),
         ]
         .into();
     });

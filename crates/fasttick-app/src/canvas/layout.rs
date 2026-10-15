@@ -393,7 +393,10 @@ mod tests {
         }
         // Levels: all nodes of a level start at the same y, below the
         // tallest node of the level before.
-        assert_eq!(result.level_starts, vec![0.0, 40.0 + 56.0, 40.0 + 56.0 + 30.0 + 56.0]);
+        assert_eq!(
+            result.level_starts,
+            vec![0.0, 40.0 + 56.0, 40.0 + 56.0 + 30.0 + 56.0]
+        );
         for (node, rect) in tree.nodes().iter().zip(&result.rects) {
             assert_eq!(rect.min.y, result.level_starts[node.depth as usize]);
         }
@@ -441,7 +444,11 @@ mod tests {
 
     #[test]
     fn wide_parent_over_narrow_children() {
-        let tree = tree(&[(None, 400.0, 40.0), (Some(0), 20.0, 20.0), (Some(0), 20.0, 20.0)]);
+        let tree = tree(&[
+            (None, 400.0, 40.0),
+            (Some(0), 20.0, 20.0),
+            (Some(0), 20.0, 20.0),
+        ]);
         let result = layout(&tree, LayoutDirection::TopDown);
         no_overlaps(&result);
         assert_eq!(result.bounds.width(), 400.0);

@@ -6,7 +6,8 @@
 use fasttick_app::app::{FastTickApp, Mode, StartOptions};
 use fasttick_app::theme::ThemeChoice;
 
-const USAGE: &str = "Usage: fasttick [--theme light|dark|system] [--mode edit|live|replay] [FILE...]
+const USAGE: &str =
+    "Usage: fasttick [--theme light|dark|system] [--mode edit|live|replay] [FILE...]
 
 Opens tree XML files (.xml) and logs (.btlog).
 

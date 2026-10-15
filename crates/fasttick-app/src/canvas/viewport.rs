@@ -111,7 +111,11 @@ impl Viewport {
         );
         let width = bounds.width().max(1.0);
         let height = bounds.height().max(1.0);
-        let zoom = clamp_zoom((available.x / width).min(available.y / height).min(max_zoom));
+        let zoom = clamp_zoom(
+            (available.x / width)
+                .min(available.y / height)
+                .min(max_zoom),
+        );
         Viewport::centered_on(bounds.center(), size, zoom)
     }
 
@@ -242,7 +246,10 @@ mod tests {
         let view = Viewport::new(vec2(30.0, -12.0), 1.7);
         let origin = pos2(100.0, 50.0);
         for p in [pos2(0.0, 0.0), pos2(-40.0, 33.5), pos2(1000.0, -200.0)] {
-            assert!(close_pos(view.to_world(origin, view.to_screen(origin, p)), p));
+            assert!(close_pos(
+                view.to_world(origin, view.to_screen(origin, p)),
+                p
+            ));
         }
         let rect = Rect::from_min_max(pos2(-5.0, 2.0), pos2(20.0, 40.0));
         let back = view.rect_to_world(origin, view.rect_to_screen(origin, rect));
@@ -277,7 +284,13 @@ mod tests {
         assert_eq!(view, before);
         assert_eq!(clamp_zoom(f32::INFINITY), 1.0);
         assert!(view.is_valid());
-        assert!(!Viewport { pan: Vec2::ZERO, zoom: 99.0 }.is_valid());
+        assert!(
+            !Viewport {
+                pan: Vec2::ZERO,
+                zoom: 99.0
+            }
+            .is_valid()
+        );
     }
 
     #[test]
@@ -287,7 +300,10 @@ mod tests {
         let small = Rect::from_min_size(pos2(100.0, 100.0), vec2(100.0, 50.0));
         let view = Viewport::fit(small, size, FIT_MARGIN, FIT_MAX_ZOOM);
         assert!(close(view.zoom, 1.0));
-        assert!(close_pos(view.to_screen(Pos2::ZERO, small.center()), pos2(400.0, 300.0)));
+        assert!(close_pos(
+            view.to_screen(Pos2::ZERO, small.center()),
+            pos2(400.0, 300.0)
+        ));
 
         // A wide tree fits the width.
         let wide = Rect::from_min_size(pos2(-1000.0, 0.0), vec2(4000.0, 200.0));
@@ -301,7 +317,10 @@ mod tests {
         // Bad input gives the default view.
         let nan = Rect::from_min_max(pos2(f32::NAN, 0.0), pos2(1.0, 1.0));
         assert_eq!(Viewport::fit(nan, size, 0.0, 1.0), Viewport::default());
-        assert_eq!(Viewport::fit(small, Vec2::ZERO, 0.0, 1.0), Viewport::default());
+        assert_eq!(
+            Viewport::fit(small, Vec2::ZERO, 0.0, 1.0),
+            Viewport::default()
+        );
         // A huge tree uses the smallest zoom.
         let huge = Rect::from_min_size(Pos2::ZERO, vec2(1e9, 1e9));
         assert_eq!(Viewport::fit(huge, size, 0.0, 1.0).zoom, MIN_ZOOM);
@@ -336,7 +355,10 @@ mod tests {
         // Larger than the canvas: show the top-left part.
         let big = Rect::from_min_size(pos2(1000.0, 1000.0), vec2(2000.0, 2000.0));
         let moved = view.reveal(big, size, 10.0);
-        assert!(close_pos(moved.rect_to_screen(Pos2::ZERO, big).min, pos2(10.0, 10.0)));
+        assert!(close_pos(
+            moved.rect_to_screen(Pos2::ZERO, big).min,
+            pos2(10.0, 10.0)
+        ));
     }
 
     #[test]

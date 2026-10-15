@@ -185,15 +185,18 @@ mod tests {
     fn bad_or_partial_values() {
         let mut storage = MemoryStorage::default();
         // A partial settings record (for example from an older version).
-        storage
-            .0
-            .insert(SETTINGS_KEY.to_owned(), "(theme: Light, poll_interval_ms: 0)".to_owned());
+        storage.0.insert(
+            SETTINGS_KEY.to_owned(),
+            "(theme: Light, poll_interval_ms: 0)".to_owned(),
+        );
         let loaded = Settings::load(Some(&storage));
         assert_eq!(loaded.theme, ThemeChoice::Light);
         assert_eq!(loaded.poll_interval_ms, MIN_POLL_MS);
         assert_eq!(loaded.live_port, DEFAULT_PORT);
         // Garbage gives the defaults.
-        storage.0.insert(SETTINGS_KEY.to_owned(), "not ron".to_owned());
+        storage
+            .0
+            .insert(SETTINGS_KEY.to_owned(), "not ron".to_owned());
         assert_eq!(Settings::load(Some(&storage)), Settings::default());
     }
 
@@ -207,12 +210,22 @@ mod tests {
         assert_eq!(settings.recent[0].path, Path::new("/f19.xml"));
         settings.add_recent(Path::new("/f10.xml"));
         assert_eq!(settings.recent[0].path, Path::new("/f10.xml"));
-        assert_eq!(settings.recent.iter().filter(|r| r.path == Path::new("/f10.xml")).count(), 1);
+        assert_eq!(
+            settings
+                .recent
+                .iter()
+                .filter(|r| r.path == Path::new("/f10.xml"))
+                .count(),
+            1
+        );
         settings.add_recent(Path::new("/x/run.BTLOG"));
         assert_eq!(settings.recent[0].kind, RecentKind::Log);
         settings.remove_recent(Path::new("/x/run.BTLOG"));
         assert_ne!(settings.recent[0].kind, RecentKind::Log);
-        assert_eq!(RecentKind::for_path(Path::new("p.ftproj")), RecentKind::Project);
+        assert_eq!(
+            RecentKind::for_path(Path::new("p.ftproj")),
+            RecentKind::Project
+        );
         assert_eq!(RecentKind::for_path(Path::new("noext")), RecentKind::Tree);
     }
 }
