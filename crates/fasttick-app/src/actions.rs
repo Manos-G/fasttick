@@ -6,9 +6,10 @@
 
 use std::path::PathBuf;
 
-use fasttick_core::runtime::InstanceIndex;
+use fasttick_core::runtime::{InstanceIndex, Uid};
 
 use crate::documents::{DocId, ViewId};
+use crate::jobs::DialogPurpose;
 use crate::shortcuts::Command;
 
 /// A request to the app.
@@ -26,6 +27,9 @@ pub enum AppAction {
     OpenTreeInNewTab(DocId, InstanceIndex),
     /// Expand the path to a SubTree instance and focus its node.
     RevealInstance(ViewId, InstanceIndex),
+    /// Show a node of a document: expand the SubTrees above it, select it
+    /// and move the view to it.
+    RevealNode(DocId, Uid),
     /// Connect to an executor.
     Connect {
         /// Host name or address.
@@ -33,8 +37,8 @@ pub enum AppAction {
         /// Server port (the notification port is the next one).
         port: u16,
     },
-    /// Set the replay position of a log document.
-    SetReplayPosition(DocId, usize),
+    /// Open a file dialog for a purpose (save a recording, export, ...).
+    PickFile(DialogPurpose),
     /// Remove the recent-files list.
     ClearRecent,
 }

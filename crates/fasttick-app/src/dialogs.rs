@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use egui::{Align2, Color32, RichText, Ui};
 
+use crate::actions::AppAction;
 use crate::shortcuts::{CANVAS_HELP, Command, KeyMap};
 
 /// The URL of the third-party licence list.
@@ -226,18 +227,32 @@ pub struct Notice {
     pub level: NoticeLevel,
     /// The time when the notice appeared (egui time, seconds).
     pub since: f64,
+    /// A button with a text and an action, for example "Open in replay".
+    pub action: Option<(String, AppAction)>,
 }
 
 /// How long a notice stays, in seconds.
 pub const NOTICE_SECONDS: f64 = 7.0;
 
-/// Draws the notices and removes the old ones.
-pub fn notices(ctx: &egui::Context, notices: &mut Vec<Notice>) {
+/// How long a notice with an action button stays, in seconds.
+pub const ACTION_NOTICE_SECONDS: f64 = 20.0;
+
+/// Draws the notices and removes the old ones. Returns the action of a
+/// notice button that the user clicked.
+pub fn notices(ctx: &egui::Context, notices: &mut Vec<Notice>) -> Option<AppAction> {
     let now = ctx.input(|i| i.time);
-    notices.retain(|n| now - n.since < NOTICE_SECONDS);
+    notices.retain(|n| {
+        let limit = if n.action.is_some() {
+            ACTION_NOTICE_SECONDS
+        } else {
+            NOTICE_SECONDS
+        };
+        now - n.since < limit
+    });
     if notices.is_empty() {
-        return;
+        return None;
     }
+    let mut clicked = None;
     ctx.request_repaint_after(std::time::Duration::from_millis(500));
     egui::Area::new(egui::Id::new("fasttick_notices"))
         .anchor(Align2::RIGHT_BOTTOM, [-16.0, -40.0])
@@ -256,6 +271,12 @@ pub fn notices(ctx: &egui::Context, notices: &mut Vec<Notice>) {
                     ui.horizontal(|ui| {
                         crate::widgets::status_dot(ui, color);
                         ui.label(&notice.text);
+                        if let Some((text, action)) = &notice.action
+                            && ui.button(text).clicked()
+                        {
+                            clicked = Some(action.clone());
+                            dismiss = Some(index);
+                        }
                         if ui.small_button("Close").clicked() {
                             dismiss = Some(index);
                         }
@@ -267,4 +288,5 @@ pub fn notices(ctx: &egui::Context, notices: &mut Vec<Notice>) {
                 notices.remove(index);
             }
         });
+    clicked
 }

@@ -3,8 +3,14 @@
 //! Panels that are not built yet show a short placeholder text
 //! ([`placeholder_text`]).
 
+pub mod blackboard;
+pub mod breakpoints;
 pub mod inspector;
+pub mod live_bar;
 pub mod start;
+pub mod statistics;
+pub mod timeline;
+pub mod transitions;
 pub mod tree_list;
 
 use egui::{RichText, Ui};
@@ -12,7 +18,8 @@ use egui::{RichText, Ui};
 use crate::actions::AppAction;
 use crate::app::Mode;
 use crate::dock::Tab;
-use crate::documents::Workspace;
+use crate::documents::{DocId, Workspace};
+use crate::jobs::LoadingFile;
 use crate::live::LiveController;
 use crate::settings::Settings;
 use crate::shortcuts::KeyMap;
@@ -28,7 +35,11 @@ pub struct PanelContext<'a> {
     /// The settings.
     pub settings: &'a mut Settings,
     /// The live connection.
-    pub live: &'a LiveController,
+    pub live: &'a mut LiveController,
+    /// The document of the live tree, if any.
+    pub live_doc: Option<DocId>,
+    /// The logs that are loading now.
+    pub loading: &'a [LoadingFile],
     /// The key map (for shortcut hints).
     pub keymap: &'a KeyMap,
     /// The canvas colours.
@@ -43,6 +54,11 @@ pub fn show_panel(tab: Tab, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         Tab::Start => start::show(ui, cx),
         Tab::Trees => tree_list::show(ui, cx),
         Tab::Inspector => inspector::show(ui, cx),
+        Tab::Blackboard => blackboard::show(ui, cx),
+        Tab::Breakpoints => breakpoints::show(ui, cx),
+        Tab::Timeline => timeline::show(ui, cx),
+        Tab::Transitions => transitions::show(ui, cx),
+        Tab::Statistics => statistics::show(ui, cx),
         Tab::Document(_) => {}
         other => placeholder(ui, other),
     }
@@ -52,15 +68,24 @@ pub fn show_panel(tab: Tab, ui: &mut Ui, cx: &mut PanelContext<'_>) {
 pub fn placeholder_text(tab: Tab) -> &'static str {
     match tab {
         Tab::Palette => "The node palette comes with the tree editor.",
-        Tab::Blackboard => "The blackboard viewer comes with live debugging.",
-        Tab::Breakpoints => "The breakpoint list comes with live debugging.",
         Tab::Problems => "The problems list comes with validation.",
         Tab::Xml => "The XML view comes with the tree editor.",
         Tab::Search => "Search comes in a later version.",
-        Tab::Transitions => "The transitions table comes with replay.",
-        Tab::Statistics => "The statistics table comes with replay.",
-        Tab::Start | Tab::Document(_) | Tab::Trees | Tab::Inspector => "",
+        Tab::Start
+        | Tab::Document(_)
+        | Tab::Trees
+        | Tab::Inspector
+        | Tab::Blackboard
+        | Tab::Breakpoints
+        | Tab::Transitions
+        | Tab::Statistics
+        | Tab::Timeline => "",
     }
+}
+
+/// True if a panel is built (it has no placeholder).
+pub fn is_built(tab: Tab) -> bool {
+    placeholder_text(tab).is_empty()
 }
 
 fn placeholder(ui: &mut Ui, tab: Tab) {
@@ -71,16 +96,29 @@ fn placeholder(ui: &mut Ui, tab: Tab) {
     });
 }
 
+/// A short weak text at the top of an empty panel.
+pub(crate) fn empty(ui: &mut Ui, text: &str) {
+    ui.add_space(8.0);
+    ui.label(RichText::new(text).weak());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn every_unbuilt_panel_has_a_placeholder() {
+        let built = [
+            Tab::Trees,
+            Tab::Inspector,
+            Tab::Blackboard,
+            Tab::Breakpoints,
+            Tab::Transitions,
+            Tab::Statistics,
+            Tab::Timeline,
+        ];
         for tab in Tab::PANELS {
-            if !matches!(tab, Tab::Trees | Tab::Inspector) {
-                assert!(!placeholder_text(tab).is_empty(), "{tab:?}");
-            }
+            assert_eq!(is_built(tab), built.contains(&tab), "{tab:?}");
         }
     }
 }

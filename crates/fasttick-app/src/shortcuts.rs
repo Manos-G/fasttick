@@ -71,6 +71,34 @@ pub enum Command {
     Connect,
     /// Disconnect from the executor.
     Disconnect,
+    /// Add or remove a breakpoint on the selected node (live mode).
+    ToggleBreakpoint,
+    /// Let the node at the breakpoint continue (live mode).
+    Continue,
+    /// Start or stop a recording (live mode).
+    ToggleRecording,
+    /// Save the recording as a `.btlog` file.
+    SaveRecording,
+    /// Save the breakpoints to a file.
+    SaveBreakpoints,
+    /// Load breakpoints from a file.
+    LoadBreakpoints,
+    /// Start or stop playback (replay mode).
+    PlayPause,
+    /// Take back one transition.
+    StepBack,
+    /// Apply one transition.
+    StepForward,
+    /// Go to the start of the log (or of the time range).
+    GoToStart,
+    /// Go to the end of the log (or of the time range).
+    GoToEnd,
+    /// Show the whole log on the timeline.
+    ResetTimelineZoom,
+    /// Export the filtered transitions as JSON.
+    ExportJson,
+    /// Export the filtered transitions as CSV.
+    ExportCsv,
     /// Show the active document a second time, beside the first.
     SplitView,
     /// Close the active document tab.
@@ -85,7 +113,7 @@ pub enum Command {
 
 impl Command {
     /// All commands, in help-dialog order.
-    pub const ALL: [Command; 35] = [
+    pub const ALL: [Command; 49] = [
         Command::NewProject,
         Command::OpenFile,
         Command::OpenLog,
@@ -119,6 +147,20 @@ impl Command {
         Command::ModeReplay,
         Command::Connect,
         Command::Disconnect,
+        Command::ToggleBreakpoint,
+        Command::Continue,
+        Command::ToggleRecording,
+        Command::SaveRecording,
+        Command::SaveBreakpoints,
+        Command::LoadBreakpoints,
+        Command::PlayPause,
+        Command::StepBack,
+        Command::StepForward,
+        Command::GoToStart,
+        Command::GoToEnd,
+        Command::ResetTimelineZoom,
+        Command::ExportJson,
+        Command::ExportCsv,
         Command::ShowShortcuts,
         Command::About,
     ];
@@ -156,6 +198,20 @@ impl Command {
             Command::ModeReplay => "Replay mode",
             Command::Connect => "Connect\u{2026}",
             Command::Disconnect => "Disconnect",
+            Command::ToggleBreakpoint => "Toggle breakpoint",
+            Command::Continue => "Continue",
+            Command::ToggleRecording => "Start or stop recording",
+            Command::SaveRecording => "Save recording\u{2026}",
+            Command::SaveBreakpoints => "Save breakpoints\u{2026}",
+            Command::LoadBreakpoints => "Load breakpoints\u{2026}",
+            Command::PlayPause => "Play or pause",
+            Command::StepBack => "One transition back",
+            Command::StepForward => "One transition forward",
+            Command::GoToStart => "Go to the start",
+            Command::GoToEnd => "Go to the end",
+            Command::ResetTimelineZoom => "Show the whole log",
+            Command::ExportJson => "Export transitions as JSON\u{2026}",
+            Command::ExportCsv => "Export transitions as CSV\u{2026}",
             Command::SplitView => "Split view",
             Command::CloseTab => "Close tab",
             Command::ResetLayout => "Reset panel layout",
@@ -196,7 +252,22 @@ impl Command {
             | Command::CloseTab
             | Command::ResetLayout => "View",
             Command::ModeEdit | Command::ModeLive | Command::ModeReplay => "Mode",
-            Command::Connect | Command::Disconnect => "Live",
+            Command::Connect
+            | Command::Disconnect
+            | Command::ToggleBreakpoint
+            | Command::Continue
+            | Command::ToggleRecording
+            | Command::SaveRecording
+            | Command::SaveBreakpoints
+            | Command::LoadBreakpoints => "Live",
+            Command::PlayPause
+            | Command::StepBack
+            | Command::StepForward
+            | Command::GoToStart
+            | Command::GoToEnd
+            | Command::ResetTimelineZoom
+            | Command::ExportJson
+            | Command::ExportCsv => "Replay",
             Command::ShowShortcuts | Command::About => "Help",
         }
     }
@@ -275,6 +346,14 @@ impl Default for KeyMap {
                 bind(Command::ModeReplay, cmd, Key::Num3),
                 bind(Command::Connect, none, Key::F5),
                 bind(Command::Disconnect, Modifiers::SHIFT, Key::F5),
+                bind(Command::Continue, none, Key::F8),
+                bind(Command::ToggleBreakpoint, none, Key::F9),
+                bind(Command::ToggleRecording, cmd, Key::R),
+                bind(Command::PlayPause, none, Key::P),
+                bind(Command::StepBack, none, Key::Comma),
+                bind(Command::StepForward, none, Key::Period),
+                bind(Command::GoToStart, cmd, Key::Home),
+                bind(Command::GoToEnd, cmd, Key::End),
                 bind(Command::ShowShortcuts, none, Key::F1),
             ],
         }
