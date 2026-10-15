@@ -27,6 +27,13 @@ demo notes [M1](docs/demo/M1.md), [M2](docs/demo/M2.md),
 - Replay of `.btlog` files (`BT::FileLogger2`) and SQLite logs
   (`BT::SqliteLogger`): timeline, transitions table, statistics, JSON and CSV
   export.
+- Fast authoring: drag from the dot under a node, or push Shift+A, and
+  find the node type with fuzzy search. Fold large subtrees. Find the
+  nodes that use a blackboard key.
+- Command search (Ctrl+Shift+P) for commands, trees, recent files and
+  themes; Ctrl+P goes to a tree.
+- Export of a tree as an SVG image, with the statuses in live and replay
+  mode.
 - Descriptions of the node types when you hover over a node.
 - Twelve themes: FastTick Light and Dark, OpenWire Light and Dark,
   Catppuccin (Latte, Frappé, Macchiato, Mocha) and VS Code (Dark Modern,
