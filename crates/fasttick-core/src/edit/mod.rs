@@ -76,7 +76,9 @@ mod trees;
 mod unconnected;
 
 pub use clipboard::{DUPLICATE_OFFSET, copy};
-pub use editor::{Applied, Editor, NodePlace, StructurePolicy, node_place, run, top_most};
+pub use editor::{
+    Applied, Editor, NodePlace, StructurePolicy, node_place, parent_rule, run, top_most,
+};
 pub use error::{CommandError, NameKind};
 pub use history::{Coalesce, CoalesceKey, DEFAULT_MAX_DEPTH, History, HistoryError};
 pub use nodes::Condition;

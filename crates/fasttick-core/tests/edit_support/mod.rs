@@ -18,7 +18,9 @@ pub struct Snapshot {
 
 /// Tree IDs whose layout state the snapshot records (besides the trees of
 /// the files).
-const EXTRA_LAYOUT_KEYS: &[&str] = &["Main", "Walk", "Sub", "New", "Renamed", "Greet"];
+const EXTRA_LAYOUT_KEYS: &[&str] = &[
+    "Main", "Walk", "Sub", "New", "Renamed", "Greet", "Stroll", "Start",
+];
 
 pub fn snapshot(project: &Project) -> Snapshot {
     let texts = project

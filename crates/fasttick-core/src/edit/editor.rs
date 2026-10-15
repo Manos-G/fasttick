@@ -434,10 +434,13 @@ pub(crate) fn parent_place(
 
 /// The label and the child rule of a parent: `BehaviorTree` and exactly one
 /// child for a `<BehaviorTree>` element (`VerifyXML` in
-/// `src/xml_parsing.cpp`), else the rule of the node type
+/// `src/xml_parsing.cpp`), else the type ID and the rule of the node type
 /// ([`builtin::child_rule`]). The rule is `None` if the kind of the node is
 /// not known.
-pub(crate) fn parent_rule(
+///
+/// The GUI can use it to show whether a drop target takes one more child
+/// ([`ChildRule::accepts_more`]) before it runs a command.
+pub fn parent_rule(
     project: &Project,
     file: FileId,
     parent: NodeId,
@@ -486,4 +489,37 @@ pub fn top_most(doc: &Document, nodes: &[NodeId]) -> Vec<NodeId> {
 pub(crate) fn element_index(doc: &Document, node: NodeId) -> Option<usize> {
     let parent = doc.parent(node)?;
     doc.element_children(parent).position(|c| c == node)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn top_most_sorts_and_filters() {
+        let mut doc = Document::parse("<r><a><b/><c/></a><d/></r>").unwrap();
+        let find = |doc: &Document, name: &str| {
+            doc.descendants(doc.root())
+                .find(|&n| doc.name(n) == Some(name))
+                .unwrap()
+        };
+        let (a, b, c, d) = (
+            find(&doc, "a"),
+            find(&doc, "b"),
+            find(&doc, "c"),
+            find(&doc, "d"),
+        );
+        assert_eq!(top_most(&doc, &[d, c, b, c]), vec![b, c, d]);
+        assert_eq!(top_most(&doc, &[c, a, d]), vec![a, d]);
+        // Detached subtrees come after the document, by their top node.
+        let x = doc.create_element("x").unwrap();
+        let y = doc.create_element("y").unwrap();
+        let z = doc.create_element("z").unwrap();
+        doc.append_child(y, z).unwrap();
+        assert_eq!(top_most(&doc, &[z, x, d]), vec![d, x, z]);
+        assert_eq!(top_most(&doc, &[z, y]), vec![y]);
+        assert_eq!(top_most(&doc, &[NodeId(999)]), vec![]);
+        assert_eq!(element_index(&doc, c), Some(1));
+        assert_eq!(element_index(&doc, x), None);
+    }
 }

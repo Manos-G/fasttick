@@ -6,7 +6,7 @@ use edit_support::{check, check_error, named, project, tag, text};
 use fasttick_core::bt::{PostCondition, PreCondition, StructureHash};
 use fasttick_core::builtin::ChildRule;
 use fasttick_core::edit::{
-    CommandError, Condition, NameKind, NodePlace, StructurePolicy, copy, node_place,
+    CommandError, Condition, NameKind, NodePlace, StructurePolicy, copy, node_place, parent_rule,
 };
 use fasttick_core::models::{NodeKind, NodeModel, PortDirection, PortModel};
 use fasttick_core::project::{LayoutDirection, LayoutState};
@@ -972,6 +972,63 @@ fn rename_tree_updates_references_and_state() {
     assert!(text(&p, f).contains("main_tree_to_execute=\"Start\""));
     assert!(text(&p, f).contains("<BehaviorTree ID=\"Start\">"));
     assert_eq!(check(&mut p, |ed| ed.rename_tree(f, "Start", "Start")), 0);
+}
+
+#[test]
+fn rename_tree_over_stale_state() {
+    let (mut p, f) = project(BASE);
+    let walk = LayoutState::new(LayoutDirection::TopDown, StructureHash(1));
+    let stale = LayoutState::new(LayoutDirection::LeftRight, StructureHash(2));
+    p.set_layout(f, "Walk", walk.clone());
+    p.set_layout(f, "Stroll", stale);
+    let old_node = check(&mut p, |ed| {
+        ed.add_unconnected_node(f, "Walk", "AlwaysSuccess", None, [0.0, 0.0])
+    });
+    // A stale unconnected node of a tree "Stroll" that does not exist.
+    let tree = p.file(f).unwrap().tree("Main").unwrap().element;
+    let main_node = check(&mut p, |ed| {
+        ed.add_unconnected_node(f, "Main", "AlwaysFailure", None, [1.0, 1.0])
+    });
+    check(&mut p, |ed| ed.rename_tree(f, "Main", "Stroll"));
+    check(&mut p, |ed| ed.rename_tree(f, "Stroll", "Main"));
+    assert_eq!(p.file(f).unwrap().tree("Main").unwrap().element, tree);
+    assert_eq!(p.unconnected(f, "Main")[0].node, main_node);
+    // Now the real test: "Walk" goes over the stale state of "Stroll".
+    check(&mut p, |ed| ed.rename_tree(f, "Walk", "Stroll"));
+    assert_eq!(p.layout(f, "Stroll"), Some(&walk));
+    assert_eq!(p.unconnected(f, "Stroll")[0].node, old_node);
+}
+
+#[test]
+fn parent_rules_for_drop_targets() {
+    let (p, f) = project(BASE);
+    let main = p.file(f).unwrap().tree("Main").unwrap().element;
+    let sequence = named(&p, f, "root");
+    let door = tag(&p, f, "IsDoorOpen");
+    let sub = tag(&p, f, "SubTree");
+    assert_eq!(
+        parent_rule(&p, f, main).unwrap(),
+        ("BehaviorTree".to_owned(), Some(ChildRule::Exactly(1)))
+    );
+    assert_eq!(
+        parent_rule(&p, f, sequence).unwrap(),
+        ("Sequence".to_owned(), Some(ChildRule::AtLeast(1)))
+    );
+    assert_eq!(
+        parent_rule(&p, f, door).unwrap(),
+        ("IsDoorOpen".to_owned(), Some(ChildRule::Exactly(0)))
+    );
+    // A SubTree uses the rule of "SubTree", not of its tree ID.
+    assert_eq!(
+        parent_rule(&p, f, sub).unwrap(),
+        ("SubTree".to_owned(), Some(ChildRule::Exactly(0)))
+    );
+    let (p, f) = project("<root><BehaviorTree ID=\"T\"><Custom/></BehaviorTree></root>");
+    let custom = tag(&p, f, "Custom");
+    assert_eq!(
+        parent_rule(&p, f, custom).unwrap(),
+        ("Custom".to_owned(), None)
+    );
 }
 
 #[test]

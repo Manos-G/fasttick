@@ -267,6 +267,14 @@ impl Transaction {
         self.edits.is_empty()
     }
 
+    /// The XML changes of the transaction, with their files, in order.
+    pub fn changes(&self) -> impl Iterator<Item = (FileId, &Change)> {
+        self.edits.iter().filter_map(|e| match e {
+            Edit::Xml { file, change } => Some((*file, change)),
+            _ => None,
+        })
+    }
+
     /// The files that the XML edits change, each once, in order.
     pub fn xml_files(&self) -> Vec<FileId> {
         let mut out: Vec<FileId> = Vec::new();
