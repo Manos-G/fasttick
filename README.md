@@ -52,7 +52,12 @@ demo notes [M1](docs/demo/M1.md), [M2](docs/demo/M2.md),
 Run `cargo test`. The integration tests need BT.CPP 4.x and CMake (see
 [test_harness/README.md](test_harness/README.md)). Set `FASTTICK_BTCPP_PREFIX` to the
 install prefix of BT.CPP (for ROS 2 Jazzy: `/opt/ros/jazzy`). If the tests
-cannot find BT.CPP, they skip.
+cannot find BT.CPP, they skip; set `FASTTICK_REQUIRE_HARNESS=1` to make them
+fail instead.
+
+The performance tests use trees of 5,000 nodes. To see the times, run
+`cargo test --release -p fasttick-app --test canvas_perf --test edit_perf
+--test live_replay_perf -- --nocapture`.
 
 ## Licence
 
