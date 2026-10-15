@@ -1242,7 +1242,7 @@ fn the_search_field_of_the_popup_has_the_focus_at_once() {
         harness
             .state()
             .add_popup()
-            .map(|p| p.query.clone())
+            .map(|p| p.query().to_owned())
             .as_deref(),
         Some("alwfail")
     );
@@ -1315,4 +1315,60 @@ fn closing_a_changed_document_asks_first() {
     harness.run();
     assert_eq!(views(&harness), 0);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+}
+
+#[test]
+fn ctrl_p_goes_to_a_tree() {
+    let mut harness = harness();
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::P);
+    harness.run();
+    assert!(harness.state().command_search().is_some());
+    harness.event(Event::Text("count".into()));
+    harness.run();
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert!(harness.state().command_search().is_none());
+    let app = harness.state();
+    assert_eq!(
+        app.workspace().active().unwrap().canvas.tree().title,
+        "Counting"
+    );
+}
+
+#[test]
+fn the_command_search_runs_a_command() {
+    let mut harness = harness();
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, egui::Key::P);
+    harness.run();
+    let ctx = harness.ctx.clone();
+    let items = harness
+        .state()
+        .command_search_items(&ctx, fasttick_app::command_search::Scope::All);
+    let texts: Vec<&str> = items.iter().map(|i| i.text.as_str()).collect();
+    // Commands that can run, the trees, the themes.
+    assert!(texts.contains(&"Edit: Add node\u{2026}"), "{texts:?}");
+    assert!(texts.contains(&"Tree: Navigate"), "{texts:?}");
+    assert!(texts.contains(&"Theme: Catppuccin Mocha"), "{texts:?}");
+    // Commands that cannot run now are not in the list.
+    assert!(!texts.contains(&"Replay: Play or pause"), "{texts:?}");
+    assert!(
+        !texts.iter().any(|t| t.starts_with("Edit: Undo")),
+        "{texts:?}"
+    );
+    // Search and run "Theme: Catppuccin Mocha".
+    harness.event(Event::Text("mocha".into()));
+    harness.run();
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert!(harness.state().command_search().is_none());
+    assert_eq!(harness.state().theme(), ThemeChoice::CatppuccinMocha);
+    // Escape closes the search and changes nothing.
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, egui::Key::P);
+    harness.run();
+    harness.event(Event::Text("light".into()));
+    harness.run();
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(harness.state().command_search().is_none());
+    assert_eq!(harness.state().theme(), ThemeChoice::CatppuccinMocha);
 }

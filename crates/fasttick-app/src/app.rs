@@ -222,6 +222,7 @@ pub struct FastTickApp {
     name_prompt: Option<NamePrompt>,
     model_form: Option<crate::model_dialog::ModelForm>,
     add_popup: Option<crate::add_popup::AddPopup>,
+    command_search: Option<crate::command_search::CommandSearch>,
     notices: Vec<Notice>,
     actions: Vec<AppAction>,
     save_as_view: Option<ViewId>,
@@ -277,6 +278,7 @@ impl FastTickApp {
             name_prompt: None,
             model_form: None,
             add_popup: None,
+            command_search: None,
             notices: Vec::new(),
             actions: Vec::new(),
             save_as_view: None,
@@ -655,6 +657,8 @@ impl FastTickApp {
                 .is_some_and(|v| !crate::edit_ops::selected_nodes(&self.workspace, v).is_empty()),
             Command::Paste => self.active_edit_view().is_some() && self.clipboard.is_some(),
             Command::AddNode => self.active_edit_view().is_some() && self.add_popup.is_none(),
+            Command::SearchCommands => self.command_search.is_none(),
+            Command::GoToTree => active.is_some() && self.command_search.is_none(),
             Command::SaveAs => active.is_some_and(|v| {
                 self.workspace
                     .doc_of_view(v)
@@ -864,7 +868,19 @@ impl FastTickApp {
                     self.save_view(ctx, view);
                 }
             }
-            Command::AddNode => self.open_add_for_selection(ctx),
+            Command::AddNode => {
+                self.command_search = None;
+                self.open_add_for_selection(ctx);
+            }
+            Command::SearchCommands | Command::GoToTree => {
+                let scope = if command == Command::GoToTree {
+                    crate::command_search::Scope::Trees
+                } else {
+                    crate::command_search::Scope::All
+                };
+                self.add_popup = None;
+                self.command_search = Some(crate::command_search::CommandSearch::new(scope));
+            }
             Command::Undo
             | Command::Redo
             | Command::Cut
@@ -2030,6 +2046,9 @@ impl FastTickApp {
             self.menu_item(ui, Command::Find);
         });
         ui.menu_button("View", |ui| {
+            self.menu_item(ui, Command::SearchCommands);
+            self.menu_item(ui, Command::GoToTree);
+            ui.separator();
             self.menu_item(ui, Command::FitToView);
             self.menu_item(ui, Command::ZoomIn);
             self.menu_item(ui, Command::ZoomOut);
@@ -2317,6 +2336,7 @@ impl FastTickApp {
             }
         }
         self.add_popup_dialog(ctx, palette);
+        self.command_search_dialog(ctx);
         if let Some(prompt) = &mut self.name_prompt {
             match dialogs::name_prompt(ctx, prompt) {
                 (PromptChoice::Open, _) => {}
@@ -2459,6 +2479,157 @@ impl FastTickApp {
     /// The search popup, if it is open.
     pub fn add_popup(&self) -> Option<&crate::add_popup::AddPopup> {
         self.add_popup.as_ref()
+    }
+
+    /// The command search, if it is open.
+    pub fn command_search(&self) -> Option<&crate::command_search::CommandSearch> {
+        self.command_search.as_ref()
+    }
+
+    /// The items of the command search: the commands that can run now, the
+    /// trees of the active document, the recent files that exist and the
+    /// themes. [`Scope::Trees`](crate::command_search::Scope::Trees) gives
+    /// the trees only.
+    pub fn command_search_items(
+        &self,
+        ctx: &egui::Context,
+        scope: crate::command_search::Scope,
+    ) -> Vec<crate::command_search::SearchItem> {
+        use crate::command_search::{Scope, SearchItem, SearchTarget};
+        let all = scope == Scope::All;
+        let mut items = Vec::new();
+        if all {
+            for command in Command::ALL {
+                let theme = matches!(
+                    command,
+                    Command::ThemeLight | Command::ThemeDark | Command::ThemeSystem
+                );
+                if theme || command == Command::SearchCommands || !self.is_enabled(command) {
+                    continue;
+                }
+                items.push(SearchItem {
+                    target: SearchTarget::Command(command),
+                    text: format!("{}: {}", command.group(), command.label()),
+                    tag: self.keymap.shortcut_text(ctx, command).unwrap_or_default(),
+                    description: None,
+                });
+            }
+        }
+        if let Some(view) = self
+            .active_view_in_mode()
+            .and_then(|v| self.workspace.view(v))
+            && let Some(doc) = self.workspace.doc(view.doc)
+        {
+            let trees: Vec<(InstanceIndex, String, String)> = match &doc.editor {
+                Some(editor) => {
+                    let refs = editor.tree_refs();
+                    let several_files = {
+                        let mut files: Vec<_> = refs.iter().map(|r| r.file).collect();
+                        files.dedup();
+                        files.len() > 1
+                    };
+                    editor
+                        .trees()
+                        .into_iter()
+                        .map(|(index, id)| {
+                            let file = refs
+                                .get(index)
+                                .filter(|_| several_files)
+                                .map(|r| editor.file_name(r.file))
+                                .unwrap_or_default();
+                            (InstanceIndex(index), id, file)
+                        })
+                        .collect()
+                }
+                None => panels::tree_list::rows(&doc.runtime, doc.linking)
+                    .into_iter()
+                    .map(|row| (row.instance, row.tree_id, row.path))
+                    .collect(),
+            };
+            for (instance, id, place) in trees {
+                let current = instance == view.root_instance;
+                items.push(SearchItem {
+                    target: SearchTarget::Tree(view.id, instance),
+                    text: if all { format!("Tree: {id}") } else { id },
+                    tag: if current {
+                        "shown".to_owned()
+                    } else {
+                        place.clone()
+                    },
+                    description: (!place.is_empty()).then_some(place),
+                });
+            }
+        }
+        if all {
+            for recent in &self.settings.recent {
+                if !recent.path.exists() {
+                    continue;
+                }
+                let name = recent.path.file_name().map_or_else(
+                    || recent.path.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                );
+                items.push(SearchItem {
+                    target: SearchTarget::Recent(recent.path.clone()),
+                    text: format!("Open recent: {name}"),
+                    tag: match recent.kind {
+                        RecentKind::Tree => "tree",
+                        RecentKind::Project => "project",
+                        RecentKind::Log => "log",
+                    }
+                    .to_owned(),
+                    description: Some(recent.path.display().to_string()),
+                });
+            }
+            let current = self.theme();
+            for choice in ThemeChoice::ALL {
+                let name = if choice.family() == "FastTick" {
+                    format!("FastTick {}", choice.name())
+                } else {
+                    choice.name().to_owned()
+                };
+                items.push(SearchItem {
+                    target: SearchTarget::Theme(choice),
+                    text: format!("Theme: {name}"),
+                    tag: if choice == current {
+                        "current".to_owned()
+                    } else {
+                        String::new()
+                    },
+                    description: None,
+                });
+            }
+        }
+        items
+    }
+
+    /// The command search popup.
+    fn command_search_dialog(&mut self, ctx: &egui::Context) {
+        let Some(scope) = self.command_search.as_ref().map(|s| s.scope) else {
+            return;
+        };
+        let items = self.command_search_items(ctx, scope);
+        let Some(search) = &mut self.command_search else {
+            return;
+        };
+        use crate::command_search::SearchTarget;
+        use crate::search_list::SearchChoice;
+        match crate::command_search::show(ctx, search, &items) {
+            SearchChoice::Open => {}
+            SearchChoice::Cancel => self.command_search = None,
+            SearchChoice::Pick(target) => {
+                self.command_search = None;
+                match target {
+                    SearchTarget::Command(command) => self.run_command(ctx, command),
+                    SearchTarget::Tree(view, instance) => {
+                        self.workspace.set_view_root(view, instance);
+                        self.focus_view(view);
+                    }
+                    SearchTarget::Recent(path) => self.start_open(ctx, path),
+                    SearchTarget::Theme(choice) => self.set_theme(ctx, choice),
+                }
+            }
+        }
     }
 
     /// The dialog that shows a loaded breakpoint file before the hooks go

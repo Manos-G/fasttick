@@ -98,6 +98,24 @@ Select **View** > **Theme**. These themes are available:
 **System** uses FastTick Light or FastTick Dark, as your system setting.
 FastTick keeps the theme in its settings.
 
+### 2.2 Search commands
+
+Push Ctrl+Shift+P (or select **View** > **Search commands…**) to find an
+action by its name. Type some letters of the name: the letters must be in
+the same order, but they need not be side by side. The list shows:
+
+- the commands that you can use now, with their shortcuts;
+- the trees of the active document;
+- the recent files that exist;
+- the themes.
+
+Use the Up and Down arrows to select an item. Push Enter or click the item
+to use it. Push Escape or click outside the list to close it.
+
+Push Ctrl+P (**View** > **Go to tree…**) to see only the trees of the
+active document. For example, type `nav` and push Enter to show the tree
+`Navigate`.
+
 ## 3. Edit mode
 
 ### 3.1 Open, make and save files

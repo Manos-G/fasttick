@@ -107,6 +107,10 @@ pub enum Command {
     CloseTab,
     /// Restore the default panel arrangement.
     ResetLayout,
+    /// Find a command, a tree, a recent file or a theme by its name.
+    SearchCommands,
+    /// Find a tree of the active document by its name.
+    GoToTree,
     /// Show the keyboard shortcuts.
     ShowShortcuts,
     /// Show the About dialog.
@@ -115,7 +119,7 @@ pub enum Command {
 
 impl Command {
     /// All commands, in help-dialog order.
-    pub const ALL: [Command; 50] = [
+    pub const ALL: [Command; 52] = [
         Command::NewProject,
         Command::OpenFile,
         Command::OpenLog,
@@ -145,6 +149,8 @@ impl Command {
         Command::SplitView,
         Command::CloseTab,
         Command::ResetLayout,
+        Command::SearchCommands,
+        Command::GoToTree,
         Command::ModeEdit,
         Command::ModeLive,
         Command::ModeReplay,
@@ -219,6 +225,8 @@ impl Command {
             Command::SplitView => "Split view",
             Command::CloseTab => "Close tab",
             Command::ResetLayout => "Reset panel layout",
+            Command::SearchCommands => "Search commands\u{2026}",
+            Command::GoToTree => "Go to tree\u{2026}",
             Command::ShowShortcuts => "Keyboard shortcuts",
             Command::About => "About FastTick",
         }
@@ -255,7 +263,9 @@ impl Command {
             | Command::ThemeSystem
             | Command::SplitView
             | Command::CloseTab
-            | Command::ResetLayout => "View",
+            | Command::ResetLayout
+            | Command::SearchCommands
+            | Command::GoToTree => "View",
             Command::ModeEdit | Command::ModeLive | Command::ModeReplay => "Mode",
             Command::Connect
             | Command::Disconnect
@@ -353,6 +363,8 @@ impl Default for KeyMap {
                 bind(Command::ToggleLayout, cmd, Key::L),
                 bind(Command::SplitView, cmd, Key::Backslash),
                 bind(Command::CloseTab, cmd, Key::W),
+                bind(Command::SearchCommands, cmd_shift, Key::P),
+                bind(Command::GoToTree, cmd, Key::P),
                 bind(Command::ModeEdit, cmd, Key::Num1),
                 bind(Command::ModeLive, cmd, Key::Num2),
                 bind(Command::ModeReplay, cmd, Key::Num3),

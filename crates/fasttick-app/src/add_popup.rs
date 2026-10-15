@@ -7,7 +7,7 @@
 //! node…". Arrow keys move the selection, Enter adds the selected type,
 //! Escape or a click outside closes the popup.
 
-use egui::{Align2, CornerRadius, Key, Modifiers, Pos2, RichText, Sense, Stroke};
+use egui::Pos2;
 use fasttick_core::models::{ModelSource, NodeKind, NodeModel};
 use fasttick_core::xml::NodeId;
 
@@ -15,14 +15,8 @@ use crate::canvas::category_of_kind;
 use crate::documents::ViewId;
 use crate::edit_ops::{EditOp, Placement};
 use crate::fuzzy;
+use crate::search_list::{self, SearchChoice, SearchRow, SearchState, SearchTexts};
 use crate::theme::CanvasPalette;
-
-/// The width of the popup.
-const WIDTH: f32 = 340.0;
-/// The height of one row of the list.
-const ROW_HEIGHT: f32 = 24.0;
-/// The most rows that show without scrolling.
-const VISIBLE_ROWS: usize = 12;
 
 /// A node type that the popup can add.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,11 +89,8 @@ pub struct AddPopup {
     pub title: String,
     /// The top-left corner on the screen.
     pub pos: Pos2,
-    /// The search text.
-    pub query: String,
-    /// The index of the selected row.
-    pub selected: usize,
-    focused: bool,
+    /// The search text and the selection.
+    pub search: SearchState,
 }
 
 impl AddPopup {
@@ -115,10 +106,13 @@ impl AddPopup {
             target,
             title: title.into(),
             pos,
-            query: String::new(),
-            selected: 0,
-            focused: false,
+            search: SearchState::default(),
         }
+    }
+
+    /// The search text.
+    pub fn query(&self) -> &str {
+        &self.search.query
     }
 
     /// The edit that adds a node of `type_id`.
@@ -152,175 +146,40 @@ pub fn show(
     recent: &[String],
     palette: &CanvasPalette,
 ) -> AddChoice {
-    let mut choice = AddChoice::Open;
-    // The keys of the list, before the search field sees them.
-    let (down, up, enter, escape) = ctx.input_mut(|i| {
-        (
-            i.consume_key(Modifiers::NONE, Key::ArrowDown),
-            i.consume_key(Modifiers::NONE, Key::ArrowUp),
-            i.consume_key(Modifiers::NONE, Key::Enter),
-            i.consume_key(Modifiers::NONE, Key::Escape),
-        )
-    });
-    let found = matches(&popup.query, candidates, recent);
-    if !found.is_empty() {
-        if down {
-            popup.selected = (popup.selected + 1).min(found.len() - 1);
-        }
-        if up {
-            popup.selected = popup.selected.saturating_sub(1);
-        }
-        popup.selected = popup.selected.min(found.len() - 1);
-        if enter {
-            choice = AddChoice::Add(found[popup.selected].id.clone());
-        }
-    }
-    if escape {
-        choice = AddChoice::Cancel;
-    }
-
-    let area = egui::Area::new(egui::Id::new("fasttick_add_popup"))
-        .order(egui::Order::Foreground)
-        .fixed_pos(popup.pos)
-        .pivot(Align2::LEFT_TOP)
-        .constrain(true)
-        .show(ctx, |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.set_width(WIDTH);
-                ui.label(RichText::new(&popup.title).small().weak());
-                let edit = ui.add(
-                    egui::TextEdit::singleline(&mut popup.query)
-                        .id_salt("fasttick_add_popup_search")
-                        .hint_text("Search node types")
-                        .desired_width(f32::INFINITY),
-                );
-                // The first frame of a new area is a sizing pass, which does
-                // not take the focus: ask until the field has it.
-                if !popup.focused {
-                    // The stored focus, not `has_focus`: that one is false
-                    // while the window itself has no focus.
-                    if ui.ctx().memory(|m| m.focused()) == Some(edit.id) {
-                        popup.focused = true;
-                    } else {
-                        edit.request_focus();
-                        // The focus shows in the next frame: draw it now,
-                        // not at the next input event.
-                        ui.ctx().request_repaint();
-                    }
-                }
-                if edit.changed() {
-                    popup.selected = 0;
-                }
-                ui.add_space(4.0);
-                // The list of this frame uses the query of this frame.
-                let found = matches(&popup.query, candidates, recent);
-                if found.is_empty() {
-                    ui.label(RichText::new("No node type matches the search.").weak());
-                }
-                let selected = popup.selected.min(found.len().saturating_sub(1));
-                egui::ScrollArea::vertical()
-                    .max_height(ROW_HEIGHT * VISIBLE_ROWS as f32)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        for (index, candidate) in found.iter().enumerate() {
-                            let response = row(ui, candidate, index == selected, palette);
-                            if index == selected && (down || up) {
-                                response.scroll_to_me(None);
-                            }
-                            if response.clicked() {
-                                choice = AddChoice::Add(candidate.id.clone());
-                            }
-                        }
-                    });
-                if let Some(candidate) = found.get(selected) {
-                    ui.separator();
-                    let text = candidate
+    let texts = SearchTexts {
+        id: "fasttick_add_popup",
+        title: &popup.title,
+        hint: "Search node types",
+        empty: "No node type matches the search.",
+        footer: "\u{2191} \u{2193} select \u{b7} Enter add \u{b7} Esc close",
+        width: search_list::WIDTH,
+    };
+    let rows = |query: &str| -> Vec<SearchRow<String>> {
+        matches(query, candidates, recent)
+            .into_iter()
+            .map(|candidate| SearchRow {
+                key: candidate.id.clone(),
+                text: candidate.id.clone(),
+                tag: if candidate.builtin {
+                    format!("{} \u{b7} built-in", candidate.kind.tag())
+                } else {
+                    candidate.kind.tag().to_owned()
+                },
+                swatch: Some(palette.category(category_of_kind(candidate.kind))),
+                description: Some(
+                    candidate
                         .description
                         .clone()
-                        .unwrap_or_else(|| format!("{} (no description)", candidate.kind.tag()));
-                    ui.label(RichText::new(text).small());
-                }
-                ui.label(
-                    RichText::new("↑ ↓ select · Enter add · Esc close")
-                        .small()
-                        .weak(),
-                );
-            });
-        });
-    // A click outside closes the popup.
-    let clicked_outside = ctx.input(|i| {
-        i.pointer.any_pressed()
-            && i.pointer
-                .interact_pos()
-                .is_some_and(|p| !area.response.rect.contains(p))
-    });
-    if clicked_outside && choice == AddChoice::Open {
-        choice = AddChoice::Cancel;
-    }
-    choice
-}
-
-/// One row: the category colour, the type ID and the kind.
-fn row(
-    ui: &mut egui::Ui,
-    candidate: &AddCandidate,
-    selected: bool,
-    palette: &CanvasPalette,
-) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
-    let visuals = ui.visuals();
-    if selected {
-        ui.painter().rect(
-            rect,
-            CornerRadius::same(4),
-            visuals.selection.bg_fill,
-            Stroke::new(1.0, visuals.selection.stroke.color),
-            egui::StrokeKind::Inside,
-        );
-    } else if response.hovered() {
-        ui.painter().rect_filled(
-            rect,
-            CornerRadius::same(4),
-            visuals.widgets.hovered.weak_bg_fill,
-        );
-    }
-    let color = palette.category(category_of_kind(candidate.kind));
-    let swatch = egui::Rect::from_center_size(
-        egui::pos2(rect.min.x + 12.0, rect.center().y),
-        egui::vec2(10.0, 10.0),
-    );
-    ui.painter()
-        .rect_filled(swatch, CornerRadius::same(2), color);
-    let text_color = visuals.text_color();
-    ui.painter().text(
-        egui::pos2(rect.min.x + 24.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        &candidate.id,
-        egui::TextStyle::Body.resolve(ui.style()),
-        text_color,
-    );
-    let tag = if candidate.builtin {
-        format!("{} · built-in", candidate.kind.tag())
-    } else {
-        candidate.kind.tag().to_owned()
+                        .unwrap_or_else(|| format!("{} (no description)", candidate.kind.tag())),
+                ),
+            })
+            .collect()
     };
-    ui.painter().text(
-        egui::pos2(rect.max.x - 8.0, rect.center().y),
-        Align2::RIGHT_CENTER,
-        tag,
-        egui::TextStyle::Small.resolve(ui.style()),
-        visuals.weak_text_color(),
-    );
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel,
-            true,
-            selected,
-            &candidate.id,
-        )
-    });
-    response
+    match search_list::show(ctx, &mut popup.search, popup.pos, texts, rows) {
+        SearchChoice::Open => AddChoice::Open,
+        SearchChoice::Cancel => AddChoice::Cancel,
+        SearchChoice::Pick(id) => AddChoice::Add(id),
+    }
 }
 
 #[cfg(test)]

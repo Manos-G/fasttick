@@ -26,6 +26,11 @@ pub const WHATS_NEW: &[(&str, &str)] = &[
          the types that you used last come first.",
     ),
     (
+        "Search commands",
+        "Push Ctrl+Shift+P to find a command, a tree, a recent file or a theme by \
+         its name. Ctrl+P goes to a tree of the document.",
+    ),
+    (
         "Fold large trees",
         "Double-click a node to hide or show the nodes below it.",
     ),
@@ -61,6 +66,10 @@ pub const WHATS_NEW: &[(&str, &str)] = &[
 /// Short tips, as (keys, text).
 const TIPS: &[(&str, &str)] = &[
     ("F1", "Show all keyboard shortcuts."),
+    (
+        "Ctrl+Shift+P",
+        "Find a command, a tree or a theme by its name.",
+    ),
     ("Shift+A", "Add a node to the selected node."),
     ("F", "Fit the tree to the view."),
     ("Ctrl+L", "Change the layout direction."),

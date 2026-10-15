@@ -1,4 +1,4 @@
-//! Fuzzy matching for the search of node types.
+//! Fuzzy matching for the search popups (node types, commands, trees).
 //!
 //! The characters of the query must be in the candidate in the same order,
 //! but not side by side ("rsq" finds `ReactiveSequence`). Case does not
