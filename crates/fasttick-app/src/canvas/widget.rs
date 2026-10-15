@@ -152,6 +152,8 @@ enum PendingView {
     Fit {
         animate: bool,
     },
+    /// Fit the selected nodes (all nodes without a selection).
+    FitSelection,
     Focus {
         id: CanvasNodeId,
         animate: bool,
@@ -493,6 +495,12 @@ impl CanvasState {
         self.pending = Some(PendingView::Fit { animate });
     }
 
+    /// Fits the selected nodes in the view (the whole tree if no node is
+    /// selected), at most at 100 %.
+    pub fn fit_selection(&mut self) {
+        self.pending = Some(PendingView::FitSelection);
+    }
+
     /// Centres the view on a node and selects it. If the zoom is too small
     /// to read the node, the view zooms in to 100 %. Breakpoints use this
     /// to show the node that stopped.
@@ -622,6 +630,15 @@ impl CanvasState {
                     return;
                 }
                 target
+            }
+            PendingView::FitSelection => {
+                let bounds = self
+                    .tree
+                    .selected()
+                    .filter_map(|id| self.layout.rect(id))
+                    .reduce(|a, b| a.union(b))
+                    .unwrap_or(self.layout.bounds);
+                Viewport::fit(bounds, size, viewport::FIT_MARGIN, viewport::FIT_MAX_ZOOM)
             }
             PendingView::Focus { id, animate } => {
                 let Some(rect) = self.layout.rect(id) else {
@@ -3084,6 +3101,41 @@ mod tests {
         small.prepare_with(&mut FixedMeasure(7.0));
         small.size = size;
         assert_eq!(small.min_zoom(), viewport::FIT_MAX_ZOOM);
+    }
+
+    #[test]
+    fn fit_selection_shows_the_selected_nodes() {
+        let size = vec2(800.0, 600.0);
+        let mut state = CanvasState::new(chain_tree(200));
+        state.prepare_with(&mut FixedMeasure(7.0));
+        state.size = size;
+        state.tree.select_only(CanvasNodeId(100));
+        state.tree.set_selected(CanvasNodeId(102), true);
+        state.fit_selection();
+        state.apply_pending(size);
+        let mut now = 0.0;
+        for _ in 0..2 {
+            now += 10.0;
+            state.step_animation(now);
+        }
+        let view = Rect::from_min_size(Pos2::ZERO, size);
+        for id in [100, 102] {
+            let rect = state.layout().rect(CanvasNodeId(id)).unwrap();
+            let screen = state.viewport().rect_to_screen(Pos2::ZERO, rect);
+            assert!(view.contains_rect(screen), "{id}: {screen:?}");
+        }
+        // Not more than 100 %, and much more than the whole tree.
+        assert!(state.viewport().zoom <= viewport::FIT_MAX_ZOOM);
+        assert!(state.viewport().zoom > 2.0 * state.min_zoom());
+        // Without a selection: the whole tree.
+        state.clear_selection();
+        state.fit_selection();
+        state.apply_pending(size);
+        for _ in 0..2 {
+            now += 10.0;
+            state.step_animation(now);
+        }
+        assert!((state.viewport().zoom - state.min_zoom()).abs() < 1e-4);
     }
 
     #[test]

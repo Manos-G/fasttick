@@ -45,6 +45,8 @@ pub enum Command {
     Find,
     /// Show the whole tree.
     FitToView,
+    /// Show the selected nodes.
+    FitSelection,
     /// Zoom in.
     ZoomIn,
     /// Zoom out.
@@ -121,7 +123,7 @@ pub enum Command {
 
 impl Command {
     /// All commands, in help-dialog order.
-    pub const ALL: [Command; 53] = [
+    pub const ALL: [Command; 54] = [
         Command::NewProject,
         Command::OpenFile,
         Command::OpenLog,
@@ -140,6 +142,7 @@ impl Command {
         Command::AddNode,
         Command::Find,
         Command::FitToView,
+        Command::FitSelection,
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomReset,
@@ -197,6 +200,7 @@ impl Command {
             Command::AddNode => "Add node\u{2026}",
             Command::Find => "Find\u{2026}",
             Command::FitToView => "Fit to view",
+            Command::FitSelection => "Fit selection",
             Command::ZoomIn => "Zoom in",
             Command::ZoomOut => "Zoom out",
             Command::ZoomReset => "Zoom to 100 %",
@@ -257,6 +261,7 @@ impl Command {
             | Command::AddNode
             | Command::Find => "Edit",
             Command::FitToView
+            | Command::FitSelection
             | Command::ZoomIn
             | Command::ZoomOut
             | Command::ZoomReset
@@ -361,6 +366,7 @@ impl Default for KeyMap {
                 bind(Command::AddNode, Modifiers::SHIFT, Key::A),
                 bind(Command::Find, cmd, Key::F),
                 bind(Command::FitToView, none, Key::F),
+                bind(Command::FitSelection, Modifiers::SHIFT, Key::F),
                 bind(Command::ZoomIn, cmd, Key::Equals),
                 bind(Command::ZoomIn, cmd, Key::Plus),
                 bind(Command::ZoomOut, cmd, Key::Minus),

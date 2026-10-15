@@ -669,6 +669,7 @@ impl FastTickApp {
             }),
             Command::SelectAll
             | Command::FitToView
+            | Command::FitSelection
             | Command::ZoomIn
             | Command::ZoomOut
             | Command::ZoomReset
@@ -780,6 +781,7 @@ impl FastTickApp {
                 panels::search::request_focus(ctx);
             }
             Command::FitToView => self.with_active_canvas(|c| c.fit_to_view(true)),
+            Command::FitSelection => self.with_active_canvas(|c| c.fit_selection()),
             Command::ZoomIn => self.with_active_canvas(|c| c.zoom_in()),
             Command::ZoomOut => self.with_active_canvas(|c| c.zoom_out()),
             Command::ZoomReset => self.with_active_canvas(|c| c.zoom_reset()),
@@ -2108,6 +2110,7 @@ impl FastTickApp {
             self.menu_item(ui, Command::GoToTree);
             ui.separator();
             self.menu_item(ui, Command::FitToView);
+            self.menu_item(ui, Command::FitSelection);
             self.menu_item(ui, Command::ZoomIn);
             self.menu_item(ui, Command::ZoomOut);
             self.menu_item(ui, Command::ZoomReset);
