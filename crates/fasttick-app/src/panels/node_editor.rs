@@ -160,19 +160,21 @@ pub fn show(
         })
         .strong(),
     );
-    let tree_keys = element
+    let subtree_keys = element
         .subtree_id()
         .map(|tree_id| editor.project().tree_keys(file_id, tree_id))
         .unwrap_or_default();
-    ports(
-        ui,
-        &element,
-        model,
-        &tree_keys,
-        node,
-        &node_problems,
-        &mut edit,
-    );
+    // The keys of the tree of the node, for the key menu of each port.
+    let local_keys = editor
+        .tree_of_node(file_id, node)
+        .and_then(|index| editor.tree_id(index))
+        .map(|tree_id| editor.project().tree_keys(file_id, &tree_id))
+        .unwrap_or_default();
+    let keys = Keys {
+        subtree: &subtree_keys,
+        local: &local_keys,
+    };
+    ports(ui, &element, model, keys, node, &node_problems, &mut edit);
 
     // Conditions.
     ui.add_space(8.0);
@@ -384,11 +386,20 @@ fn type_combo(
 
 /// The rows of the ports: the ports of the model first (in model order),
 /// then the other port attributes of the element.
+/// Blackboard keys for the port fields.
+#[derive(Clone, Copy)]
+struct Keys<'a> {
+    /// For a SubTree node: the keys of its tree, which it can connect.
+    subtree: &'a [String],
+    /// The keys of the tree of the node, for the key menus.
+    local: &'a [String],
+}
+
 fn ports(
     ui: &mut Ui,
     element: &NodeView<'_>,
     model: Option<(&NodeModel, ModelSource)>,
-    tree_keys: &[String],
+    keys: Keys<'_>,
     node: NodeId,
     problems: &[&Problem],
     edit: &mut dyn FnMut(EditOp),
@@ -397,6 +408,7 @@ fn ports(
     let declared =
         model.is_some_and(|(_, source)| !matches!(source, ModelSource::InferredSubTree(_)));
     let model = model.map(|(m, _)| m);
+    let tree_keys = keys.subtree;
     let model_ports = model.map(|m| m.ports.as_slice()).unwrap_or_default();
     let extra: Vec<(String, String)> = element
         .attributes()
@@ -427,7 +439,7 @@ fn ports(
             tip.push_str(&format!(".\n{description}"));
         }
         let value = element.attribute(&port.name);
-        let label_id = port_header(ui, node, &port.name, value, edit, |ui| {
+        let label_id = port_header(ui, node, &port.name, value, keys.local, edit, |ui| {
             ui.label(RichText::new(direction_tag(port.direction)).small().weak())
                 .on_hover_text(direction_text(port.direction));
             let id = ui.label(label).on_hover_text(&tip).id;
@@ -455,7 +467,7 @@ fn ports(
         ui.add_space(6.0);
     }
     for (name, value) in &extra {
-        let label_id = port_header(ui, node, name, Some(value), edit, |ui| {
+        let label_id = port_header(ui, node, name, Some(value), keys.local, edit, |ui| {
             let id = ui.label(RichText::new(name).monospace()).id;
             if tree_keys.contains(name) {
                 ui.label(RichText::new("key of the tree").small().weak());
@@ -475,7 +487,7 @@ fn ports(
         if element.attribute(key).is_some() || model.is_some_and(|m| m.port(key).is_some()) {
             continue;
         }
-        let label_id = port_header(ui, node, key, None, edit, |ui| {
+        let label_id = port_header(ui, node, key, None, keys.local, edit, |ui| {
             let id = ui.label(RichText::new(key).monospace()).id;
             ui.label(RichText::new("key of the tree").small().weak())
                 .on_hover_text(
@@ -503,6 +515,7 @@ fn port_header(
     node: NodeId,
     port: &str,
     value: Option<&str>,
+    keys: &[String],
     edit: &mut dyn FnMut(EditOp),
     name_ui: impl FnOnce(&mut Ui) -> egui::Id,
 ) -> egui::Id {
@@ -536,6 +549,36 @@ fn port_header(
                     port: port.to_owned(),
                     value: Some(toggle_reference(current, port)),
                 });
+            }
+            if !keys.is_empty() {
+                let menu = ui
+                    .menu_button(RichText::new("keys").small(), |ui| {
+                        ui.label(RichText::new("Keys of this tree").small().weak());
+                        egui::ScrollArea::vertical()
+                            .max_height(280.0)
+                            .show(ui, |ui| {
+                                for key in keys {
+                                    let text = format!("{{{key}}}");
+                                    let selected = current.trim() == text;
+                                    if ui
+                                        .add(egui::Button::selectable(
+                                            selected,
+                                            RichText::new(&text).monospace(),
+                                        ))
+                                        .clicked()
+                                    {
+                                        edit(EditOp::SetPort {
+                                            node,
+                                            port: port.to_owned(),
+                                            value: Some(text),
+                                        });
+                                        ui.close();
+                                    }
+                                }
+                            });
+                    })
+                    .response;
+                menu.on_hover_text("Use a blackboard key that the tree uses");
             }
         });
         id

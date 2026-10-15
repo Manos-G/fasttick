@@ -1208,3 +1208,23 @@ fn double_click_folds_and_unfolds_the_children() {
         ["check_blocked", "check_flag"]
     );
 }
+
+#[test]
+fn the_key_menu_sets_a_blackboard_key_of_the_tree() {
+    let mut harness = harness();
+    select(&mut harness, "check_flag");
+    let keys = harness.query_all_by_label("keys").count();
+    assert_eq!(keys, 1, "one port, one key menu");
+    harness.get_by_label("keys").click();
+    harness.run();
+    // The tree uses these keys, among others.
+    harness.get_by_label("{flag}");
+    harness.get_by_label("{a_vector}");
+    harness.get_by_label("{blocked}").click();
+    harness.run();
+    assert!(
+        xml(&harness).contains(r#"<CheckFlag name="check_flag" flag="{blocked}"/>"#),
+        "{}",
+        xml(&harness)
+    );
+}
