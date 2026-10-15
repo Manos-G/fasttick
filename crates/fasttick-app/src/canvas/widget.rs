@@ -157,6 +157,10 @@ const SLOT_PORT: u64 = 2; // .. 2 + MAX_PORT_LINES
 const SLOT_MORE: u64 = 8;
 const SLOT_CHIP: u64 = 9;
 const SLOT_TAG: u64 = 10;
+const SLOT_LABEL_SMALL: u64 = 11;
+
+/// The smallest label size (screen points) at [`Detail::Labels`].
+const LABEL_MIN_PX: f32 = 9.5;
 
 impl GalleyCache {
     fn prepare(&mut self, bucket: i32, palette_key: u64) {
@@ -1099,7 +1103,7 @@ fn paint_canvas(
         shapes.push(Shape::rect_stroke(
             rect.shrink(1.0),
             CornerRadius::ZERO,
-            Stroke::new(1.0, palette.accent.gamma_multiply(0.6)),
+            Stroke::new(1.0, palette.accent.gamma_multiply(0.35)),
             StrokeKind::Inside,
         ));
     }
@@ -1257,8 +1261,8 @@ fn paint_card(
 
     if detail == Detail::Boxes {
         let fill = match status_color {
-            Some(color) => mix(palette.card, color, 0.55),
-            None => mix(palette.card, category_color, 0.28),
+            Some(color) => mix(palette.card, color, 0.7),
+            None => mix(palette.card, category_color, 0.42),
         };
         shapes.push(Shape::rect_filled(screen, r, fill));
         let band_width = card::BAND * zoom;
@@ -1368,18 +1372,35 @@ fn paint_card(
     let label_line = card::LABEL_LINE * zoom;
     let has_type = node.card.type_line.is_some();
     {
-        let label = state.galleys.get(index, SLOT_LABEL, || {
-            painter.layout_job(LayoutJob::simple_singleline(
-                node.card.label.clone(),
-                font_for(TextKind::Label, card::LABEL_SIZE * text_zoom),
-                text_color,
-            ))
-        });
-        let mut pos = local(geometry.label_pos(has_type && detail == Detail::Full));
-        if !has_type || detail != Detail::Full {
-            pos = local(geometry.label_pos(false));
-        }
-        pos.y += (label_line - label.size().y) * 0.5;
+        let label = if detail == Detail::Full {
+            state.galleys.get(index, SLOT_LABEL, || {
+                painter.layout_job(LayoutJob::simple_singleline(
+                    node.card.label.clone(),
+                    font_for(TextKind::Label, card::LABEL_SIZE * text_zoom),
+                    text_color,
+                ))
+            })
+        } else {
+            // Small cards: a readable minimum size, cut to the free width.
+            let size = (card::LABEL_SIZE * text_zoom).max(LABEL_MIN_PX);
+            let free = (node.card.size.x - card::TEXT_LEFT - card::PAD_X - card::BADGE - 2.0) * zoom;
+            state.galleys.get(index, SLOT_LABEL_SMALL, || {
+                let mut job = LayoutJob::simple_singleline(
+                    node.label.clone(),
+                    font_for(TextKind::Label, size),
+                    text_color,
+                );
+                job.wrap = egui::text::TextWrapping::truncate_at_width(free.max(1.0));
+                painter.layout_job(job)
+            })
+        };
+        let pos = if detail == Detail::Full && has_type {
+            local(geometry.label_pos(true))
+        } else {
+            local(geometry.label_pos(false))
+        };
+        // Centre the text on its line.
+        let pos = pos + vec2(0.0, (label_line - label.size().y) * 0.5);
         shapes.push(Shape::galley(snap(pos, ppp), label, text_color));
     }
     if detail == Detail::Full {
@@ -1448,6 +1469,32 @@ fn paint_card(
                 pos.y += (card::PORT_LINE * zoom - galley.size().y) * 0.5;
                 shapes.push(Shape::galley(snap(pos, ppp), galley, weak));
             }
+        }
+    }
+
+    // Small cards: grey bars stand for the port lines.
+    if detail == Detail::Labels && geometry.port_lines > 0 {
+        let bar_color = palette.separator.gamma_multiply(alpha);
+        let y = local(pos2(0.0, geometry.separator_y())).y;
+        shapes.push(Shape::hline(
+            (screen.min.x + card::BAND * zoom)..=(screen.max.x - 1.0),
+            y,
+            Stroke::new(1.0, bar_color),
+        ));
+        let max_bar = (node.card.size.x - card::BAND - 2.0 * card::PAD_X) * zoom;
+        for line in 0..geometry.port_lines {
+            let chars = node
+                .card
+                .ports
+                .get(line)
+                .map_or(8, |(name, value)| name.chars().count() + value.chars().count() + 2);
+            let width = (chars as f32 * 6.0 * zoom).min(max_bar);
+            let top = local(geometry.port_pos(line));
+            let bar = Rect::from_min_size(
+                pos2(top.x, top.y + card::PORT_LINE * zoom * 0.3),
+                vec2(width, (card::PORT_LINE * zoom * 0.4).max(1.0)),
+            );
+            shapes.push(Shape::rect_filled(bar, radius(2.0), bar_color));
         }
     }
 
