@@ -45,6 +45,17 @@ enum MainTree<'a> {
     None,
 }
 
+/// The result of the check of the root element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RootState {
+    /// The document has no root element.
+    Missing,
+    /// The root element is not the one that BT.CPP expects.
+    Wrong,
+    /// The root element is correct.
+    Correct,
+}
+
 /// The state of the walk through one tree (or one unconnected node).
 struct TreeState<'a> {
     /// The tree ID.
@@ -124,13 +135,18 @@ impl<'c, 'p> FileChecker<'c, 'p> {
 
     pub(super) fn run(mut self) {
         let is_models_file = self.is_models_file();
-        if !self.check_root(is_models_file) {
+        let root = self.check_root(is_models_file);
+        if root == RootState::Missing {
             self.check_unconnected();
             return;
         }
         self.check_includes();
         self.check_models();
-        self.check_other_elements();
+        // The children of a wrong root element (for example of a ROS
+        // package.xml) are not BT.CPP elements: one problem is sufficient.
+        if root == RootState::Correct {
+            self.check_other_elements();
+        }
         let main = self.main_tree();
         if !is_models_file {
             self.check_main_tree(main);
@@ -149,9 +165,8 @@ impl<'c, 'p> FileChecker<'c, 'p> {
     // File level
     // ----------------------------------------------------------------
 
-    /// Checks the root element and `BTCPP_format`. Returns false if the
-    /// document has no root element.
-    fn check_root(&mut self, is_models_file: bool) -> bool {
+    /// Checks the root element and `BTCPP_format`.
+    fn check_root(&mut self, is_models_file: bool) -> RootState {
         let Some(root) = self.bt.index().root else {
             self.push(
                 Severity::Error,
@@ -163,12 +178,17 @@ impl<'c, 'p> FileChecker<'c, 'p> {
                  Add a <root BTCPP_format=\"4\"> element."
                     .to_owned(),
             );
-            return false;
+            return RootState::Missing;
         };
         self.check_amp_attributes(root, None);
         let name = self.doc.name(root).unwrap_or_default();
         if is_models_file {
-            if name != "root" && name != "TreeNodesModel" {
+            let state = if name == "root" || name == "TreeNodesModel" {
+                RootState::Correct
+            } else {
+                RootState::Wrong
+            };
+            if state == RootState::Wrong {
                 self.push(
                     Severity::Error,
                     ProblemCode::RootElement,
@@ -192,7 +212,7 @@ impl<'c, 'p> FileChecker<'c, 'p> {
                         .to_owned(),
                 );
             }
-            return true;
+            return state;
         }
         if name != "root" {
             // VerifyXML: "The XML must have a root node called <root>".
@@ -207,7 +227,7 @@ impl<'c, 'p> FileChecker<'c, 'p> {
                      element. Rename the element to <root>."
                 ),
             );
-            return true;
+            return RootState::Wrong;
         }
         // loadDocImpl prints a warning when BTCPP_format is missing.
         match self.bt.index().format.as_deref() {
@@ -235,7 +255,7 @@ impl<'c, 'p> FileChecker<'c, 'p> {
                 ),
             ),
         }
-        true
+        RootState::Correct
     }
 
     fn check_includes(&mut self) {

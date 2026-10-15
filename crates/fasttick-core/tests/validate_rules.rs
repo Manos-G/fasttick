@@ -920,6 +920,22 @@ fn a_document_without_a_root_element() {
 }
 
 #[test]
+fn a_wrong_root_element_gives_one_problem() {
+    // For example a ROS package manifest: the children are not checked.
+    let found = problems(
+        "<?xml version=\"1.0\"?>\n<package format=\"3\"><name>x</name><depend>y</depend></package>",
+    );
+    assert_eq!(found.len(), 1, "{}", show(&found));
+    assert_eq!(found[0].code, C::RootElement);
+    assert_eq!(found[0].severity, Error);
+    assert!(
+        found[0].message.contains("<package>"),
+        "{}",
+        found[0].message
+    );
+}
+
+#[test]
 fn unknown_type_messages() {
     let found = problems("<Sequence><SayMesage/><Action ID=\"Nope\"/></Sequence>");
     let unknown = with_code(&found, C::UnknownNodeType);

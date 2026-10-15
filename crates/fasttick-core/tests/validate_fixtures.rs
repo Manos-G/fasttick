@@ -215,3 +215,27 @@ fn fixture_messages_are_sentences() {
         println!("{severity:7} {code:22} {n}");
     }
 }
+
+/// The trees of the test executor (`test_harness/trees`) with the models of
+/// the executor give no problem at all.
+#[test]
+fn harness_trees_have_no_problems() {
+    let trees = workspace().join("test_harness/trees");
+    let mut checked = 0;
+    for name in ["main.xml", "include_main.xml", "long_running.xml"] {
+        let (project, problems) = validate_fixture(&trees.join(name));
+        assert!(
+            problems.is_empty(),
+            "{name}:\n{}",
+            problems
+                .iter()
+                .map(|p| describe(&project, p))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        checked += project.files().count();
+    }
+    // The three files, the included file and the model file of each
+    // project.
+    assert_eq!(checked, 7);
+}
