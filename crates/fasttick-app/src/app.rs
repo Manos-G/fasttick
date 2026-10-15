@@ -906,6 +906,14 @@ impl FastTickApp {
                                 self.jobs.save_text(ctx, path, text);
                             }
                         }
+                        DialogPurpose::SaveRecording => {
+                            self.save_recording_to(ctx, path);
+                        }
+                        DialogPurpose::SaveBreakpoints => self.save_breakpoints_to(ctx, path),
+                        DialogPurpose::LoadBreakpoints => self.jobs.load_breakpoints(ctx, path),
+                        DialogPurpose::ExportTransitions(format) => {
+                            self.export_transitions_to(ctx, path, format);
+                        }
                     }
                 }
                 JobResult::Tree { path, result } => match result {
@@ -921,9 +929,13 @@ impl FastTickApp {
                         );
                     }
                 },
-                JobResult::Log { path, result } => match result {
+                JobResult::Log {
+                    path,
+                    session,
+                    result,
+                } => match result {
                     Ok(loaded) => {
-                        self.add_log_document(&path, *loaded);
+                        self.add_log_document(&path, session, *loaded);
                     }
                     Err(message) => {
                         self.settings.remove_recent(&path);
@@ -944,81 +956,172 @@ impl FastTickApp {
                         format!("Cannot save {}: {message}", path.display()),
                     ),
                 },
+                JobResult::SqliteSessions { path, result } => match result {
+                    Ok(sessions) if sessions.is_empty() => self.notify(
+                        ctx,
+                        NoticeLevel::Warning,
+                        format!("{} has no sessions.", path.display()),
+                    ),
+                    Ok(sessions) => {
+                        let selected = sessions.len() - 1;
+                        self.sqlite_picker = Some(SqlitePicker {
+                            path,
+                            sessions,
+                            selected,
+                        });
+                    }
+                    Err(message) => {
+                        self.settings.remove_recent(&path);
+                        self.notify(
+                            ctx,
+                            NoticeLevel::Error,
+                            format!("Cannot open {}: {message}", path.display()),
+                        );
+                    }
+                },
+                JobResult::RecordingSaved { path, result } => match result {
+                    Ok(count) => {
+                        self.settings.add_recent(&path);
+                        self.notify_with_action(
+                            ctx,
+                            NoticeLevel::Info,
+                            format!("Saved {count} transitions to {}.", path.display()),
+                            "Open in replay",
+                            AppAction::OpenPath(path),
+                        );
+                    }
+                    Err(message) => self.notify(
+                        ctx,
+                        NoticeLevel::Error,
+                        format!("Cannot save the recording to {}: {message}", path.display()),
+                    ),
+                },
+                JobResult::Exported { path, result } => match result {
+                    Ok(count) => self.notify(
+                        ctx,
+                        NoticeLevel::Info,
+                        format!("Exported {count} transitions to {}.", path.display()),
+                    ),
+                    Err(message) => self.notify(
+                        ctx,
+                        NoticeLevel::Error,
+                        format!("Cannot export to {}: {message}", path.display()),
+                    ),
+                },
+                JobResult::BreakpointsSaved { path, result } => match result {
+                    Ok(()) => self.notify(
+                        ctx,
+                        NoticeLevel::Info,
+                        format!("Saved the breakpoints to {}.", path.display()),
+                    ),
+                    Err(message) => self.notify(
+                        ctx,
+                        NoticeLevel::Error,
+                        format!("Cannot save {}: {message}", path.display()),
+                    ),
+                },
+                JobResult::BreakpointsLoaded { path, result } => match result {
+                    Ok(set) => self.prepare_breakpoints(ctx, path, set),
+                    Err(message) => self.notify(
+                        ctx,
+                        NoticeLevel::Error,
+                        format!("Cannot read {}: {message}", path.display()),
+                    ),
+                },
             }
         }
     }
 
     fn handle_live(&mut self, ctx: &egui::Context) {
-        for event in self.live.poll() {
-            match event {
-                SessionEvent::Tree { tree, .. } => {
-                    let endpoint = self.live.endpoint_text().unwrap_or_default();
-                    match self.live_doc.filter(|d| self.workspace.doc(*d).is_some()) {
-                        Some(doc) => {
-                            self.workspace.replace_runtime(doc, tree);
-                            if let Some(document) = self.workspace.doc_mut(doc) {
-                                document.kind = DocKind::Live { endpoint };
-                            }
-                        }
-                        None => {
-                            let doc = self.workspace.add_doc(
-                                DocKind::Live { endpoint },
-                                "Live",
-                                tree,
-                                None,
-                            );
-                            self.live_doc = Some(doc);
-                            if let Some(view) =
-                                self.workspace
-                                    .open_view(doc, InstanceIndex(0), self.view_options())
-                            {
-                                dock::add_document(
-                                    &mut self.docks[Mode::Live.index()],
-                                    Tab::Document(view),
-                                );
-                                if self.mode == Mode::Live {
-                                    self.workspace.active_view = Some(view);
-                                }
-                            }
-                        }
-                    }
-                }
-                SessionEvent::Status { snapshot } => {
-                    if let Some(doc) = self.live_doc {
-                        self.workspace.for_each_tree(doc, |tree| {
-                            for entry in &snapshot.entries {
-                                tree.set_status(entry.uid, entry.current, entry.previous);
-                            }
-                        });
-                    }
-                }
-                SessionEvent::BreakpointReached { uid } => {
-                    if self.settings.auto_focus_on_breakpoint
-                        && let Some(doc) = self.live_doc
-                    {
-                        let views: Vec<ViewId> =
-                            self.workspace.views_of(doc).map(|v| v.id).collect();
-                        for view in views {
-                            if let Some(v) = self.workspace.view_mut(view)
-                                && let Some(id) = v.canvas.tree().find_uid(uid)
-                            {
-                                v.canvas.focus_on(id, true);
-                            }
-                        }
-                    }
-                }
-                SessionEvent::ExecutorRestarted { .. } => {
-                    self.notify(
-                        ctx,
-                        NoticeLevel::Info,
-                        "The executor restarted. FastTick reads its tree again.",
-                    );
-                }
-                SessionEvent::Error(message) => {
-                    self.notify(ctx, NoticeLevel::Error, message);
-                }
-                _ => {}
+        for update in self.live.poll() {
+            match update {
+                LiveUpdate::Tree(tree) => self.show_live_tree(tree),
+                LiveUpdate::Stopped(uid) => self.on_breakpoint(ctx, uid),
+                LiveUpdate::Notice(level, text) => self.notify(ctx, level, text),
             }
+        }
+        if self.live.is_active() {
+            // The controller reads the hook list of the executor now and
+            // then; it needs a frame for that.
+            ctx.request_repaint_after(crate::live::HOOK_DUMP_INTERVAL);
+        }
+    }
+
+    fn show_live_tree(&mut self, tree: Arc<fasttick_core::runtime::RuntimeTree>) {
+        let endpoint = self.live.endpoint_text().unwrap_or_default();
+        match self.live_doc.filter(|d| self.workspace.doc(*d).is_some()) {
+            Some(doc) => {
+                let same = self
+                    .workspace
+                    .doc(doc)
+                    .is_some_and(|d| d.runtime.xml == tree.xml);
+                if !same {
+                    self.workspace.replace_runtime(doc, tree);
+                }
+                if let Some(document) = self.workspace.doc_mut(doc) {
+                    document.kind = DocKind::Live { endpoint };
+                }
+            }
+            None => {
+                let doc = self
+                    .workspace
+                    .add_doc(DocKind::Live { endpoint }, "Live", tree, None);
+                self.live_doc = Some(doc);
+                if let Some(view) =
+                    self.workspace
+                        .open_view(doc, InstanceIndex(0), self.view_options())
+                {
+                    dock::add_document(&mut self.docks[Mode::Live.index()], Tab::Document(view));
+                    if self.mode == Mode::Live {
+                        self.workspace.active_view = Some(view);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The executor stopped at a breakpoint: show the node, unless the user
+    /// turned this off.
+    fn on_breakpoint(&mut self, ctx: &egui::Context, uid: Uid) {
+        if self.settings.auto_focus_on_breakpoint
+            && let Some(doc) = self.live_doc
+        {
+            self.reveal_node(doc, uid);
+        }
+        if self.mode != Mode::Live {
+            let name = self
+                .live
+                .node_text(uid)
+                .map_or_else(|| format!("UID {}", uid.0), |(name, _)| name);
+            self.notify_with_action(
+                ctx,
+                NoticeLevel::Info,
+                format!("The executor stopped before {name}."),
+                "Show",
+                AppAction::Command(Command::ModeLive),
+            );
+        }
+    }
+
+    /// Moves the playback of the replay documents forward.
+    fn handle_replay(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|i| i.time);
+        let ids: Vec<DocId> = self
+            .workspace
+            .docs()
+            .iter()
+            .filter(|d| d.replay.is_some())
+            .map(|d| d.id)
+            .collect();
+        let mut playing = false;
+        for doc in ids {
+            if let Some(model) = self.workspace.replay_mut(doc) {
+                model.advance(now);
+                playing |= model.cursor().is_playing();
+            }
+        }
+        if playing {
+            ctx.request_repaint();
         }
     }
 
@@ -1047,9 +1150,12 @@ impl FastTickApp {
                 AppAction::RevealInstance(view, instance) => {
                     self.workspace.reveal_instance(view, instance);
                 }
+                AppAction::RevealNode(doc, uid) => self.reveal_node(doc, uid),
                 AppAction::Connect { host, port } => self.connect(ctx, host, port),
-                AppAction::SetReplayPosition(doc, position) => {
-                    self.workspace.set_replay_position(doc, position);
+                AppAction::PickFile(purpose) => {
+                    if !self.jobs.dialog_open() {
+                        self.pick_file(ctx, purpose);
+                    }
                 }
                 AppAction::ClearRecent => self.settings.recent.clear(),
             }
@@ -1064,6 +1170,7 @@ impl FastTickApp {
         let ctx = ui.ctx().clone();
         self.handle_jobs(&ctx);
         self.handle_live(&ctx);
+        self.handle_replay(&ctx);
 
         let commands = self.keymap.consume(&ctx, |c| self.is_enabled(c));
         for command in commands {
@@ -1089,12 +1196,44 @@ impl FastTickApp {
                     .fill(ui.visuals().panel_fill)
                     .inner_margin(4),
             )
-            .show(ui, |ui| self.dock_area(ui, &palette));
+            .show(ui, |ui| {
+                if self.mode == Mode::Live {
+                    self.live_header(ui, &palette);
+                }
+                self.dock_area(ui, &palette);
+            });
 
         self.dialogs(&ctx, &palette);
-        dialogs::notices(&ctx, &mut self.notices);
+        if let Some(action) = dialogs::notices(&ctx, &mut self.notices) {
+            self.actions.push(action);
+        }
         self.handle_actions(&ctx);
         self.update_title(&ctx);
+    }
+
+    /// The live bar and the breakpoint banner, above the dock of live mode.
+    fn live_header(&mut self, ui: &mut Ui, palette: &CanvasPalette) {
+        let mut cx = PanelContext {
+            mode: self.mode,
+            workspace: &mut self.workspace,
+            settings: &mut self.settings,
+            live: &mut self.live,
+            live_doc: self.live_doc,
+            loading: self.jobs.loading(),
+            keymap: &self.keymap,
+            palette,
+            actions: &mut self.actions,
+        };
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(6, 4))
+            .show(ui, |ui| {
+                live_bar::show_bar(ui, &mut cx);
+                if !cx.live.hits().is_empty() {
+                    ui.add_space(4.0);
+                    live_bar::show_banner(ui, &mut cx);
+                }
+            });
+        ui.add_space(2.0);
     }
 
     fn update_title(&mut self, ctx: &egui::Context) {
@@ -1119,7 +1258,7 @@ impl FastTickApp {
         let full = ui.available_rect_before_wrap();
         let full = egui::Rect::from_min_size(full.min, egui::vec2(full.width(), height));
         ui.allocate_rect(full, egui::Sense::hover());
-        let left = egui::Rect::from_min_max(full.min, egui::pos2(full.min.x + 300.0, full.max.y));
+        let left = egui::Rect::from_min_max(full.min, egui::pos2(full.min.x + 380.0, full.max.y));
         ui.scope_builder(
             egui::UiBuilder::new()
                 .max_rect(left)
@@ -1360,10 +1499,34 @@ impl FastTickApp {
             self.menu_item(ui, Command::Connect);
             self.menu_item(ui, Command::Disconnect);
             ui.separator();
+            self.menu_item(ui, Command::ToggleBreakpoint);
+            self.menu_item(ui, Command::Continue);
+            ui.add_enabled(false, egui::Button::new("Breakpoint after the node"))
+                .on_disabled_hover_text(AFTER_BREAKPOINT_UNAVAILABLE);
+            ui.separator();
+            self.menu_item(ui, Command::ToggleRecording);
+            self.menu_item(ui, Command::SaveRecording);
+            ui.separator();
+            self.menu_item(ui, Command::SaveBreakpoints);
+            self.menu_item(ui, Command::LoadBreakpoints);
+            ui.separator();
             ui.checkbox(
                 &mut self.settings.auto_focus_on_breakpoint,
                 "Show the node at a breakpoint",
             );
+        });
+        ui.menu_button("Replay", |ui| {
+            self.menu_item(ui, Command::OpenLog);
+            ui.separator();
+            self.menu_item(ui, Command::PlayPause);
+            self.menu_item(ui, Command::StepBack);
+            self.menu_item(ui, Command::StepForward);
+            self.menu_item(ui, Command::GoToStart);
+            self.menu_item(ui, Command::GoToEnd);
+            self.menu_item(ui, Command::ResetTimelineZoom);
+            ui.separator();
+            self.menu_item(ui, Command::ExportJson);
+            self.menu_item(ui, Command::ExportCsv);
         });
         ui.menu_button("Help", |ui| {
             self.menu_item(ui, Command::ShowShortcuts);
@@ -1392,7 +1555,7 @@ impl FastTickApp {
             match doc {
                 Some(doc) => {
                     let text = match &doc.kind {
-                        DocKind::TreeFile { path } | DocKind::Replay { path } => {
+                        DocKind::TreeFile { path } | DocKind::Replay { path, .. } => {
                             path.display().to_string()
                         }
                         DocKind::Live { endpoint } => format!("Live tree from {endpoint}"),
@@ -1403,10 +1566,36 @@ impl FastTickApp {
                     ui.label(small("No document".to_owned()).weak());
                 }
             }
-            if self.jobs.running() > 0 {
+            if let Some(loading) = self.jobs.loading().first() {
                 ui.separator();
                 ui.spinner();
-                ui.label(small("Loading".to_owned()));
+                let name = file_name(&loading.path);
+                let text = match loading.progress.phase() {
+                    crate::jobs::LoadPhase::Reading => format!(
+                        "Loading {name} ({:.0} %)",
+                        loading.progress.fraction() * 100.0
+                    ),
+                    crate::jobs::LoadPhase::Indexing => format!("Indexing {name}"),
+                };
+                ui.label(small(text));
+                ctx_repaint_soon(ui);
+            } else if self.jobs.running() > 0 && !self.jobs.dialog_open() {
+                ui.separator();
+                ui.spinner();
+                ui.label(small("Working".to_owned()));
+            }
+            if self.live.recording().is_active() {
+                ui.separator();
+                widgets::status_dot(ui, palette.breakpoint);
+                ui.label(small(format!(
+                    "Recording ({} transitions)",
+                    self.live.recording().len()
+                )));
+            }
+            if !self.live.hits().is_empty() {
+                ui.separator();
+                widgets::status_dot(ui, palette.breakpoint);
+                ui.label(small("Stopped at a breakpoint".to_owned()));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(view) = active.and_then(|v| self.workspace.view(v)) {
@@ -1448,8 +1637,9 @@ impl FastTickApp {
             mode,
             workspace: &mut self.workspace,
             settings: &mut self.settings,
-            live: &self.live,
+            live: &mut self.live,
             live_doc: self.live_doc,
+            loading: self.jobs.loading(),
             keymap: &self.keymap,
             palette,
             actions: &mut self.actions,
@@ -1477,6 +1667,8 @@ impl FastTickApp {
         if self.show_shortcuts {
             self.show_shortcuts = dialogs::shortcuts(ctx, &self.keymap);
         }
+        self.breakpoint_dialog(ctx);
+        self.sqlite_dialog(ctx);
         if let Some(form) = &mut self.connect_form {
             match dialogs::connect(ctx, form) {
                 ConnectChoice::Open => {}
@@ -1494,6 +1686,200 @@ impl FastTickApp {
             }
         }
     }
+}
+
+impl FastTickApp {
+    /// The dialog that shows a loaded breakpoint file before the hooks go
+    /// to the executor.
+    fn breakpoint_dialog(&mut self, ctx: &egui::Context) {
+        let Some(pending) = &mut self.pending_breakpoints else {
+            return;
+        };
+        let mut open = true;
+        let mut insert = false;
+        let mut cancel = false;
+        let palette = CanvasPalette::for_theme(ctx.theme());
+        egui::Window::new("Load breakpoints")
+            .collapsible(false)
+            .resizable(true)
+            .default_width(560.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, -40.0])
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "{}: {} breakpoints. FastTick looked for each node in the running \
+                     tree by its path.",
+                    file_name(&pending.path),
+                    pending.set.breakpoints.len()
+                ));
+                ui.add_space(6.0);
+                egui::ScrollArea::vertical()
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        egui::Grid::new("pending_breakpoints")
+                            .num_columns(3)
+                            .spacing([10.0, 6.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                for (row, resolved) in pending.resolved.iter().enumerate() {
+                                    let Some(breakpoint) =
+                                        pending.set.breakpoints.get(resolved.index)
+                                    else {
+                                        continue;
+                                    };
+                                    let found = resolved.uid.is_some();
+                                    let path = if breakpoint.node_path.is_empty() {
+                                        "(no path)".to_owned()
+                                    } else {
+                                        breakpoint.node_path.clone()
+                                    };
+                                    ui.add_enabled(
+                                        found,
+                                        egui::Checkbox::new(&mut pending.chosen[row], path),
+                                    );
+                                    ui.label(match (breakpoint.mode, breakpoint.desired_status) {
+                                        (HookMode::Breakpoint, _) => "Breakpoint".to_owned(),
+                                        (HookMode::Replace, status) => format!("Force {status}"),
+                                    });
+                                    let (text, color) = resolution_text(resolved, breakpoint.uid);
+                                    let color = match color {
+                                        ResolutionColor::Good => palette.success,
+                                        ResolutionColor::Warning => ui.visuals().warn_fg_color,
+                                        ResolutionColor::Bad => ui.visuals().error_fg_color,
+                                    };
+                                    ui.label(RichText::new(text).color(color));
+                                    ui.end_row();
+                                }
+                            });
+                    });
+                ui.add_space(8.0);
+                let count = pending
+                    .resolved
+                    .iter()
+                    .zip(&pending.chosen)
+                    .filter(|(r, c)| **c && r.uid.is_some())
+                    .count();
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            count > 0,
+                            egui::Button::new(
+                                RichText::new(format!("Insert {count} hooks")).strong(),
+                            ),
+                        )
+                        .clicked()
+                    {
+                        insert = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if insert {
+            let count = self.apply_pending_breakpoints();
+            self.notify(
+                ctx,
+                NoticeLevel::Info,
+                format!("Inserted {count} hooks from the breakpoint file."),
+            );
+        } else if cancel || !open {
+            self.pending_breakpoints = None;
+        }
+    }
+
+    /// The dialog that picks one session of a SQLite log.
+    fn sqlite_dialog(&mut self, ctx: &egui::Context) {
+        let Some(picker) = &mut self.sqlite_picker else {
+            return;
+        };
+        let mut open = true;
+        let mut choice = None;
+        let mut cancel = false;
+        egui::Window::new("Choose a session")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, -40.0])
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "{} has {} sessions. Each session is one run of the tree.",
+                    file_name(&picker.path),
+                    picker.sessions.len()
+                ));
+                ui.add_space(6.0);
+                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    for (index, session) in picker.sessions.iter().enumerate() {
+                        let text = format!(
+                            "Session {}   {}   {} transitions",
+                            session.id, session.date, session.transition_count
+                        );
+                        let response =
+                            ui.add(egui::Button::selectable(picker.selected == index, text));
+                        if response.clicked() {
+                            picker.selected = index;
+                        }
+                        if response.double_clicked() {
+                            choice = Some(session.id);
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(RichText::new("Open").strong()).clicked() {
+                        choice = picker.sessions.get(picker.selected).map(|s| s.id);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if let Some(id) = choice {
+            let path = picker.path.clone();
+            self.sqlite_picker = None;
+            if let Some(view) = self.find_open_view(&path, Some(id)) {
+                self.focus_view(view);
+            } else {
+                self.jobs.load_sqlite_session(ctx, path, id);
+            }
+        } else if cancel || !open {
+            self.sqlite_picker = None;
+        }
+    }
+}
+
+/// How good a breakpoint resolution is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolutionColor {
+    Good,
+    Warning,
+    Bad,
+}
+
+/// The text that explains how a breakpoint of a file was found.
+fn resolution_text(resolved: &ResolvedBreakpoint, stored: Option<u16>) -> (String, ResolutionColor) {
+    match resolved.resolution {
+        Resolution::ByPath => ("Found by path".to_owned(), ResolutionColor::Good),
+        Resolution::AmbiguousPath => (
+            "Several nodes have this path; FastTick took one of them".to_owned(),
+            ResolutionColor::Warning,
+        ),
+        Resolution::ByStoredUid => (
+            format!(
+                "Not found by path. Found only by the stored UID {}: the tree changed, so \
+                 this can be another node",
+                stored.map_or_else(|| "?".to_owned(), |u| u.to_string())
+            ),
+            ResolutionColor::Warning,
+        ),
+        Resolution::Unresolved => ("Not found".to_owned(), ResolutionColor::Bad),
+    }
+}
+
+/// Asks for a repaint soon (progress displays).
+fn ctx_repaint_soon(ui: &Ui) {
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(100));
 }
 
 /// A submenu entry. egui's default arrow glyph is not in the bundled font,
@@ -1541,8 +1927,9 @@ struct Viewer<'a> {
     mode: Mode,
     workspace: &'a mut Workspace,
     settings: &'a mut Settings,
-    live: &'a LiveController,
+    live: &'a mut LiveController,
     live_doc: Option<DocId>,
+    loading: &'a [LoadingFile],
     keymap: &'a KeyMap,
     palette: &'a CanvasPalette,
     actions: &'a mut Vec<AppAction>,
@@ -1556,37 +1943,21 @@ impl Viewer<'_> {
         };
         let doc_id = doc.id;
         let is_live = self.live_doc == Some(doc_id);
-        let replay = doc.replay.as_ref().map(|r| {
-            (
-                r.position,
-                r.index.len(),
-                r.index.time_of_index(r.position.saturating_sub(1)),
-                r.index.last_time(),
-            )
-        });
-
-        if is_live {
-            self.live_strip(ui, view_id);
-        }
-        if let Some((position, len, time, last)) = replay {
-            egui::Panel::bottom(Id::new(("replay_strip", view_id)))
-                .resizable(false)
-                .frame(
-                    egui::Frame::NONE
-                        .inner_margin(egui::Margin::symmetric(8, 4))
-                        .fill(ui.visuals().panel_fill),
-                )
-                .show(ui, |ui| {
-                    replay_strip(ui, doc_id, position, len, time, last, self.actions)
-                });
-        }
+        // Statuses and markers of this frame, before the canvas draws.
+        self.workspace
+            .refresh_decorations(self.live, self.live_doc);
 
         let Some(view) = self.workspace.view_mut(view_id) else {
             return;
         };
-        let output = TreeCanvas::new(&mut view.canvas, self.palette)
-            .id_salt(("canvas", view_id.0))
-            .show(ui);
+        let live = &mut *self.live;
+        let mut menu = |ui: &mut Ui, node: &CanvasNode| live_node_menu(ui, live, node);
+        let mut canvas =
+            TreeCanvas::new(&mut view.canvas, self.palette).id_salt(("canvas", view_id.0));
+        if is_live {
+            canvas = canvas.node_menu(&mut menu);
+        }
+        let output = canvas.show(ui);
         if output.response.clicked()
             || output.response.drag_started()
             || output.response.secondary_clicked()
@@ -1607,86 +1978,93 @@ impl Viewer<'_> {
             }
         }
     }
+}
 
-    fn live_strip(&mut self, ui: &mut Ui, view_id: ViewId) {
-        egui::Panel::top(Id::new(("live_strip", view_id)))
-            .resizable(false)
-            .frame(
-                egui::Frame::NONE
-                    .inner_margin(egui::Margin::symmetric(8, 4))
-                    .fill(ui.visuals().panel_fill),
-            )
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let color = match self.live.state() {
-                        ConnectionState::Connected { .. } => self.palette.success,
-                        ConnectionState::Disconnected => self.palette.skipped,
-                        _ => self.palette.running,
-                    };
-                    widgets::status_dot(ui, color);
-                    ui.label(self.live.state_text());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if self.live.is_active() {
-                            if ui.button("Disconnect").clicked() {
-                                self.actions.push(AppAction::Command(Command::Disconnect));
-                            }
-                        } else if ui.button("Connect\u{2026}").clicked() {
-                            self.actions.push(AppAction::Command(Command::Connect));
-                        }
-                    });
-                });
-            });
+/// The live entries of the context menu of a node: breakpoints and forced
+/// results.
+fn live_node_menu(ui: &mut Ui, live: &mut LiveController, node: &CanvasNode) {
+    let Some(uid) = node.uid else {
+        ui.label(RichText::new("This node has no UID.").weak());
+        return;
+    };
+    let connected = live.is_connected();
+    if live.is_hit(uid) {
+        for action in [
+            ResumeAction::Continue,
+            ResumeAction::ForceSuccess,
+            ResumeAction::ForceFailure,
+        ] {
+            if ui
+                .add_enabled(connected, egui::Button::new(action.label()))
+                .clicked()
+            {
+                live.resume(uid, action);
+            }
+        }
+        ui.separator();
     }
-}
-
-fn format_time(us: u64) -> String {
-    format!("{:.3} s", us as f64 / 1e6)
-}
-
-fn replay_strip(
-    ui: &mut Ui,
-    doc: DocId,
-    position: usize,
-    len: usize,
-    time: Option<u64>,
-    last: Option<u64>,
-    actions: &mut Vec<AppAction>,
-) {
-    ui.horizontal(|ui| {
-        let mut target = None;
-        if widgets::icon_button(ui, Icon::First, "Go to the start", position > 0).clicked() {
-            target = Some(0);
+    let hook = live.hook(uid).copied();
+    match hook {
+        Some(hook) if hook.mode == HookMode::Breakpoint => {
+            if ui
+                .add_enabled(connected, egui::Button::new("Remove breakpoint"))
+                .clicked()
+            {
+                live.remove_hook(uid);
+            }
+            let text = if hook.enabled {
+                "Disable breakpoint"
+            } else {
+                "Enable breakpoint"
+            };
+            if ui.add_enabled(connected, egui::Button::new(text)).clicked() {
+                live.set_enabled(uid, !hook.enabled);
+            }
         }
-        if widgets::icon_button(ui, Icon::Previous, "One transition back", position > 0).clicked() {
-            target = Some(position.saturating_sub(1));
+        _ => {
+            let response = ui
+                .add_enabled(connected, egui::Button::new("Add breakpoint before the node"))
+                .on_disabled_hover_text("Connect to an executor first.");
+            let response = if hook.is_some() {
+                response.on_hover_text("This replaces the forced result: a node has one hook.")
+            } else {
+                response
+            };
+            if response.clicked() {
+                live.add_breakpoint(uid);
+            }
         }
-        if widgets::icon_button(ui, Icon::Next, "One transition forward", position < len).clicked()
-        {
-            target = Some(position + 1);
-        }
-        if widgets::icon_button(ui, Icon::Last, "Go to the end", position < len).clicked() {
-            target = Some(len);
-        }
-        let mut value = position;
-        ui.spacing_mut().slider_width = (ui.available_width() - 260.0).max(80.0);
+    }
+    ui.add_enabled(false, egui::Button::new("Add breakpoint after the node"))
+        .on_disabled_hover_text(AFTER_BREAKPOINT_UNAVAILABLE);
+    ui.separator();
+    for (text, status) in [
+        ("Force SUCCESS", NodeStatus::Success),
+        ("Force FAILURE", NodeStatus::Failure),
+    ] {
+        let active = hook.is_some_and(|h| h.mode == HookMode::Replace && h.desired_status == status);
         if ui
-            .add(egui::Slider::new(&mut value, 0..=len).show_value(false))
-            .on_hover_text("Replay position (number of transitions)")
-            .changed()
+            .add_enabled(connected && !active, egui::Button::new(text))
+            .on_hover_text("The node does not tick. It returns this status.")
+            .clicked()
         {
-            target = Some(value);
+            live.force(uid, status);
         }
-        let time_text = match (time, position) {
-            (_, 0) => format!("0.000 s / {}", format_time(last.unwrap_or(0))),
-            (Some(t), _) => format!("{} / {}", format_time(t), format_time(last.unwrap_or(t))),
-            (None, _) => String::new(),
-        };
-        ui.label(RichText::new(format!("{position} / {len}")).monospace());
-        ui.label(RichText::new(time_text).monospace().weak());
-        if let Some(target) = target {
-            actions.push(AppAction::SetReplayPosition(doc, target));
-        }
-    });
+    }
+    let forced = hook.is_some_and(|h| h.mode == HookMode::Replace);
+    if ui
+        .add_enabled(connected && forced, egui::Button::new("Clear forced result"))
+        .clicked()
+    {
+        live.remove_hook(uid);
+    }
+    if !connected {
+        ui.label(
+            RichText::new("Connect to an executor to use breakpoints.")
+                .small()
+                .weak(),
+        );
+    }
 }
 
 impl TabViewer for Viewer<'_> {
@@ -1729,6 +2107,8 @@ impl TabViewer for Viewer<'_> {
                     workspace: self.workspace,
                     settings: self.settings,
                     live: self.live,
+                    live_doc: self.live_doc,
+                    loading: self.loading,
                     keymap: self.keymap,
                     palette: self.palette,
                     actions: self.actions,

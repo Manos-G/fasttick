@@ -11,7 +11,7 @@
 
 use egui::{
     Align2, Color32, CornerRadius, FontId, Id, Pos2, Rect, RichText, Sense, Stroke, StrokeKind,
-    Ui, WidgetInfo, WidgetType, pos2, vec2,
+    Ui, WidgetInfo, pos2, vec2,
 };
 use fasttick_log::replay::PlaybackSpeed;
 
