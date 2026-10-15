@@ -30,6 +30,17 @@
 //!   the message while no subscriber is connected. ZeroMQ connects the REQ
 //!   and the SUB socket independently: after a restart of the executor,
 //!   the SUB socket can connect about 200 ms after the REQ socket.
+//! - After a connection attempt, it inserts its hooks again only after a
+//!   short delay. A publisher that lost its heartbeat (5 s without a
+//!   request) enables all hooks again when the next request comes, also
+//!   the disabled ones (`heartbeatLoop` of the publisher). The delayed
+//!   insert disables them again.
+//! - If the executor runs a hook that the session has as disabled (after a
+//!   heartbeat timeout, or when a hit crosses a disable), the session
+//!   removes the hook and inserts it again as disabled, and sends a
+//!   [`SessionEvent::Warning`]. The remove releases a node that waits at
+//!   the breakpoint. The session sends no
+//!   [`SessionEvent::BreakpointReached`] for such a hit.
 //! - During a recording, it reads GET_TRANSITIONS every 100 ms.
 //! - On disconnect and on shutdown, it stops the recording (and reads the
 //!   last transitions), then removes all hooks (best effort, with a short
@@ -70,6 +81,17 @@ const MAX_NOTIFICATIONS_PER_PASS: usize = 256;
 /// The interval between two checks of the notification socket while the
 /// session waits for its connection.
 const NOTIFICATION_CHECK_INTERVAL: Duration = Duration::from_millis(10);
+
+/// The delay between the first reply of a connection and the insert of the
+/// hooks of the session.
+///
+/// When the publisher gets a request after a heartbeat timeout, it enables
+/// all its hooks again, also the hooks that a client disabled
+/// (`heartbeatLoop` of the publisher calls `enableAllHooks(true)`). Its
+/// heartbeat thread checks every 10 ms, so this happens up to about 10 ms
+/// after the first request. The hooks of the session must go back after
+/// that, or a disabled hook stays enabled in the executor.
+const PUBLISHER_SETTLE_DELAY: Duration = Duration::from_millis(50);
 
 /// How often the session polls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -973,7 +995,9 @@ impl LiveSession {
                 }
                 self.set_state(ConnectionState::Connected { uuid });
                 self.rehook_pending |= self.config.reinsert_hooks && !self.hooks.is_empty();
-                self.rehook_at = Instant::now();
+                // Let the publisher enable its hooks first (see
+                // PUBLISHER_SETTLE_DELAY).
+                self.rehook_at = Instant::now() + PUBLISHER_SETTLE_DELAY;
                 self.next_status_at = Instant::now();
                 if !self
                     .client
@@ -1101,7 +1125,9 @@ impl LiveSession {
                 self.tree = None;
                 self.tree_refresh_at = Some(Instant::now());
                 self.rehook_pending = self.config.reinsert_hooks && !self.hooks.is_empty();
-                self.rehook_at = Instant::now();
+                // The new executor can have lost its heartbeat before this
+                // request (see PUBLISHER_SETTLE_DELAY).
+                self.rehook_at = Instant::now() + PUBLISHER_SETTLE_DELAY;
                 // The notification socket can still wait for its
                 // reconnect: check it again before the hooks go back.
                 self.notification_wait_until = None;
@@ -1361,6 +1387,10 @@ impl LiveSession {
             .find(|((hook_uid, _), _)| *hook_uid == uid.0)
             .map(|(key, hook)| (*key, *hook));
         match hook {
+            Some((_, hook)) if !hook.enabled => {
+                self.disable_again(hook);
+                return;
+            }
             Some((key, hook)) if hook.mode == HookMode::Replace => {
                 if hook.once {
                     // The publisher removes the hook after it runs.
@@ -1372,6 +1402,35 @@ impl LiveSession {
             }
         }
         self.emit(SessionEvent::BreakpointReached { uid });
+    }
+
+    /// Handles a hit of a hook that the session has as disabled: the hook
+    /// is enabled in the executor. This happens when the publisher enables
+    /// all hooks after a heartbeat timeout (`heartbeatLoop` of the publisher)
+    /// and the session could not disable them again in time, or when a hit
+    /// crosses a disable.
+    ///
+    /// HOOK_REMOVE wakes a node that waits at the breakpoint
+    /// (`removeHook` of the publisher), and the node then ticks normally.
+    /// HOOK_INSERT then makes a new, disabled hook. An unlock is not used:
+    /// if the node does not wait, the publisher keeps the unlock, and the
+    /// next hit after an enable would not stop.
+    fn disable_again(&mut self, hook: Hook) {
+        self.emit(SessionEvent::Warning(format!(
+            "the executor ran the disabled hook at node {}; the session disabled it \
+             again (BT.CPP enables all hooks when a client sends a request after a \
+             heartbeat timeout)",
+            hook.uid
+        )));
+        match self.call("HOOK_REMOVE", |client| {
+            client.remove_hook(hook.uid, hook.position)
+        }) {
+            Ok(()) | Err(Failure::Server) => {}
+            // The connection is lost. The hooks go back after the
+            // reconnect.
+            Err(Failure::Other) => return,
+        }
+        let _ = self.call("HOOK_INSERT", |client| client.insert_hook(&hook));
     }
 }
 
