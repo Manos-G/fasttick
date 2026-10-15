@@ -65,9 +65,23 @@ fn replay_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
 fn live_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     ui.label("Connect to an executor that runs the BT.CPP publisher.");
     ui.add_space(8.0);
+    // Centre the form: a frame does not centre itself.
+    let width = 300.0;
+    let left = ((ui.available_width() - width) * 0.5).max(0.0);
+    ui.horizontal(|ui| {
+        ui.add_space(left);
+        ui.vertical(|ui| {
+            ui.set_width(width);
+            connect_form(ui, cx);
+        });
+    });
+}
+
+fn connect_form(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     egui::Frame::group(ui.style())
         .inner_margin(12.0)
         .show(ui, |ui| {
+            ui.set_width(ui.available_width());
             egui::Grid::new("start_connect")
                 .num_columns(2)
                 .spacing([10.0, 8.0])

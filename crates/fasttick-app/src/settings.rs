@@ -74,6 +74,8 @@ pub struct Settings {
     pub edge_style: EdgeStyle,
     /// Show the node that reached a breakpoint.
     pub auto_focus_on_breakpoint: bool,
+    /// Show the minimap when the tree does not fit the view.
+    pub show_minimap: bool,
 }
 
 impl Default for Settings {
@@ -87,6 +89,7 @@ impl Default for Settings {
             layout_direction: LayoutDirection::TopDown,
             edge_style: EdgeStyle::Orthogonal,
             auto_focus_on_breakpoint: true,
+            show_minimap: true,
         }
     }
 }

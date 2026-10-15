@@ -134,7 +134,7 @@ pub fn default_dock(mode: Mode) -> DockState<Tab> {
     // Order of the splits: bottom row under the centre column only, then
     // the side columns over the full height.
     let [center, _left] = surface.split_left(NodeIndex::root(), 0.18, left);
-    let [center, _right] = surface.split_right(center, 0.76, right);
+    let [center, _right] = surface.split_right(center, 0.74, right);
     let [_center, _bottom] = surface.split_below(center, 0.78, bottom);
     dock
 }

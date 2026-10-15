@@ -239,6 +239,7 @@ impl FastTickApp {
         ViewOptions {
             direction: self.settings.layout_direction,
             edge_style: self.settings.edge_style,
+            minimap: self.settings.show_minimap,
         }
     }
 
@@ -1008,6 +1009,14 @@ impl FastTickApp {
                 ui.separator();
                 self.menu_item(ui, Command::ResetLayout);
             });
+            if ui.checkbox(&mut self.settings.show_minimap, "Minimap").changed() {
+                let show = self.settings.show_minimap;
+                for view in self.workspace.views_in_mode(self.mode) {
+                    if let Some(v) = self.workspace.view_mut(view) {
+                        v.canvas.set_minimap(show);
+                    }
+                }
+            }
             ui.separator();
             self.menu_item(ui, Command::SplitView);
             self.menu_item(ui, Command::CloseTab);
@@ -1098,6 +1107,7 @@ impl FastTickApp {
         style.separator.width = 1.0;
         style.separator.extra = 4.0;
         style.tab_bar.corner_radius = egui::CornerRadius::same(4);
+        style.tab_bar.show_scroll_bar_on_overflow = false;
         let dock = &mut self.docks[mode.index()];
         let mut viewer = Viewer {
             mode,

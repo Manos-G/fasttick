@@ -142,6 +142,8 @@ pub struct ViewOptions {
     pub direction: LayoutDirection,
     /// The edge style.
     pub edge_style: EdgeStyle,
+    /// Show the minimap.
+    pub minimap: bool,
 }
 
 impl Workspace {
@@ -251,11 +253,7 @@ impl Workspace {
             let options = build_options(document, view.root_instance);
             view.expansion = CanvasTree::default_expansion(&document.runtime, options);
             let tree = build_tree(document, view.root_instance, &view.expansion);
-            let direction = view.canvas.direction();
-            let edge_style = view.canvas.edge_style();
-            view.canvas = CanvasState::new(tree);
-            view.canvas.set_direction(direction);
-            view.canvas.set_edge_style(edge_style);
+            view.canvas = fresh_canvas(tree, &view.canvas);
         }
     }
 
@@ -276,6 +274,7 @@ impl Workspace {
         let mut canvas = CanvasState::new(tree);
         canvas.set_direction(options.direction);
         canvas.set_edge_style(options.edge_style);
+        canvas.set_minimap(options.minimap);
         let id = ViewId(self.next());
         self.views.push(View {
             id,
@@ -304,6 +303,7 @@ impl Workspace {
         let mut canvas = CanvasState::new(tree);
         canvas.set_direction(direction);
         canvas.set_edge_style(edge_style);
+        canvas.set_minimap(view.canvas.minimap());
         canvas.set_viewport(viewport);
         canvas.fit_to_view(false);
         let new_id = ViewId(self.next());
@@ -347,11 +347,7 @@ impl Workspace {
         if let Some(replay) = &document.replay {
             apply_replay_state(&mut tree, &replay.state());
         }
-        let direction = view.canvas.direction();
-        let edge_style = view.canvas.edge_style();
-        view.canvas = CanvasState::new(tree);
-        view.canvas.set_direction(direction);
-        view.canvas.set_edge_style(edge_style);
+        view.canvas = fresh_canvas(tree, &view.canvas);
     }
 
     /// Expands or collapses a SubTree node of a view. The node stays at its
@@ -462,6 +458,15 @@ impl Workspace {
             .map(|v| v.id)
             .collect()
     }
+}
+
+/// A new canvas for a tree with the display settings of an old one.
+fn fresh_canvas(tree: CanvasTree, old: &CanvasState) -> CanvasState {
+    let mut canvas = CanvasState::new(tree);
+    canvas.set_direction(old.direction());
+    canvas.set_edge_style(old.edge_style());
+    canvas.set_minimap(old.minimap());
+    canvas
 }
 
 /// The build options for a document and a root instance.

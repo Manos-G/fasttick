@@ -1781,7 +1781,7 @@ fn minimap(state: &mut CanvasState, ui: &Ui, rect: Rect, palette: &CanvasPalette
     let inner = frame.shrink(6.0);
     let scale = (inner.width() / bounds.width()).min(inner.height() / bounds.height());
     let offset = inner.center() - bounds.center().to_vec2() * scale;
-    let to_mini = |p: Pos2| (offset + p.to_vec2() * scale);
+    let to_mini = |p: Pos2| offset + p.to_vec2() * scale;
     let from_mini = |p: Pos2| ((p - offset) / scale).to_pos2();
 
     let response = ui.interact(frame, canvas.with("minimap"), Sense::click_and_drag());

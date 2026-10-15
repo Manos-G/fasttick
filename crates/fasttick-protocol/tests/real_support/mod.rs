@@ -252,11 +252,6 @@ impl Live {
         hooks
     }
 
-    /// The number of RESULT lines up to now.
-    pub fn result_count(&self) -> usize {
-        self.executor.results().len()
-    }
-
     /// Waits for the RESULT line of run `run` and gives its status text.
     pub fn wait_result(&self, run: u64) -> String {
         let prefix = format!("RESULT loop={run} ");
@@ -270,18 +265,31 @@ impl Live {
             .to_owned()
     }
 
-    /// Checks for [`QUIET`] that the executor makes no progress: no new
-    /// RESULT line, and the blackboard counters of `probe.xml` stay the
-    /// same. The client sends requests during the check (heartbeat).
+    /// Checks for [`QUIET`] that the executor makes no progress: the
+    /// blackboard counters of `probe.xml` stay the same, and the current
+    /// run (the run that set `{runs}`) has no RESULT line. The client sends
+    /// requests during the check (heartbeat).
+    ///
+    /// The RESULT lines of earlier runs can still arrive during the check:
+    /// the testkit reads stdout on another thread, and that thread can be
+    /// late on a loaded machine. So the check does not count lines.
     pub fn assert_blocked(&mut self) -> ProbeCounters {
         let counters = self.probe_counters();
-        let results = self.result_count();
         let end = Instant::now() + QUIET;
         while Instant::now() < end {
             std::thread::sleep(Duration::from_millis(50));
             assert_eq!(self.probe_counters(), counters, "the tree made progress");
         }
-        assert_eq!(self.result_count(), results, "the tree completed a run");
+        let current = format!("RESULT loop={} ", counters.runs);
+        assert!(
+            !self
+                .executor
+                .stdout_lines()
+                .iter()
+                .any(|line| line.starts_with(&current)),
+            "the tree completed run {}",
+            counters.runs
+        );
         counters
     }
 
