@@ -1459,3 +1459,27 @@ fn alt_arrow_keys_move_a_node_among_its_siblings() {
         ["check_blocked", "check_flag"]
     );
 }
+
+#[test]
+fn the_find_button_of_a_port_shows_the_nodes_that_use_its_key() {
+    let mut harness = harness();
+    select(&mut harness, "check_flag");
+    harness.get_by_label("find").click();
+    harness.run();
+    harness.run();
+    let app = harness.state();
+    let tree = app.workspace().active().unwrap().canvas.tree();
+    let marked: Vec<String> = tree
+        .nodes()
+        .iter()
+        .filter(|n| n.deco.search_match)
+        .map(|n| n.label.clone())
+        .collect();
+    // The port values and the conditions that use the key "flag": the
+    // script that sets it, the two CheckFlag nodes and the _skipIf script.
+    for label in ["init", "check_flag", "CheckFlag", "skipped_node"] {
+        assert!(marked.contains(&label.to_owned()), "{label}: {marked:?}");
+    }
+    // Not the node named check_blocked (its key is "blocked").
+    assert!(!marked.contains(&"check_blocked".to_owned()), "{marked:?}");
+}

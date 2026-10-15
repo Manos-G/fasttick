@@ -259,6 +259,8 @@ Select a node. The **Inspector** shows its properties:
   a star mark a required port. The hint text shows the default value.
   Click **{ }** to change between a literal value and a blackboard key.
   Click **keys** to select one of the blackboard keys that the tree uses.
+  If the value is a blackboard key, click **find** to see all nodes that
+  use the key (in port values and in conditions) in the **Search** panel.
   Click **×** to remove the attribute. Use **Add port** for a port that the
   model does not have.
 - **Ports and remappings** (SubTree nodes): the ports of the model of the

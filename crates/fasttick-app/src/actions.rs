@@ -70,6 +70,8 @@ pub enum AppAction {
     /// Adds the XML files of the folder that have the missing trees and
     /// node models of a document.
     AddMissingFiles(DocId),
+    /// Shows the nodes that use a blackboard key in the search panel.
+    FindKey(String),
     /// Opens the search popup that adds a node (see [`crate::add_popup`]).
     OpenAddPopup {
         /// The edit view.

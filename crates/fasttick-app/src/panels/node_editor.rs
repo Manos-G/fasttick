@@ -261,7 +261,14 @@ pub fn show(
             });
         }
     }
+    // The "find" button of a port with a blackboard key.
+    if let Some(key) = ui.data_mut(|d| d.remove_temp::<String>(egui::Id::new(FIND_KEY))) {
+        actions.push(AppAction::FindKey(key));
+    }
 }
+
+/// The temporary data ID of a click on a "find" button of a port.
+const FIND_KEY: &str = "fasttick_node_editor_find_key";
 
 /// True if the inspector has a field for this attribute: the name, a
 /// condition, a port of the model or a port attribute of the element.
@@ -536,6 +543,15 @@ fn port_header(
             }
             let current = value.unwrap_or("");
             let is_reference = blackboard_pointer(current).is_some();
+            if let Some(key) = blackboard_pointer(current)
+                && ui
+                    .small_button("find")
+                    .on_hover_text(format!("Find the nodes that use the key {key}"))
+                    .clicked()
+            {
+                let key = key.to_owned();
+                ui.data_mut(|d| d.insert_temp(egui::Id::new(FIND_KEY), key));
+            }
             let toggle = ui
                 .selectable_label(is_reference, RichText::new("{ }").monospace())
                 .on_hover_text(if is_reference {

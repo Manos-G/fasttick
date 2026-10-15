@@ -253,6 +253,26 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     ui.data_mut(|d| d.insert_temp(state_id, state));
 }
 
+/// Sets the search to the nodes that use a blackboard key: the key as a
+/// whole word, with the same case, in the port values and the conditions.
+pub fn find_key(ctx: &egui::Context, key: &str) {
+    let state_id = egui::Id::new("fasttick_search_state");
+    ctx.data_mut(|d| {
+        let state: &mut SearchState = d.get_temp_mut_or_default(state_id);
+        state.query = Query {
+            text: key.to_owned(),
+            fields: Fields {
+                port_values: true,
+                conditions: true,
+                ..Fields::NONE
+            },
+            case_sensitive: true,
+            whole_word: true,
+            wildcard: false,
+        };
+    });
+}
+
 /// Asks the search panel to take the keyboard focus on the next frame.
 pub fn request_focus(ctx: &egui::Context) {
     ctx.data_mut(|d| d.insert_temp(egui::Id::new("fasttick_search_state").with("focus"), true));
