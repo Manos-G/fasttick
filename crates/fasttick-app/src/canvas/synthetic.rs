@@ -28,7 +28,7 @@ pub fn synthetic_tree(nodes: usize, fanout: usize) -> CanvasTree {
         let index = builder.len();
         let leaf = node_depth >= depth;
         let (type_id, category) = if leaf {
-            if index % 3 == 0 {
+            if index.is_multiple_of(3) {
                 ("CheckBattery", NodeCategory::Condition)
             } else {
                 ("MoveBase", NodeCategory::Action)

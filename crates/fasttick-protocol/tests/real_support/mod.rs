@@ -235,6 +235,16 @@ impl Live {
         statuses_by_name(&self.tree, &snapshot)
     }
 
+    /// Waits until STATUS gives `status` for the node `name`.
+    ///
+    /// The executor writes READY before its first tick, so a test that
+    /// checks the statuses of a running tree must wait for it first.
+    pub fn wait_for_status(&mut self, name: &str, status: NodeStatus) {
+        wait_until(&format!("{name} {status:?}"), || {
+            (self.statuses().get(name) == Some(&status)).then_some(())
+        });
+    }
+
     /// The installed hooks, sorted by UID.
     pub fn hooks(&mut self) -> Vec<Hook> {
         let mut hooks = self.client.hooks_dump().expect("HOOKS_DUMP");

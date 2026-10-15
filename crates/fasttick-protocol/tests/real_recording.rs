@@ -70,6 +70,9 @@ fn recording_start_stop_and_transitions() {
         return;
     };
     let mut live = Live::start(options(harness, LONG_RUNNING));
+    // The first tick can come after READY. Start the recording after it,
+    // so that the root, "setup" and "forever" do not change during it.
+    live.wait_for_status("forever", NodeStatus::Running);
 
     // The reply to "start" is the system time of the executor, in
     // microseconds since the Unix epoch.

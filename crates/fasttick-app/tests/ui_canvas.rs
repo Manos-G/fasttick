@@ -177,8 +177,7 @@ fn click_shift_click_ctrl_click() {
         harness
             .state()
             .events
-            .iter()
-            .any(|e| *e == CanvasEvent::SelectionChanged)
+            .contains(&CanvasEvent::SelectionChanged)
     );
     // The accessibility tree reports the selection.
     click_at(&harness, item_center(&harness, "move"), Modifiers::NONE);

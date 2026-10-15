@@ -144,6 +144,9 @@ fn status_covers_every_node_and_changes_over_time() {
     let mut live = Live::start(options(harness, LONG_RUNNING));
     let tree_uids = all_uids(&live.tree);
     let slow_action = Uid(live.uid("slow_action"));
+    // The first tick can come after READY. When "forever" is RUNNING, the
+    // root is RUNNING and "setup" is complete.
+    live.wait_for_status("forever", NodeStatus::Running);
 
     let mut distinct = BTreeSet::new();
     let mut slow_states = BTreeSet::new();

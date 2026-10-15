@@ -71,7 +71,9 @@ pub fn shortcuts(ctx: &egui::Context, keymap: &KeyMap) -> bool {
 
 /// The list of all shortcuts, grouped.
 pub fn shortcut_list(ui: &mut Ui, keymap: &KeyMap) {
-    let mut groups: BTreeMap<usize, (&str, Vec<(Command, String)>)> = BTreeMap::new();
+    // Group rank -> (group name, entries).
+    type Group<'a> = (&'a str, Vec<(Command, String)>);
+    let mut groups: BTreeMap<usize, Group<'_>> = BTreeMap::new();
     let order = ["File", "Edit", "View", "Mode", "Live", "Help"];
     for binding in keymap.bindings() {
         let group = binding.command.group();
