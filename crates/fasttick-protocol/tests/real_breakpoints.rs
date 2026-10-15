@@ -366,6 +366,9 @@ fn replace_hooks_return_the_status_without_a_tick() {
     live.client
         .insert_hook(&Hook::replace(probe, NodeStatus::Success))
         .unwrap();
+    // A tick that started before the insert can still be real. Let one
+    // run complete before the counters are read.
+    live.wait_more_runs(1);
     let start = live.probe_counters();
     let runs = live.wait_more_runs(3);
     assert_all(&runs, "SUCCESS");

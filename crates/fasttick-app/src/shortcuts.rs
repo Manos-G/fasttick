@@ -1,0 +1,453 @@
+//! Commands and the central keyboard shortcut registry ([`KeyMap`]).
+//!
+//! Menus, toolbar buttons and the shortcut handler all use [`Command`]. The
+//! menus show the shortcut of each command from the key map, and the help
+//! dialog lists all of them. To add a command: add a variant, give it a
+//! label and a group, add a binding in [`KeyMap::default`] if it has a
+//! shortcut, and handle it in `FastTickApp::run_command`.
+
+use egui::{Key, KeyboardShortcut, Modifiers};
+
+/// A user command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Command {
+    /// Make a new project.
+    NewProject,
+    /// Open a project or a tree XML file.
+    OpenFile,
+    /// Open a `.btlog` file.
+    OpenLog,
+    /// Save the active document.
+    Save,
+    /// Save the active document under a new name.
+    SaveAs,
+    /// Close the window.
+    Quit,
+    /// Undo the last edit.
+    Undo,
+    /// Redo the last undone edit.
+    Redo,
+    /// Cut the selection.
+    Cut,
+    /// Copy the selection.
+    Copy,
+    /// Paste.
+    Paste,
+    /// Duplicate the selection.
+    Duplicate,
+    /// Delete the selection.
+    Delete,
+    /// Select all nodes.
+    SelectAll,
+    /// Find nodes.
+    Find,
+    /// Show the whole tree.
+    FitToView,
+    /// Zoom in.
+    ZoomIn,
+    /// Zoom out.
+    ZoomOut,
+    /// Zoom to 100 %.
+    ZoomReset,
+    /// Lay out the tree from top to bottom.
+    LayoutTopDown,
+    /// Lay out the tree from left to right.
+    LayoutLeftRight,
+    /// Change between the two layout directions.
+    ToggleLayout,
+    /// Use the light theme.
+    ThemeLight,
+    /// Use the dark theme.
+    ThemeDark,
+    /// Follow the system theme.
+    ThemeSystem,
+    /// Change to edit mode.
+    ModeEdit,
+    /// Change to live mode.
+    ModeLive,
+    /// Change to replay mode.
+    ModeReplay,
+    /// Connect to an executor.
+    Connect,
+    /// Disconnect from the executor.
+    Disconnect,
+    /// Show the active document a second time, beside the first.
+    SplitView,
+    /// Close the active document tab.
+    CloseTab,
+    /// Restore the default panel arrangement.
+    ResetLayout,
+    /// Show the keyboard shortcuts.
+    ShowShortcuts,
+    /// Show the About dialog.
+    About,
+}
+
+impl Command {
+    /// All commands, in help-dialog order.
+    pub const ALL: [Command; 35] = [
+        Command::NewProject,
+        Command::OpenFile,
+        Command::OpenLog,
+        Command::Save,
+        Command::SaveAs,
+        Command::Quit,
+        Command::Undo,
+        Command::Redo,
+        Command::Cut,
+        Command::Copy,
+        Command::Paste,
+        Command::Duplicate,
+        Command::Delete,
+        Command::SelectAll,
+        Command::Find,
+        Command::FitToView,
+        Command::ZoomIn,
+        Command::ZoomOut,
+        Command::ZoomReset,
+        Command::LayoutTopDown,
+        Command::LayoutLeftRight,
+        Command::ToggleLayout,
+        Command::ThemeLight,
+        Command::ThemeDark,
+        Command::ThemeSystem,
+        Command::SplitView,
+        Command::CloseTab,
+        Command::ResetLayout,
+        Command::ModeEdit,
+        Command::ModeLive,
+        Command::ModeReplay,
+        Command::Connect,
+        Command::Disconnect,
+        Command::ShowShortcuts,
+        Command::About,
+    ];
+
+    /// The menu label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Command::NewProject => "New project",
+            Command::OpenFile => "Open project or XML\u{2026}",
+            Command::OpenLog => "Open log\u{2026}",
+            Command::Save => "Save",
+            Command::SaveAs => "Save as\u{2026}",
+            Command::Quit => "Quit",
+            Command::Undo => "Undo",
+            Command::Redo => "Redo",
+            Command::Cut => "Cut",
+            Command::Copy => "Copy",
+            Command::Paste => "Paste",
+            Command::Duplicate => "Duplicate",
+            Command::Delete => "Delete",
+            Command::SelectAll => "Select all",
+            Command::Find => "Find\u{2026}",
+            Command::FitToView => "Fit to view",
+            Command::ZoomIn => "Zoom in",
+            Command::ZoomOut => "Zoom out",
+            Command::ZoomReset => "Zoom to 100 %",
+            Command::LayoutTopDown => "Top-down",
+            Command::LayoutLeftRight => "Left-right",
+            Command::ToggleLayout => "Change layout direction",
+            Command::ThemeLight => "Light",
+            Command::ThemeDark => "Dark",
+            Command::ThemeSystem => "System",
+            Command::ModeEdit => "Edit mode",
+            Command::ModeLive => "Live mode",
+            Command::ModeReplay => "Replay mode",
+            Command::Connect => "Connect\u{2026}",
+            Command::Disconnect => "Disconnect",
+            Command::SplitView => "Split view",
+            Command::CloseTab => "Close tab",
+            Command::ResetLayout => "Reset panel layout",
+            Command::ShowShortcuts => "Keyboard shortcuts",
+            Command::About => "About FastTick",
+        }
+    }
+
+    /// The group in the help dialog.
+    pub fn group(self) -> &'static str {
+        match self {
+            Command::NewProject
+            | Command::OpenFile
+            | Command::OpenLog
+            | Command::Save
+            | Command::SaveAs
+            | Command::Quit => "File",
+            Command::Undo
+            | Command::Redo
+            | Command::Cut
+            | Command::Copy
+            | Command::Paste
+            | Command::Duplicate
+            | Command::Delete
+            | Command::SelectAll
+            | Command::Find => "Edit",
+            Command::FitToView
+            | Command::ZoomIn
+            | Command::ZoomOut
+            | Command::ZoomReset
+            | Command::LayoutTopDown
+            | Command::LayoutLeftRight
+            | Command::ToggleLayout
+            | Command::ThemeLight
+            | Command::ThemeDark
+            | Command::ThemeSystem
+            | Command::SplitView
+            | Command::CloseTab
+            | Command::ResetLayout => "View",
+            Command::ModeEdit | Command::ModeLive | Command::ModeReplay => "Mode",
+            Command::Connect | Command::Disconnect => "Live",
+            Command::ShowShortcuts | Command::About => "Help",
+        }
+    }
+}
+
+/// A key binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Binding {
+    /// The command.
+    pub command: Command,
+    /// The key combination.
+    pub shortcut: KeyboardShortcut,
+}
+
+/// The key map: all global shortcuts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyMap {
+    bindings: Vec<Binding>,
+}
+
+/// Canvas keys and mouse actions. The canvas handles these itself; the
+/// help dialog lists them.
+pub const CANVAS_HELP: &[(&str, &str)] = &[
+    ("Click", "Select a node"),
+    ("Shift + click", "Add a node to the selection"),
+    ("Ctrl + click", "Add or remove a node"),
+    ("Drag on the background", "Select with a rectangle"),
+    ("Double-click a SubTree", "Expand or collapse it"),
+    ("Middle drag, Space + drag", "Pan"),
+    ("Mouse wheel, touchpad", "Pan"),
+    ("Ctrl + wheel, pinch", "Zoom at the pointer"),
+    ("Arrow keys", "Go to the parent, a child or a sibling"),
+    ("Home", "Go to the root"),
+    ("Enter", "Expand or collapse the SubTree"),
+    ("Escape", "Clear the selection"),
+    ("Right-click", "Node and view actions"),
+];
+
+impl Default for KeyMap {
+    fn default() -> Self {
+        let cmd = Modifiers::COMMAND;
+        let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
+        let none = Modifiers::NONE;
+        let bind = |command, modifiers, key| Binding {
+            command,
+            shortcut: KeyboardShortcut::new(modifiers, key),
+        };
+        KeyMap {
+            bindings: vec![
+                bind(Command::NewProject, cmd, Key::N),
+                bind(Command::OpenFile, cmd, Key::O),
+                bind(Command::OpenLog, cmd_shift, Key::O),
+                bind(Command::Save, cmd, Key::S),
+                bind(Command::SaveAs, cmd_shift, Key::S),
+                bind(Command::Quit, cmd, Key::Q),
+                bind(Command::Undo, cmd, Key::Z),
+                bind(Command::Redo, cmd_shift, Key::Z),
+                bind(Command::Redo, cmd, Key::Y),
+                bind(Command::Cut, cmd, Key::X),
+                bind(Command::Copy, cmd, Key::C),
+                bind(Command::Paste, cmd, Key::V),
+                bind(Command::Duplicate, cmd, Key::D),
+                bind(Command::Delete, none, Key::Delete),
+                bind(Command::SelectAll, cmd, Key::A),
+                bind(Command::Find, cmd, Key::F),
+                bind(Command::FitToView, none, Key::F),
+                bind(Command::ZoomIn, cmd, Key::Equals),
+                bind(Command::ZoomIn, cmd, Key::Plus),
+                bind(Command::ZoomOut, cmd, Key::Minus),
+                bind(Command::ZoomReset, cmd, Key::Num0),
+                bind(Command::ToggleLayout, cmd, Key::L),
+                bind(Command::SplitView, cmd, Key::Backslash),
+                bind(Command::CloseTab, cmd, Key::W),
+                bind(Command::ModeEdit, cmd, Key::Num1),
+                bind(Command::ModeLive, cmd, Key::Num2),
+                bind(Command::ModeReplay, cmd, Key::Num3),
+                bind(Command::Connect, none, Key::F5),
+                bind(Command::Disconnect, Modifiers::SHIFT, Key::F5),
+                bind(Command::ShowShortcuts, none, Key::F1),
+            ],
+        }
+    }
+}
+
+impl KeyMap {
+    /// All bindings.
+    pub fn bindings(&self) -> &[Binding] {
+        &self.bindings
+    }
+
+    /// The first shortcut of a command.
+    pub fn shortcut(&self, command: Command) -> Option<KeyboardShortcut> {
+        self.bindings
+            .iter()
+            .find(|b| b.command == command)
+            .map(|b| b.shortcut)
+    }
+
+    /// The shortcut text of a command, for example `Ctrl+Shift+O`.
+    pub fn shortcut_text(&self, ctx: &egui::Context, command: Command) -> Option<String> {
+        self.shortcut(command).map(|s| ctx.format_shortcut(&s))
+    }
+
+    /// Commands that have two bindings with the same keys. Should be empty.
+    pub fn conflicts(&self) -> Vec<(Command, Command)> {
+        let mut out = Vec::new();
+        for (i, a) in self.bindings.iter().enumerate() {
+            for b in &self.bindings[i + 1..] {
+                if a.shortcut == b.shortcut && a.command != b.command {
+                    out.push((a.command, b.command));
+                }
+            }
+        }
+        out
+    }
+
+    /// Takes the pressed shortcuts out of the input and returns their
+    /// commands. Only commands for which `enabled` is true are taken, so a
+    /// disabled command does not block the key for other widgets.
+    ///
+    /// Shortcuts without Ctrl or Alt (for example `F` for "Fit to view")
+    /// are ignored while a text field has the keyboard focus.
+    pub fn consume(
+        &self,
+        ctx: &egui::Context,
+        enabled: impl Fn(Command) -> bool,
+    ) -> Vec<Command> {
+        let typing = ctx.text_edit_focused();
+        // A binding with more modifiers goes first: egui matches Ctrl+S
+        // also when Ctrl+Shift+S is pressed.
+        let mut order: Vec<&Binding> = self.bindings.iter().collect();
+        order.sort_by_key(|b| std::cmp::Reverse(modifier_count(b.shortcut.modifiers)));
+        let mut commands = Vec::new();
+        ctx.input_mut(|input| {
+            for binding in order {
+                let plain = !binding.shortcut.modifiers.command
+                    && !binding.shortcut.modifiers.ctrl
+                    && !binding.shortcut.modifiers.alt
+                    && !is_function_key(binding.shortcut.logical_key);
+                if (plain && typing) || !enabled(binding.command) {
+                    continue;
+                }
+                if input.consume_shortcut(&binding.shortcut) && !commands.contains(&binding.command)
+                {
+                    commands.push(binding.command);
+                }
+            }
+        });
+        commands
+    }
+}
+
+fn modifier_count(m: Modifiers) -> u8 {
+    u8::from(m.alt) + u8::from(m.shift) + u8::from(m.ctrl || m.command) + u8::from(m.mac_cmd)
+}
+
+fn is_function_key(key: Key) -> bool {
+    matches!(
+        key,
+        Key::F1
+            | Key::F2
+            | Key::F3
+            | Key::F4
+            | Key::F5
+            | Key::F6
+            | Key::F7
+            | Key::F8
+            | Key::F9
+            | Key::F10
+            | Key::F11
+            | Key::F12
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_conflicts_and_all_labelled() {
+        let map = KeyMap::default();
+        assert!(map.conflicts().is_empty(), "{:?}", map.conflicts());
+        for command in Command::ALL {
+            assert!(!command.label().is_empty());
+            assert!(!command.group().is_empty());
+        }
+        // Every bound command is in ALL.
+        for binding in map.bindings() {
+            assert!(Command::ALL.contains(&binding.command));
+        }
+        assert_eq!(
+            map.shortcut(Command::OpenLog),
+            Some(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::O))
+        );
+        assert_eq!(map.shortcut(Command::About), None);
+    }
+
+    fn press(ctx: &egui::Context, modifiers: Modifiers, key: Key, map: &KeyMap) -> Vec<Command> {
+        let mut input = egui::RawInput {
+            modifiers,
+            ..Default::default()
+        };
+        input.events.push(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        });
+        let mut out = Vec::new();
+        let _ = ctx.run_ui(input, |ui| {
+            out = map.consume(ui.ctx(), |_| true);
+        });
+        out
+    }
+
+    #[test]
+    fn consume_prefers_more_modifiers() {
+        let ctx = egui::Context::default();
+        let map = KeyMap::default();
+        assert_eq!(
+            press(&ctx, Modifiers::COMMAND | Modifiers::SHIFT, Key::S, &map),
+            vec![Command::SaveAs]
+        );
+        assert_eq!(press(&ctx, Modifiers::COMMAND, Key::S, &map), vec![Command::Save]);
+        assert_eq!(press(&ctx, Modifiers::NONE, Key::F, &map), vec![Command::FitToView]);
+        assert_eq!(press(&ctx, Modifiers::COMMAND, Key::F, &map), vec![Command::Find]);
+        assert_eq!(press(&ctx, Modifiers::NONE, Key::F1, &map), vec![Command::ShowShortcuts]);
+        assert!(press(&ctx, Modifiers::NONE, Key::G, &map).is_empty());
+    }
+
+    #[test]
+    fn disabled_commands_are_not_consumed() {
+        let ctx = egui::Context::default();
+        let map = KeyMap::default();
+        let mut input = egui::RawInput {
+            modifiers: Modifiers::COMMAND,
+            ..Default::default()
+        };
+        input.events.push(egui::Event::Key {
+            key: Key::C,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::COMMAND,
+        });
+        let _ = ctx.run_ui(input, |ui| {
+            let commands = map.consume(ui.ctx(), |c| c != Command::Copy);
+            assert!(commands.is_empty());
+            // The key event is still there for other widgets.
+            assert!(ui.input(|i| i.key_pressed(Key::C)));
+        });
+    }
+}

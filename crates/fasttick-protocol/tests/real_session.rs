@@ -98,11 +98,16 @@ impl Events {
         });
     }
 
-    /// The events that arrived up to now, without a wait.
-    fn drain(&mut self) -> Vec<SessionEvent> {
-        let new: Vec<SessionEvent> = self.receiver.try_iter().collect();
-        self.seen.extend(new.iter().cloned());
-        new
+    /// Checks that no event up to now (also the events that arrived
+    /// during earlier waits) is a warning or an error.
+    fn assert_no_problems(&mut self) {
+        self.seen.extend(self.receiver.try_iter());
+        let problems: Vec<&SessionEvent> = self
+            .seen
+            .iter()
+            .filter(|event| matches!(event, SessionEvent::Warning(_) | SessionEvent::Error(_)))
+            .collect();
+        assert!(problems.is_empty(), "{problems:#?}");
     }
 }
 
@@ -347,14 +352,9 @@ fn disconnect_removes_the_hooks_and_the_executor_keeps_running() {
         matches!(event, SessionEvent::RecordingStopped).then_some(())
     });
     events.disconnected();
-    assert!(
-        !events
-            .drain()
-            .iter()
-            .any(|event| matches!(event, SessionEvent::Warning(_))),
-        "{:#?}",
-        events.seen
-    );
+    // The cleanup worked: no warning (for example "cannot remove the
+    // hooks") in all the events of the session.
+    events.assert_no_problems();
 
     // The executor has no hooks: the tree continues, "probe" and
     // "count_done" tick again.
@@ -427,12 +427,7 @@ fn disabling_a_hit_breakpoint_through_the_session_releases_the_node() {
     assert_eq!(live.wait_result(before.runs), "SUCCESS");
     assert!(live.hooks().is_empty());
 
-    for event in events.drain() {
-        assert!(
-            !matches!(event, SessionEvent::Error(_) | SessionEvent::Warning(_)),
-            "{event:?}"
-        );
-    }
+    events.assert_no_problems();
     assert!(handle.join());
 }
 

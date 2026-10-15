@@ -35,7 +35,8 @@ pub fn harness() -> Option<&'static Harness> {
     match fasttick_testkit::harness() {
         Ok(harness) => Some(harness),
         Err(reason) => {
-            let explicit_prefix = std::env::var_os(PREFIX_ENV).is_some_and(|value| !value.is_empty());
+            let explicit_prefix =
+                std::env::var_os(PREFIX_ENV).is_some_and(|value| !value.is_empty());
             if reason.is_fatal() || explicit_prefix {
                 panic!("the FastTick test harness is not usable ({PREFIX_ENV} is set): {reason}");
             }
