@@ -1228,9 +1228,11 @@ dependencies = [
 name = "fasttick-core"
 version = "0.1.0"
 dependencies = [
+ "fasttick-testkit",
  "insta",
  "proptest",
  "quick-xml 0.42.0",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

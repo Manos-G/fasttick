@@ -1,0 +1,53 @@
+# BT.CPP XML fixtures that BT.CPP 4.9.0 rejects when it loads the file
+# alone (registerBehaviorTreeFromFile, then createTree for each tree), or
+# when the tree ticks (marked "tick:"; the BT.CPP test asserts the
+# exception: IfThenElse and WhileDoElse check their children in tick()).
+# Format: <fixture path>\t<expected ProblemCode>\t<first BT.CPP error>
+# Made with a scratch oracle that links the installed BT.CPP 4.9.0 and
+# registers dummy nodes for the harness models (all_models.xml), the models
+# of the fixture and the node types that only exist in the C++ tests.
+# The expected code is the problem that the validator must report. For
+# ex03_ncurses_manual_selector_1.xml, ManualSelector only exists in C++,
+# so the validator reports UnknownNodeType (BT.CPP rejects the childless
+# <ManualSelector> node, a Control node in the example).
+examples/test_files/subtree_test.xml	UnknownNodeType	Error at line 6: -> Node not recognized: CheckStatus
+fuzzing/corpus/bt_corpus/corpus2.xml	UnknownPort	tree MainTree: a port with name [timeout_ms] is found in the XML (<Timeout>, line 5) but not in the providedPorts() of its registered node type.
+fuzzing/corpus/bt_corpus/corpus3.xml	TreeIdConflict	Error at line 5: -> The attribute [ID] of tag <SubTree> must not use the name of a registered Node
+fuzzing/corpus/bt_corpus/corpus4.xml	ChildCount	Error at line 5: -> The node 'ForceSuccess' must have exactly 1 child
+inline/ex03_ncurses_manual_selector_1.xml	UnknownNodeType	Error at line 9: -> The node 'ManualSelector' must have 1 or more children
+inline/gtest_factory_12.xml	MissingSubTree	tree TestTree: Can't find a tree with name: MyTree
+inline/gtest_factory_13.xml	EmptyTree	Error at line 2: -> The tag <BehaviorTree> with ID 'Main' must have exactly 1 child
+inline/gtest_factory_14.xml	MissingId	Error at line 2: -> The tag <BehaviorTree> must have the attribute [ID]
+inline/gtest_factory_15.xml	MissingId	Error at line 2: -> The tag <BehaviorTree> must have the attribute [ID]
+inline/gtest_factory_18.xml	MultipleRoots	Error at line 2: -> The tag <BehaviorTree> with ID 'Main' must have exactly 1 child
+inline/gtest_factory_3.xml	MissingSubTree	tree MainTree: Can't find a tree with name: DoorClosedSubtree
+inline/gtest_factory_5.xml	EmptyTree	Error at line 2: -> The tag <BehaviorTree> with ID 'ReceiveGuest' must have exactly 1 child
+inline/gtest_if_then_else_8.xml	ChildCount	tick: IfThenElseNode must have either 2 or 3 children
+inline/gtest_if_then_else_9.xml	ChildCount	tick: IfThenElseNode must have either 2 or 3 children
+inline/gtest_name_validation_11.xml	InvalidName	Error at line 3: Model name 'Sub Tree' contains forbidden character ' '
+inline/gtest_name_validation_16.xml	InvalidName	Error at line 8: Port name 'input value' contains forbidden character ' '
+inline/gtest_name_validation_17.xml	InvalidName	Error at line 8: Port name 'ID' is a reserved attribute name
+inline/gtest_name_validation_18.xml	InvalidName	Error at line 8: Port name '1port' cannot start with a digit
+inline/gtest_name_validation_3.xml	ReservedNodeName	Error at line 2: 'Root' is a reserved name and cannot be used as a node type
+inline/gtest_name_validation_4.xml	ReservedNodeName	Error at line 2: 'Root' is a reserved name and cannot be used as a node type
+inline/gtest_name_validation_5.xml	InvalidName	Error at line 2: Model name 'Main Tree' contains forbidden character ' '
+inline/gtest_name_validation_6.xml	InvalidName	Error at line 2: Model name 'Main.Tree' contains forbidden character '.'
+inline/gtest_reactive_5.xml	ReactiveSequenceChild	Error at line 3: -> A ReactiveSequence cannot have more than one async child.
+inline/gtest_substitution_1.xml	MissingSubTree	tree Parent: Can't find a tree with name: Child
+inline/gtest_subtree_18.xml	UnknownNodeType	Error at line 3: -> Node not recognized: PrintToConsole
+inline/gtest_subtree_19.xml	SelfSubTree	tree MainTree: Recursive behavior tree cycle detected: tree 'MainTree' references itself (directly or indirectly)
+inline/gtest_subtree_20.xml	CircularSubTree	tree MainTree: Recursive behavior tree cycle detected: tree 'MainTree' references itself (directly or indirectly)
+inline/gtest_subtree_22.xml	DuplicateSubTreeName	tree MainTree: Duplicate SubTree path detected: 'my_worker'. Multiple SubTree nodes with the same 'name' attribute under the same parent are not allowed. Please use unique names or omit the 'name' attribute to auto-generate unique paths.
+inline/gtest_subtree_23.xml	DuplicateSubTreeName	tree MainTree: Duplicate SubTree path detected: 'my_task'. Multiple SubTree nodes with the same 'name' attribute under the same parent are not allowed. Please use unique names or omit the 'name' attribute to auto-generate unique paths.
+inline/gtest_subtree_26.xml	DuplicateSubTreeName	tree MainTree: Duplicate SubTree path detected: 'task'. Multiple SubTree nodes with the same 'name' attribute under the same parent are not allowed. Please use unique names or omit the 'name' attribute to auto-generate unique paths.
+inline/gtest_try_catch_8.xml	ChildCount	Error at line 3: -> The node 'TryCatch' must have at least 2 children
+inline/gtest_updates_2.xml	MissingSubTree	tree Main: Can't find a tree with name: Check
+inline/gtest_updates_3.xml	MissingSubTree	tree Main: Can't find a tree with name: Check
+inline/gtest_updates_4.xml	MissingSubTree	tree Main: Can't find a tree with name: Check
+inline/gtest_updates_5.xml	MissingSubTree	tree Main: Can't find a tree with name: Check
+inline/gtest_while_do_else_10.xml	ChildCount	tick: WhileDoElseNode must have either 2 or 3 children
+inline/gtest_while_do_else_9.xml	ChildCount	tick: WhileDoElseNode must have either 2 or 3 children
+inline/gtest_xml_null_subtree_id_1.xml	BadModel	Missing attribute 'ID' in SubTree element within TreeNodesModel
+inline/t07_load_multiple_xml_1.xml	MissingSubTree	tree MainTree: Can't find a tree with name: SubA
+inline/t14_subtree_model_2.xml	MissingSubTree	tree MainTree: Can't find a tree with name: MySub
+package.xml	RootElement	The XML must have a root node called <root>

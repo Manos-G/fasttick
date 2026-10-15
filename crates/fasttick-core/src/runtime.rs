@@ -310,6 +310,11 @@ impl RuntimeTree {
     }
 
     /// The full path of a node: the instance path, `/`, and the node name.
+    ///
+    /// This is a display path. It is not always equal to the path of BT.CPP
+    /// (`TreeNode::fullPath()`): for a node whose instance name is its type
+    /// ID, BT.CPP adds `::<uid>`. Use [`RuntimeTree::full_path`] for the
+    /// exact BT.CPP path.
     pub fn node_path(&self, index: NodeIndex) -> String {
         let node = &self.nodes[index.0];
         if node.is_subtree()
@@ -323,6 +328,59 @@ impl RuntimeTree {
         } else {
             format!("{}/{}", instance.fullpath, node.name)
         }
+    }
+
+    /// The full path of a node exactly as BT.CPP gives it
+    /// (`TreeNode::fullPath()`, the value of `NodeConfig::path`). The
+    /// `SqliteLogger` writes it in the `Nodes` table, and the substitution
+    /// rules of `BehaviorTreeFactory` match it.
+    ///
+    /// `createNodeFromXML` (`src/xml_parsing.cpp`) makes the path:
+    ///
+    /// - the prefix of the SubTree instance: empty for the main tree, else
+    ///   the instance path (`_fullpath` of the `<BehaviorTree>` element) and
+    ///   `/`;
+    /// - the instance name: the `name` attribute, else the type ID (for a
+    ///   `<SubTree>`: its `ID`, the tree ID);
+    /// - if the instance name is equal to the type ID: `::` and the UID.
+    ///   This also applies when a `name` attribute has the type ID as value.
+    ///
+    /// For a `<SubTree>` node, `WriteTreeToXML` writes this path in the
+    /// `_fullpath` attribute, so the function returns that attribute.
+    ///
+    /// Differences from [`RuntimeTree::node_path`]: `node_path` never adds
+    /// `::<uid>`, and it uses the type ID for an empty `name`. For example,
+    /// for `<CheckFlag/>` with UID 10 in the instance `navigate`,
+    /// `full_path` gives `navigate/CheckFlag::10` and `node_path` gives
+    /// `navigate/CheckFlag`. A node without a UID (an authoring file, not
+    /// runtime XML) gets no `::<uid>` part.
+    pub fn full_path(&self, index: NodeIndex) -> String {
+        let node = &self.nodes[index.0];
+        if node.is_subtree()
+            && let Some(fullpath) = node.attribute("_fullpath")
+        {
+            return fullpath.to_owned();
+        }
+        let type_id = if node.is_subtree() {
+            node.attribute("ID").unwrap_or("SubTree")
+        } else {
+            node.type_id.as_str()
+        };
+        let instance_name = node.attribute("name").unwrap_or(type_id);
+        let instance = &self.instances[node.instance.0];
+        let mut path = String::with_capacity(instance.fullpath.len() + instance_name.len() + 8);
+        if !instance.fullpath.is_empty() {
+            path.push_str(&instance.fullpath);
+            path.push('/');
+        }
+        path.push_str(instance_name);
+        if instance_name == type_id
+            && let Some(uid) = node.uid
+        {
+            path.push_str("::");
+            path.push_str(&uid.to_string());
+        }
+        path
     }
 
     /// The expanded children of a node: for a `<SubTree>` node, the root of
@@ -598,6 +656,44 @@ mod tests {
             tree.node_path(tree.index_of_uid(Uid(5)).unwrap()),
             "sub_a/fb"
         );
+    }
+
+    #[test]
+    fn full_paths_follow_btcpp() {
+        let tree = RuntimeTree::parse(SAMPLE).unwrap();
+        let path = |uid: u16| tree.full_path(tree.index_of_uid(Uid(uid)).unwrap());
+        assert_eq!(path(1), "root_sequence");
+        assert_eq!(path(2), "hello");
+        assert_eq!(path(3), "sub_a");
+        assert_eq!(path(4), "Sub::4");
+        assert_eq!(path(5), "sub_a/fb");
+        // The name is the type ID: BT.CPP adds "::<uid>".
+        assert_eq!(path(6), "sub_a/AlwaysFailure::6");
+        assert_eq!(path(7), "Sub::4/fb");
+        assert_eq!(path(8), "Sub::4/AlwaysFailure::8");
+        // node_path differs for these nodes.
+        assert_eq!(
+            tree.node_path(tree.index_of_uid(Uid(6)).unwrap()),
+            "sub_a/AlwaysFailure"
+        );
+    }
+
+    #[test]
+    fn full_paths_without_runtime_attributes() {
+        let xml = r#"<root>
+            <BehaviorTree ID="T"><Sequence name="">
+                <Action ID="Talk" _uid="7"/>
+                <Action ID="Talk" name="Talk"/>
+                <SubTree ID="Sub" _uid="9"/>
+                <SubTree ID="Sub" name="named"/>
+            </Sequence></BehaviorTree>
+        </root>"#;
+        let tree = RuntimeTree::parse(xml).unwrap();
+        let paths: Vec<String> = (0..tree.len())
+            .map(|i| tree.full_path(NodeIndex(i)))
+            .collect();
+        // An empty name stays empty (BT.CPP does not use the type ID then).
+        assert_eq!(paths, vec!["", "Talk::7", "Talk", "Sub::9", "named"]);
     }
 
     #[test]

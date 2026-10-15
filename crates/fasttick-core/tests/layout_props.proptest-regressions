@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 265de6bab8516ed2484d657308f4cff5685b737c489731bc87c6f96e67fd74fb # shrinks to raw = [(0, 183.19038, 0.0, 64), (0, 163.27867, 0.0, 65), (0, 90.3488, 0.0, 130), (0, 82.90041, 0.0, 138), (0, 0.0, 0.0, 58), (0, 0.0, 0.0, 62), (0, 138.41165, 0.0, 198), (0, 0.0, 0.0, 174), (0, 0.0, 0.0, 22), (0, 87.98182, 0.0, 194), (0, 0.0, 0.0, 0), (0, 0.0, 0.0, 0), (0, 0.0, 0.0, 0), (0, 0.0, 0.0, 0), (0, 0.0, 0.0, 0), (0, 0.0, 0.0, 0), (0, 0.0, 0.0, 0), (0, 0.0, 0.0, 0), (0, 0.0, 0.0, 0), (0, 0.0, 0.0, 0), (229618969, 0.0, 0.0, 88), (0, 0.0, 0.0, 78), (0, 0.0, 0.0, 0), (287633892, 0.0, 0.0, 36), (0, 0.0, 0.0, 44)], params = LayoutParams { direction: LeftRight, sibling_gap: 0.0, subtree_gap: 22.036283, level_gap: 0.0, forest_gap: 0.0, layered: false }
