@@ -18,6 +18,7 @@ use std::sync::Arc;
 use egui::{Id, RichText, Ui, WidgetText};
 use egui_dock::tab_viewer::OnCloseResponse;
 use egui_dock::{DockArea, DockState, TabViewer};
+use fasttick_core::project::{MissingFiles, MissingNames};
 use fasttick_core::runtime::{InstanceIndex, Uid};
 use fasttick_core::status::NodeStatus;
 use fasttick_log::sqlite::SessionInfo;
@@ -268,7 +269,7 @@ impl FastTickApp {
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         theme::install(&cc.egui_ctx, app.theme());
         for path in options.open {
-            if let Err(message) = app.open_path_now(&path) {
+            if let Err(message) = app.open_path_now(&cc.egui_ctx, &path) {
                 app.notify(&cc.egui_ctx, NoticeLevel::Error, message);
             }
         }
@@ -410,7 +411,7 @@ impl FastTickApp {
 
     /// Opens a file now, on the calling thread (command line, tests). The
     /// menu uses background jobs instead.
-    pub fn open_path_now(&mut self, path: &Path) -> Result<(), String> {
+    pub fn open_path_now(&mut self, ctx: &egui::Context, path: &Path) -> Result<(), String> {
         match RecentKind::for_path(path) {
             RecentKind::Log => {
                 let loaded = crate::jobs::read_log(path)
@@ -429,7 +430,10 @@ impl FastTickApp {
             RecentKind::Project | RecentKind::Tree => {
                 let loaded = crate::jobs::read_tree(path)
                     .map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
-                self.add_tree_document(path, loaded);
+                let missing = loaded.missing.clone();
+                if let Some(view) = self.add_tree_document(path, loaded) {
+                    self.offer_missing_files(ctx, view, path, &missing);
+                }
             }
         }
         Ok(())
@@ -495,6 +499,88 @@ impl FastTickApp {
         self.settings.add_recent(path);
         self.focus_view(view);
         Some(view)
+    }
+
+    /// Offers the XML files of the folder that have the missing trees and
+    /// node models of a new document.
+    fn offer_missing_files(
+        &mut self,
+        ctx: &egui::Context,
+        view: ViewId,
+        path: &Path,
+        found: &MissingFiles,
+    ) {
+        if found.is_empty() {
+            return;
+        }
+        let Some(doc) = self.workspace.doc_of_view(view).map(|d| d.id) else {
+            return;
+        };
+        let files = found.files().map(|p| file_name(p)).collect::<Vec<_>>();
+        let text = format!(
+            "{} uses {} that are not in the project. {} in the same folder {}: {}.",
+            file_name(path),
+            missing_summary(&found.missing),
+            counted(files.len(), "XML file", "XML files"),
+            if files.len() == 1 {
+                "has them"
+            } else {
+                "have them"
+            },
+            files.join(", ")
+        );
+        self.notify_with_action(
+            ctx,
+            NoticeLevel::Warning,
+            text,
+            "Add the files",
+            AppAction::AddMissingFiles(doc),
+        );
+    }
+
+    /// Adds the XML files of the folder that have the missing trees and
+    /// node models of a document.
+    fn add_missing_files(&mut self, ctx: &egui::Context, doc: DocId) {
+        let Some(editor) = self.workspace.editor_mut(doc) else {
+            return;
+        };
+        let result = editor.add_missing_files();
+        self.workspace.refresh_editor_views();
+        match result {
+            Ok(found) if found.missing.is_empty() => self.notify(
+                ctx,
+                NoticeLevel::Info,
+                "Nothing is missing: the project has all its trees and node models.",
+            ),
+            Ok(found) if found.is_empty() => self.notify(
+                ctx,
+                NoticeLevel::Warning,
+                format!(
+                    "No XML file in the folder has the missing {}.",
+                    missing_list(&found.missing)
+                ),
+            ),
+            Ok(found) => {
+                let files = found.files().map(|p| file_name(p)).collect::<Vec<_>>();
+                let mut text = format!(
+                    "Added {}: {}.",
+                    counted(files.len(), "file", "files"),
+                    files.join(", ")
+                );
+                if !found.still_missing.is_empty() {
+                    text.push_str(&format!(
+                        " These are still missing: {}.",
+                        missing_list(&found.still_missing)
+                    ));
+                }
+                self.notify(ctx, NoticeLevel::Info, text);
+            }
+            Err(message) => self.notify(
+                ctx,
+                NoticeLevel::Error,
+                format!("Cannot add the files: {message}"),
+            ),
+        }
     }
 
     fn add_log_document(
@@ -912,7 +998,7 @@ impl FastTickApp {
     fn set_theme(&mut self, ctx: &egui::Context, choice: ThemeChoice) {
         self.settings.theme = choice;
         self.theme_override = None;
-        ctx.set_theme(choice.preference());
+        theme::set_visuals(ctx, choice);
     }
 
     fn close_view(&mut self, view: ViewId) {
@@ -950,8 +1036,19 @@ impl FastTickApp {
     fn handle_jobs(&mut self, ctx: &egui::Context) {
         for result in self.jobs.poll() {
             match result {
-                JobResult::Picked { purpose, path } => {
-                    let Some(path) = path else {
+                JobResult::Picked { purpose, paths } => {
+                    if matches!(
+                        purpose,
+                        DialogPurpose::AddTreeFile | DialogPurpose::AddModelFile
+                    ) {
+                        if let Some(view) = self.project_view.take() {
+                            for path in paths {
+                                self.project_file_picked(ctx, view, purpose, path);
+                            }
+                        }
+                        continue;
+                    }
+                    let Some(path) = paths.into_iter().next() else {
                         continue;
                     };
                     match purpose {
@@ -1008,7 +1105,10 @@ impl FastTickApp {
                 }
                 JobResult::Tree { path, result } => match result {
                     Ok(loaded) => {
-                        self.add_tree_document(&path, loaded);
+                        let missing = loaded.missing.clone();
+                        if let Some(view) = self.add_tree_document(&path, loaded) {
+                            self.offer_missing_files(ctx, view, &path, &missing);
+                        }
                     }
                     Err(message) => {
                         self.settings.remove_recent(&path);
@@ -1249,6 +1349,7 @@ impl FastTickApp {
                 }
                 AppAction::ClearRecent => self.settings.recent.clear(),
                 AppAction::Edit(view, op) => self.run_edit(ctx, view, op),
+                AppAction::AddMissingFiles(doc) => self.add_missing_files(ctx, doc),
                 AppAction::RevealXml { view, file, node } => {
                     self.workspace.reveal_xml(view, file, node, true);
                     self.workspace.active_view = Some(view);
@@ -1477,7 +1578,7 @@ impl FastTickApp {
             self.run_command(&ctx, command);
         }
 
-        let palette = CanvasPalette::for_theme(ctx.theme());
+        let palette = theme::canvas_palette(self.theme(), ctx.theme());
 
         egui::Panel::top("fasttick_top_bar")
             .frame(
@@ -1764,6 +1865,24 @@ impl FastTickApp {
                 self.radio_item(ui, Command::ThemeLight, theme == ThemeChoice::Light);
                 self.radio_item(ui, Command::ThemeDark, theme == ThemeChoice::Dark);
                 self.radio_item(ui, Command::ThemeSystem, theme == ThemeChoice::System);
+                let mut family = "FastTick";
+                for choice in ThemeChoice::ALL {
+                    if choice.family() == "FastTick" {
+                        continue;
+                    }
+                    if choice.family() != family {
+                        family = choice.family();
+                        ui.separator();
+                        ui.label(RichText::new(family).small().weak());
+                    }
+                    if ui
+                        .add(egui::Button::selectable(theme == choice, choice.name()))
+                        .clicked()
+                    {
+                        let ctx = ui.ctx().clone();
+                        self.set_theme(&ctx, choice);
+                    }
+                }
             });
             submenu(ui, "Panels", |ui| {
                 let dock = &mut self.docks[self.mode.index()];
@@ -2017,13 +2136,13 @@ impl FastTickApp {
     /// The dialog that shows a loaded breakpoint file before the hooks go
     /// to the executor.
     fn breakpoint_dialog(&mut self, ctx: &egui::Context) {
+        let palette = theme::canvas_palette(self.theme(), ctx.theme());
         let Some(pending) = &mut self.pending_breakpoints else {
             return;
         };
         let mut open = true;
         let mut insert = false;
         let mut cancel = false;
-        let palette = CanvasPalette::for_theme(ctx.theme());
         egui::Window::new("Load breakpoints")
             .collapsible(false)
             .resizable(true)
@@ -2230,6 +2349,51 @@ fn disabled_reason(command: Command) -> &'static str {
         Command::SaveAs => "Open a tree file first.",
         _ => "Open a document first.",
     }
+}
+
+/// "1 tree", "2 trees", ...
+fn counted(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
+}
+
+/// "5 trees", "1 tree and 2 node types", ...
+fn missing_summary(missing: &MissingNames) -> String {
+    let trees = (!missing.trees.is_empty()).then(|| counted(missing.trees.len(), "tree", "trees"));
+    let types = (!missing.node_types.is_empty())
+        .then(|| counted(missing.node_types.len(), "node type", "node types"));
+    match (trees, types) {
+        (Some(trees), Some(types)) => format!("{trees} and {types}"),
+        (Some(text), None) | (None, Some(text)) => text,
+        (None, None) => "nothing".to_owned(),
+    }
+}
+
+/// "trees A, B and node types C".
+fn missing_list(missing: &MissingNames) -> String {
+    let join = |set: &std::collections::BTreeSet<String>| {
+        set.iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut parts = Vec::new();
+    if !missing.trees.is_empty() {
+        let label = if missing.trees.len() == 1 {
+            "tree"
+        } else {
+            "trees"
+        };
+        parts.push(format!("{label} {}", join(&missing.trees)));
+    }
+    if !missing.node_types.is_empty() {
+        let label = if missing.node_types.len() == 1 {
+            "node type"
+        } else {
+            "node types"
+        };
+        parts.push(format!("{label} {}", join(&missing.node_types)));
+    }
+    parts.join(" and ")
 }
 
 fn file_name(path: &Path) -> String {

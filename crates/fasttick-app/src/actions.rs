@@ -44,7 +44,6 @@ pub enum AppAction {
     ClearRecent,
     /// Change the edit document of a view (see [`crate::edit_ops`]).
     Edit(ViewId, EditOp),
-    /// Select an element of the edit document of a view and show it.
     /// Opens a file dialog for a project change of an edit view (add a
     /// file, make a new file, save the project file).
     ProjectFile {
@@ -68,6 +67,10 @@ pub enum AppAction {
         /// What the name is for.
         purpose: NamePurpose,
     },
+    /// Adds the XML files of the folder that have the missing trees and
+    /// node models of a document.
+    AddMissingFiles(DocId),
+    /// Select an element of the edit document of a view and show it.
     RevealXml {
         /// The view.
         view: ViewId,

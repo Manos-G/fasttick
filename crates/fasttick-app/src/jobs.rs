@@ -178,6 +178,9 @@ pub struct LoadingFile {
 pub struct LoadedTree {
     /// The editor state: the project, its history and its problems.
     pub editor: Box<crate::editor::EditorDoc>,
+    /// The XML files of the folder that have the missing trees and node
+    /// models of the project.
+    pub missing: fasttick_core::project::MissingFiles,
 }
 
 impl LoadedTree {
@@ -191,12 +194,13 @@ impl LoadedTree {
 /// The result of a job.
 #[derive(Debug)]
 pub enum JobResult {
-    /// A file dialog closed. `None` if the user cancelled.
+    /// A file dialog closed. The list is empty if the user cancelled.
     Picked {
         /// The purpose of the dialog.
         purpose: DialogPurpose,
-        /// The chosen file.
-        path: Option<PathBuf>,
+        /// The chosen files. Only the dialogs that add files to a project
+        /// accept more than one file.
+        paths: Vec<PathBuf>,
     },
     /// A tree file was read.
     Tree {
@@ -341,7 +345,7 @@ impl Jobs {
             if let Some(dir) = start.as_ref().and_then(|p| p.parent()) {
                 dialog = dialog.set_directory(dir);
             }
-            let path = match purpose {
+            let paths = match purpose {
                 DialogPurpose::OpenFile => dialog
                     .set_title("Open a project or a tree XML file")
                     .add_filter("Behavior trees and projects", &["xml", "ftproj"])
@@ -374,16 +378,28 @@ impl Jobs {
                     .add_filter("FastTick breakpoints", &["json"])
                     .add_filter("All files", &["*"])
                     .pick_file(),
-                DialogPurpose::AddTreeFile => dialog
-                    .set_title("Add a tree file to the project")
-                    .add_filter("Behavior trees", &["xml"])
-                    .add_filter("All files", &["*"])
-                    .pick_file(),
-                DialogPurpose::AddModelFile => dialog
-                    .set_title("Add a node model file to the project")
-                    .add_filter("Node models", &["xml"])
-                    .add_filter("All files", &["*"])
-                    .pick_file(),
+                DialogPurpose::AddTreeFile => {
+                    let paths = dialog
+                        .set_title("Add tree files to the project")
+                        .add_filter("Behavior trees", &["xml"])
+                        .add_filter("All files", &["*"])
+                        .pick_files();
+                    return JobResult::Picked {
+                        purpose,
+                        paths: paths.unwrap_or_default(),
+                    };
+                }
+                DialogPurpose::AddModelFile => {
+                    let paths = dialog
+                        .set_title("Add node model files to the project")
+                        .add_filter("Node models", &["xml"])
+                        .add_filter("All files", &["*"])
+                        .pick_files();
+                    return JobResult::Picked {
+                        purpose,
+                        paths: paths.unwrap_or_default(),
+                    };
+                }
                 DialogPurpose::NewTreeFile => dialog
                     .set_title("New tree file")
                     .set_file_name("tree.xml")
@@ -406,7 +422,10 @@ impl Jobs {
                         .map(|p| with_extension(p, extension))
                 }
             };
-            JobResult::Picked { purpose, path }
+            JobResult::Picked {
+                purpose,
+                paths: paths.into_iter().collect(),
+            }
         });
     }
 
@@ -550,8 +569,10 @@ pub fn read_tree(path: &Path) -> Result<LoadedTree, String> {
         ));
     }
     let editor = crate::editor::EditorDoc::open(path)?;
+    let missing = editor.project().find_missing_files();
     Ok(LoadedTree {
         editor: Box::new(editor),
+        missing,
     })
 }
 

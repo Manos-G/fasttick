@@ -12,6 +12,12 @@ License 2.0. The licence text is in
 `crates/fasttick-app/assets/fonts/LICENSE` and in the Apache License 2.0
 section below.
 
+The OpenWire, Catppuccin and VS Code themes use the colour values of the
+OpenWire project (`css/themes.css`, MIT License, Copyright (c) 2026
+Manos-G). The Catppuccin colours come from Catppuccin
+(<https://catppuccin.com>, MIT License). The VS Code colours come from the
+Dark Modern, Dark+ and Light Modern themes of Visual Studio Code.
+
 ## Summary
 
 - MIT License: 276 crate(s)

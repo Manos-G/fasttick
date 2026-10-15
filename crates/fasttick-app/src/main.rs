@@ -1,20 +1,24 @@
 //! FastTick: a tree editor, live debugger and log replayer for
 //! BehaviorTree.CPP 4.
 //!
-//! Usage: `fasttick [--theme light|dark|system] [--mode edit|live|replay]
+//! Usage: `fasttick [--theme THEME] [--mode edit|live|replay]
 //! [--connect HOST[:PORT]] [FILE...]`
 
 use fasttick_app::app::{FastTickApp, Mode, StartOptions, parse_endpoint};
 use fasttick_app::theme::ThemeChoice;
 
-const USAGE: &str = "Usage: fasttick [--theme light|dark|system] [--mode edit|live|replay]
+const USAGE: &str = "Usage: fasttick [--theme THEME] [--mode edit|live|replay]
                 [--connect HOST[:PORT]] [FILE...]
 
 Opens tree XML files (.xml), projects (.ftproj) and logs (.btlog, or SQLite
 .db3 and .btdb).
 
 Options:
-  --theme THEME          Use this theme for this session (light, dark or system)
+  --theme THEME          Use this theme for this session: light, dark, system,
+                         openwire-light, openwire-dark, catppuccin-latte,
+                         catppuccin-frappe, catppuccin-macchiato,
+                         catppuccin-mocha, vscode-dark-modern,
+                         vscode-dark-plus or vscode-light-modern
   --mode MODE            Start in this mode (edit, live or replay)
   --connect HOST[:PORT]  Connect to an executor (the default port is 1667)
   --help                 Show this text
@@ -104,6 +108,8 @@ mod tests {
         assert_eq!(options.open.len(), 2);
         assert!(args(&["--theme"]).is_err());
         assert!(args(&["--theme", "pink"]).is_err());
+        let options = args(&["--theme", "catppuccin-mocha"]).unwrap().unwrap();
+        assert_eq!(options.theme, Some(ThemeChoice::CatppuccinMocha));
         assert!(args(&["--mode", "x"]).is_err());
         assert!(args(&["--frobnicate"]).is_err());
         let options = args(&["--connect", "robot:1700"]).unwrap().unwrap();

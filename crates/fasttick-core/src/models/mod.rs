@@ -278,6 +278,18 @@ impl NodeModel {
             .map(|(_, v)| v.as_str())
     }
 
+    /// A short description of the type: the `description` metadata field,
+    /// else the FastTick text of a built-in node.
+    pub fn description(&self) -> Option<&str> {
+        self.metadata_value("description")
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .or_else(|| match self.source {
+                ModelSource::Builtin => crate::builtin::description(&self.id),
+                _ => None,
+            })
+    }
+
     /// True if a node of this type must set the port.
     ///
     /// - For a SubTree model, BT.CPP checks the rule when it creates the

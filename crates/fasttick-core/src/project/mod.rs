@@ -28,6 +28,7 @@
 
 mod file;
 mod includes;
+mod missing;
 
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
@@ -47,6 +48,7 @@ pub use includes::{
     AMENT_PREFIX_PATH, IncludeLink, IncludeProblem, ament_prefix_path_from_env, find_package_share,
     resolve_include_path,
 };
+pub use missing::{MAX_FOLDER_FILE_SIZE, MAX_FOLDER_FILES, MissingFiles, MissingNames};
 
 /// The identifier of a file in a [`Project`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -914,6 +916,46 @@ impl Project {
             .or_else(|| self.find_tree(id))
     }
 
+    /// The blackboard keys that the ports of a tree use (values `{key}` and
+    /// `{=}`), sorted, without the keys of the root blackboard (`{@key}`).
+    /// The attributes of a `<SubTree>` node can connect these keys to keys
+    /// of the parent tree (remapping). The tree is the one that
+    /// [`Project::find_tree_from`] finds.
+    pub fn tree_keys(&self, file: FileId, tree_id: &str) -> Vec<String> {
+        use crate::bt::{AttributeClass, NodeView, PortValue};
+        let Some(tree) = self.find_tree_from(file, tree_id) else {
+            return Vec::new();
+        };
+        let (Some(bt_file), Some(entry)) = (self.file(tree.file), self.tree(tree)) else {
+            return Vec::new();
+        };
+        let doc = bt_file.doc();
+        let mut keys = std::collections::BTreeSet::new();
+        for id in doc.descendants(entry.element) {
+            let Some(view) = NodeView::new(doc, id) else {
+                continue;
+            };
+            for attribute in view.attributes() {
+                if attribute.class != AttributeClass::Port {
+                    continue;
+                }
+                match PortValue::parse(attribute.value) {
+                    PortValue::BlackboardRef {
+                        key,
+                        root_scope: false,
+                    } if !key.is_empty() => {
+                        keys.insert(key.to_owned());
+                    }
+                    PortValue::SameName => {
+                        keys.insert(attribute.name.to_owned());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        keys.into_iter().collect()
+    }
+
     fn find_tree_in_closure(&self, file: FileId, id: &str) -> Option<TreeRef> {
         self.include_closure(file).into_iter().find_map(|f| {
             self.file(f)?
@@ -1232,6 +1274,29 @@ fn stem(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn tree_keys_lists_the_keys_of_the_ports() {
+        let file = BtFile::parse(
+            r#"<root BTCPP_format="4">
+                 <BehaviorTree ID="Get">
+                   <Sequence _skipIf="@magazine==1">
+                     <Move side="{side}" pose="{position}" speed="3"/>
+                     <Print tag="{position}" root="{@magazine}" same="{=}"/>
+                     <SubTree ID="Other" color_id="{color_id}"/>
+                   </Sequence>
+                 </BehaviorTree>
+               </root>"#,
+            None,
+        )
+        .unwrap();
+        let (project, id) = Project::with_file("p", file);
+        assert_eq!(
+            project.tree_keys(id, "Get"),
+            ["color_id", "position", "same", "side"]
+        );
+        assert!(project.tree_keys(id, "Missing").is_empty());
+    }
     use super::*;
 
     #[test]

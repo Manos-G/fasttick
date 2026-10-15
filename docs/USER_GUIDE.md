@@ -33,7 +33,7 @@ Options:
 
 | Option | Meaning |
 |---|---|
-| `--theme light\|dark\|system` | The theme for this session. |
+| `--theme THEME` | The theme for this session (see 2.1). |
 | `--mode edit\|live\|replay` | The mode at the start. |
 | `--connect HOST[:PORT]` | Connect to an executor. The default port is 1667. |
 | `--help`, `--version` | Show the help text or the version. |
@@ -68,6 +68,31 @@ The canvas shows one tree. These actions are the same in all modes:
 
 Push F1 to see all keyboard shortcuts.
 
+Put the pointer on a node to see a short description of its type, all its
+ports and its conditions. The description comes from the model of the
+type: FastTick has a text for each built-in node of BT.CPP, and it uses
+the `description` metadata of your own models. The **Palette** shows the
+same description, and the description of each port.
+
+Each node card shows all its ports and remappings. A long value (for
+example the script of a `Script` node) continues on the next lines, and the
+card becomes taller. A value has a maximum of 12 lines on the card; the
+Inspector and the tooltip show all of it.
+
+### 2.1 Themes
+
+Select **View** > **Theme**. These themes are available:
+
+| Group | Themes | `--theme` value |
+|---|---|---|
+| FastTick | Light, Dark, System | `light`, `dark`, `system` |
+| OpenWire | OpenWire Light, OpenWire Dark | `openwire-light`, `openwire-dark` |
+| Catppuccin | Latte, Frappé, Macchiato, Mocha | `catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha` |
+| VS Code | Dark Modern, Dark+, Light Modern | `vscode-dark-modern`, `vscode-dark-plus`, `vscode-light-modern` |
+
+**System** uses FastTick Light or FastTick Dark, as your system setting.
+FastTick keeps the theme in its settings.
+
 ## 3. Edit mode
 
 ### 3.1 Open, make and save files
@@ -89,10 +114,34 @@ white space stay.
 A project lists one or more tree files and model files. Use the **Project**
 menu in the **Trees** panel:
 
-- **Add tree file…** adds an XML file to the project.
+- **Add tree files…** adds XML files to the project. You can select more
+  than one file.
 - **New tree file…** makes a new XML file with one tree.
-- **Add model file…** adds a file with node models (see 3.6).
+- **Add model files…** adds files with node models (see 3.6).
+- **Add missing files from the folder** finds the XML files that have the
+  missing SubTrees and node models, and adds them (see below).
 - **Save project as…** writes the project file (`.ftproj`).
+
+A tree often uses SubTrees that are in other files of the same folder,
+without an `<include>`. The executor loads all these files. When you open
+such a tree, FastTick looks at the XML files in the same folder. If they
+have the missing trees, a notice shows the file names. Click **Add the
+files** to add them to the project. FastTick also adds the files that the
+new files need (for example a library that uses other libraries). A file
+with only a `<TreeNodesModel>` becomes a model file when it has a missing
+node model.
+
+Example: `B1_localize.xml` uses the SubTrees `GetMaterial` and
+`LeaveMaterial` (in `SubTrees_library.xml`) and `Reset`, `SideArmsOpen` and
+`SideArmsClose` (in `Automation_library.xml`). Do these steps:
+
+1. Open `B1_localize.xml`.
+2. Click **Add the files** in the notice, or select **Project** > **Add
+   missing files from the folder**.
+3. Select **Project** > **Save project as…** and save the project in the
+   same folder.
+
+Next time, open the `.ftproj` file. It opens all the files together.
 
 The **Trees** panel shows the trees of each file. Click a tree to show it.
 The word "main" marks the `main_tree_to_execute` of each file.
@@ -108,8 +157,12 @@ To add, rename or delete a tree, use **Add tree…** or right-click the tree.
     (top and bottom ends in the left-to-right layout),
   - on an empty place to add an unconnected node.
 - Double-click a type in the palette to add it to the selected node.
-- Drag a node to move it with its children. A drop on an empty place
-  disconnects the node. Push Escape during the drag to cancel the move.
+- Drag a node to move it with its children. You do not have to drop on a
+  card exactly: a drop near a card (for example between two siblings)
+  goes to the nearest card, as if it were on the nearest end of that card.
+  Only a drop far from all cards disconnects the node. The label next to
+  the pointer tells where the node goes. Push Escape during the drag to
+  cancel the move.
 - Right-click a node to see the edit actions: **Add child**, **Add sibling
   before**, **Add sibling after**, **Cut**, **Copy**, **Duplicate**,
   **Delete**, **Paste as child**, **Move up**, **Move down**, **Disconnect**
@@ -128,11 +181,17 @@ Select a node. The **Inspector** shows its properties:
 - **Name**: the `name` attribute. An empty name removes the attribute.
 - **Type**: select another type of the same kind. The attributes and the
   children stay.
-- **Ports**: one row for each port of the model. A bold name and a star
-  mark a required port. The hint text shows the default value. Click
-  **{ }** to change between a literal value and a blackboard key. Click
-  **×** to remove the attribute. Use **Add port** for a port that the model
-  does not have.
+- **Ports**: one field for each port of the model, the full width of the
+  panel, below the port name, its type and its description. A long value
+  continues on the next lines. Push Enter to end the edit. A bold name and
+  a star mark a required port. The hint text shows the default value.
+  Click **{ }** to change between a literal value and a blackboard key.
+  Click **×** to remove the attribute. Use **Add port** for a port that the
+  model does not have.
+- **Ports and remappings** (SubTree nodes): the ports of the model of the
+  tree, the remappings of the node, and the blackboard keys that the tree
+  uses ("key of the tree"). Type a value or `{key}` in the field of a key
+  to connect it.
 - **Remapping** (SubTree nodes): **Automatic (_autoremap)**.
 - **Pre- and post-conditions**: one script for each condition. An empty
   script removes the condition. FastTick checks each script with the
@@ -175,7 +234,7 @@ models in project model files.
 To use the models of your own nodes:
 
 1. Export them with `BT::writeTreeNodesModelXML` to an XML file.
-2. In the **Trees** panel, select **Project** > **Add model file…**.
+2. In the **Trees** panel, select **Project** > **Add model files…**.
 3. Select the XML file.
 
 The types show in the palette, and the "not known" problems go away. To

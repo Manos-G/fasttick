@@ -10,10 +10,16 @@
 
 use super::model::NodeCategory;
 
-/// Gives the category of a node type ID.
+/// Gives the category and the description of a node type ID.
 pub trait CategoryLookup {
     /// The category of `type_id`, or `None` if no model is known.
     fn category(&self, type_id: &str) -> Option<NodeCategory>;
+
+    /// A short description of `type_id`, if the model has one. The default
+    /// knows the built-in nodes.
+    fn description(&self, type_id: &str) -> Option<String> {
+        fasttick_core::builtin::description(type_id).map(str::to_owned)
+    }
 }
 
 /// The built-in nodes of BT.CPP 4.9.0.
@@ -84,6 +90,7 @@ impl CategoryLookup for BuiltinCategories {
 #[derive(Debug, Clone, Default)]
 pub struct TableCategories {
     entries: std::collections::HashMap<String, NodeCategory>,
+    descriptions: std::collections::HashMap<String, String>,
 }
 
 impl TableCategories {
@@ -95,7 +102,20 @@ impl TableCategories {
     {
         TableCategories {
             entries: entries.into_iter().map(|(k, v)| (k.into(), v)).collect(),
+            descriptions: std::collections::HashMap::new(),
         }
+    }
+
+    /// Adds descriptions of types: pairs of (type ID, description).
+    pub fn with_descriptions<I, S, D>(mut self, descriptions: I) -> Self
+    where
+        I: IntoIterator<Item = (S, D)>,
+        S: Into<String>,
+        D: Into<String>,
+    {
+        self.descriptions
+            .extend(descriptions.into_iter().map(|(k, v)| (k.into(), v.into())));
+        self
     }
 }
 
@@ -105,6 +125,16 @@ impl CategoryLookup for TableCategories {
             .get(type_id)
             .copied()
             .or_else(|| BuiltinCategories.category(type_id))
+    }
+
+    fn description(&self, type_id: &str) -> Option<String> {
+        match self.descriptions.get(type_id) {
+            Some(text) => Some(text.clone()),
+            // A type of the table without a description is not the
+            // built-in type.
+            None if self.entries.contains_key(type_id) => None,
+            None => BuiltinCategories.description(type_id),
+        }
     }
 }
 
@@ -133,6 +163,13 @@ mod tests {
         let table = TableCategories::new([("MyCheck", NodeCategory::Condition)]);
         assert_eq!(table.category("MyCheck"), Some(NodeCategory::Condition));
         assert_eq!(table.category("Inverter"), Some(NodeCategory::Decorator));
+        assert_eq!(table.description("MyCheck"), None);
+        assert!(table.description("Inverter").unwrap().contains("SUCCESS"));
+        let table = table.with_descriptions([("MyCheck", "Checks a thing.")]);
+        assert_eq!(
+            table.description("MyCheck").as_deref(),
+            Some("Checks a thing.")
+        );
     }
 
     /// The table agrees with the embedded model list of fasttick-core.

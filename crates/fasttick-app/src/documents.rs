@@ -724,12 +724,17 @@ pub fn runtime_categories(runtime: &RuntimeTree) -> TableCategories {
     ) else {
         return TableCategories::default();
     };
+    let models = parsed.into_models();
+    let descriptions: Vec<(String, String)> = models
+        .iter()
+        .filter_map(|m| Some((m.id.clone(), m.description()?.to_owned())))
+        .collect();
     TableCategories::new(
-        parsed
-            .into_models()
+        models
             .into_iter()
             .map(|model| (model.id, crate::canvas::category_of_kind(model.kind))),
     )
+    .with_descriptions(descriptions)
 }
 
 /// Shows a replay state on a canvas tree.

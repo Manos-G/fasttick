@@ -4,7 +4,10 @@
 //! end at a [`DropSpot`]. The pointer position on the card under the
 //! pointer selects the placement: the two ends of the card along the
 //! sibling axis put the node before or after the target, the middle puts
-//! it inside as the last child. The core crate makes the final check (for
+//! it inside as the last child. If the pointer is near a card but not on
+//! it (for example between two siblings), the nearest card is the target,
+//! as if the pointer were on its nearest edge. Only a drop far from all
+//! cards disconnects the node. The core crate makes the final check (for
 //! example, a decorator that has a child already); the canvas only shows
 //! where the node goes.
 
@@ -54,6 +57,10 @@ pub struct NewNodePayload {
 /// node that can have children.
 const END_ZONE: f32 = 0.25;
 
+/// The distance (screen points) from a card at which a drop still goes to
+/// that card.
+pub const SNAP_DISTANCE: f32 = 48.0;
+
 /// True if nodes of this category can have children.
 pub fn takes_children(category: NodeCategory) -> bool {
     matches!(
@@ -64,16 +71,23 @@ pub fn takes_children(category: NodeCategory) -> bool {
 
 /// The drop spot at world position `p`. `moving` are the dragged nodes
 /// (empty for a new node): a node cannot go into itself or into one of its
-/// descendants.
+/// descendants. `snap` is the distance (world units) at which the nearest
+/// card is the target when the pointer is on no card.
 pub fn drop_spot(
     tree: &CanvasTree,
     rects: &[Rect],
     direction: LayoutDirection,
     p: Pos2,
     moving: &[CanvasNodeId],
+    snap: f32,
 ) -> DropSpot {
-    let Some(target) = hit::hit_node(rects, p, 0.0) else {
-        return DropSpot::Background;
+    let (target, p) = match hit::hit_node(rects, p, 0.0) {
+        Some(target) => (target, p),
+        None => match nearest_target(tree, rects, p, moving, snap) {
+            // The nearest point of the card selects the placement.
+            Some((target, rect)) => (target, rect.clamp(p)),
+            None => return DropSpot::Background,
+        },
     };
     let Some(node) = tree.get(target) else {
         return DropSpot::Background;
@@ -84,9 +98,7 @@ pub fn drop_spot(
     let Some(rect) = rects.get(target.0 as usize) else {
         return DropSpot::Invalid;
     };
-    // Expanded SubTree nodes show inline children, but in the file they are
-    // leaves.
-    let container = takes_children(node.category) && node.subtree.is_none();
+    let container = is_container(tree, target);
     let fraction = match direction {
         LayoutDirection::TopDown => (p.x - rect.min.x) / rect.width().max(1.0),
         LayoutDirection::LeftRight => (p.y - rect.min.y) / rect.height().max(1.0),
@@ -113,6 +125,42 @@ pub fn drop_spot(
         DropPlacement::After
     };
     DropSpot::Node { target, placement }
+}
+
+/// True if the node can take children in the file. Expanded SubTree nodes
+/// show inline children, but in the file they are leaves.
+fn is_container(tree: &CanvasTree, id: CanvasNodeId) -> bool {
+    tree.get(id)
+        .is_some_and(|n| takes_children(n.category) && n.subtree.is_none())
+}
+
+/// The card nearest to `p` (not further than `snap`) that can take a drop:
+/// not read-only, not moved, and not a root without children.
+fn nearest_target(
+    tree: &CanvasTree,
+    rects: &[Rect],
+    p: Pos2,
+    moving: &[CanvasNodeId],
+    snap: f32,
+) -> Option<(CanvasNodeId, Rect)> {
+    let mut best: Option<(f32, CanvasNodeId, Rect)> = None;
+    for (index, rect) in rects.iter().enumerate() {
+        let distance = rect.distance_to_pos(p);
+        if distance > snap || best.is_some_and(|(d, _, _)| d <= distance) {
+            continue;
+        }
+        let id = CanvasNodeId(index as u32);
+        let Some(node) = tree.get(id) else {
+            continue;
+        };
+        let usable = !node.inline
+            && !is_in_moving(tree, id, moving)
+            && (node.parent.is_some() || is_container(tree, id));
+        if usable {
+            best = Some((distance, id, *rect));
+        }
+    }
+    best.map(|(_, id, rect)| (id, rect))
 }
 
 /// True if `id` is one of `moving` or a descendant of one.
@@ -187,7 +235,7 @@ mod tests {
     }
 
     fn spot(tree: &CanvasTree, rects: &[Rect], p: Pos2, moving: &[CanvasNodeId]) -> DropSpot {
-        drop_spot(tree, rects, LayoutDirection::TopDown, p, moving)
+        drop_spot(tree, rects, LayoutDirection::TopDown, p, moving, 30.0)
     }
 
     #[test]
@@ -231,6 +279,49 @@ mod tests {
     }
 
     #[test]
+    fn a_drop_near_a_card_goes_to_that_card() {
+        let (tree, rects) = sample();
+        let (root, a, b) = (CanvasNodeId(0), CanvasNodeId(1), CanvasNodeId(2));
+        // Between the two leaves (x 100..150): after the left one, before
+        // the right one, by distance.
+        assert_eq!(
+            spot(&tree, &rects, pos2(110.0, 120.0), &[]),
+            DropSpot::Node {
+                target: a,
+                placement: DropPlacement::After
+            }
+        );
+        assert_eq!(
+            spot(&tree, &rects, pos2(140.0, 120.0), &[]),
+            DropSpot::Node {
+                target: b,
+                placement: DropPlacement::Before
+            }
+        );
+        // Below the middle of the root: into the root.
+        assert_eq!(
+            spot(&tree, &rects, pos2(100.0, 60.0), &[]),
+            DropSpot::Node {
+                target: root,
+                placement: DropPlacement::Inside
+            }
+        );
+        // A moved node is not a target: the next card is.
+        assert_eq!(
+            spot(&tree, &rects, pos2(125.0, 120.0), &[a]),
+            DropSpot::Node {
+                target: b,
+                placement: DropPlacement::Before
+            }
+        );
+        // Far from all cards: an empty place.
+        assert_eq!(
+            spot(&tree, &rects, pos2(100.0, 200.0), &[]),
+            DropSpot::Background
+        );
+    }
+
+    #[test]
     fn left_right_uses_the_vertical_axis() {
         let (tree, rects) = sample();
         let leaf = CanvasNodeId(1);
@@ -241,6 +332,7 @@ mod tests {
                 LayoutDirection::LeftRight,
                 pos2(50.0, y),
                 &[],
+                30.0,
             )
         };
         assert_eq!(

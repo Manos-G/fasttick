@@ -3,7 +3,7 @@
 //! double-click it to add it to the selected node.
 
 use egui::{Id, RichText, Sense, Ui};
-use fasttick_core::models::{ModelSource, NodeModel};
+use fasttick_core::models::{ModelSource, NodeKind, NodeModel};
 
 use super::PanelContext;
 use crate::actions::AppAction;
@@ -90,7 +90,13 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                             .lookup_model(file, &model.id)
                             .map(|(_, s)| s)
                             .unwrap_or(ModelSource::Unattached);
-                        item(ui, view, model, source, cx.palette, cx.actions);
+                        item(ui, view, model, source, cx.palette, cx.actions, |model| {
+                            if model.kind == NodeKind::SubTree {
+                                project.tree_keys(file, &model.id)
+                            } else {
+                                Vec::new()
+                            }
+                        });
                     }
                 });
             }
@@ -108,6 +114,7 @@ fn item(
     source: ModelSource,
     palette: &CanvasPalette,
     actions: &mut Vec<AppAction>,
+    tree_keys: impl FnOnce(&NodeModel) -> Vec<String>,
 ) {
     let payload = NewNodePayload {
         type_id: model.id.clone(),
@@ -142,7 +149,7 @@ fn item(
             },
         ));
     }
-    let response = response.on_hover_ui(|ui| model_tooltip(ui, model, source));
+    let response = response.on_hover_ui(|ui| model_tooltip(ui, model, source, tree_keys(model)));
     response.context_menu(|ui| {
         if ui.button("Add to the selected node").clicked() {
             actions.push(AppAction::Edit(
@@ -186,8 +193,10 @@ fn item(
     });
 }
 
-/// The tooltip of a palette entry: the kind, the source and the ports.
-fn model_tooltip(ui: &mut Ui, model: &NodeModel, source: ModelSource) {
+/// The tooltip of a palette entry: the kind, the source, the description,
+/// all ports and, for a tree, the blackboard keys that it uses.
+fn model_tooltip(ui: &mut Ui, model: &NodeModel, source: ModelSource, tree_keys: Vec<String>) {
+    ui.set_max_width(420.0);
     ui.label(RichText::new(&model.id).strong());
     ui.label(
         RichText::new(format!(
@@ -203,28 +212,69 @@ fn model_tooltip(ui: &mut Ui, model: &NodeModel, source: ModelSource) {
         ))
         .weak(),
     );
-    if let Some(description) = model.metadata_value("description") {
+    if let Some(description) = model.description() {
         ui.label(description);
     }
-    if model.ports.is_empty() {
+    let keys: Vec<&String> = tree_keys
+        .iter()
+        .filter(|key| model.port(key).is_none())
+        .collect();
+    if model.ports.is_empty() && keys.is_empty() {
         ui.label(RichText::new("No ports").weak());
         return;
     }
-    egui::Grid::new(("palette_tip", &model.id))
-        .num_columns(3)
-        .spacing([8.0, 2.0])
-        .show(ui, |ui| {
-            for port in &model.ports {
-                ui.label(RichText::new(port.direction.tag()).weak());
-                let mut name = RichText::new(&port.name).monospace();
-                if model.is_port_required(port) {
-                    name = name.strong();
+    if !model.ports.is_empty() {
+        ui.separator();
+        egui::Grid::new(("palette_tip", &model.id))
+            .num_columns(3)
+            .spacing([8.0, 2.0])
+            .show(ui, |ui| {
+                for port in &model.ports {
+                    ui.label(RichText::new(port.direction.tag()).weak());
+                    let mut name = RichText::new(&port.name).monospace();
+                    if model.is_port_required(port) {
+                        name = name.strong();
+                    }
+                    ui.label(name);
+                    let mut details = port
+                        .type_name
+                        .as_deref()
+                        .map(crate::panels::node_editor::short_type)
+                        .unwrap_or_default();
+                    if let Some(default) = port.default.as_deref().filter(|d| !d.is_empty()) {
+                        if !details.is_empty() {
+                            details.push_str(", ");
+                        }
+                        details.push_str(&format!("default {default}"));
+                    }
+                    ui.label(RichText::new(details).weak());
+                    ui.end_row();
+                    if let Some(description) = &port.description {
+                        ui.label("");
+                        ui.label(RichText::new(description).small());
+                        ui.label("");
+                        ui.end_row();
+                    }
                 }
-                ui.label(name);
-                ui.label(RichText::new(port.type_name.as_deref().unwrap_or("")).weak());
-                ui.end_row();
-            }
-        });
+            });
+    }
+    if !keys.is_empty() {
+        ui.separator();
+        ui.label(
+            RichText::new("Blackboard keys of the tree (connect them on the SubTree node):")
+                .small()
+                .weak(),
+        );
+        ui.label(
+            RichText::new(
+                keys.iter()
+                    .map(|k| k.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+            .monospace(),
+        );
+    }
 }
 
 #[cfg(test)]

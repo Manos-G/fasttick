@@ -223,15 +223,43 @@ pub struct CardText {
     pub label: String,
     /// The type line, if the label is not the type ID.
     pub type_line: Option<String>,
-    /// The port lines that the card shows (name and value), shortened to
-    /// fit.
-    pub ports: Vec<(String, String)>,
-    /// Text such as "+3 more", if not all ports fit.
-    pub more: Option<String>,
-    /// The condition lines (attribute name and script), shortened to fit.
-    pub conditions: Vec<(String, String)>,
+    /// All ports of the node (name and value). A long value continues on
+    /// the next lines.
+    pub ports: Vec<CardEntry>,
+    /// The conditions (attribute name and script), in the same form.
+    pub conditions: Vec<CardEntry>,
     /// The card size in world units.
     pub size: egui::Vec2,
+}
+
+impl CardText {
+    /// The number of text lines of the ports.
+    pub fn port_line_count(&self) -> usize {
+        self.ports.iter().map(CardEntry::line_count).sum()
+    }
+
+    /// The number of text lines of the conditions.
+    pub fn condition_line_count(&self) -> usize {
+        self.conditions.iter().map(CardEntry::line_count).sum()
+    }
+}
+
+/// A port or a condition on a card: the name, then the value in one or
+/// more lines. The lines after the first start below the first character
+/// of the value.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CardEntry {
+    /// The name, shortened to fit.
+    pub name: String,
+    /// The lines of the value (at least one).
+    pub value: Vec<String>,
+}
+
+impl CardEntry {
+    /// The number of text lines (at least one).
+    pub fn line_count(&self) -> usize {
+        self.value.len().max(1)
+    }
 }
 
 /// One node of a [`CanvasTree`].
@@ -249,6 +277,8 @@ pub struct CanvasNode {
     pub category: NodeCategory,
     /// True if no model gave the category and the builder inferred it.
     pub category_inferred: bool,
+    /// A short description of the type (from its model), for the tooltip.
+    pub description: Option<String>,
     /// The parent node.
     pub parent: Option<CanvasNodeId>,
     /// The children, in order.
@@ -285,6 +315,7 @@ impl CanvasNode {
             type_id: type_id.into(),
             category: NodeCategory::Unknown,
             category_inferred: false,
+            description: None,
             parent: None,
             children: Vec::new(),
             depth: 0,
@@ -555,6 +586,14 @@ impl CanvasTree {
             let (category, inferred) = categorize(runtime_node, categories);
             node.category = category;
             node.category_inferred = inferred;
+            node.description = if runtime_node.is_subtree() {
+                target_id
+                    .as_deref()
+                    .and_then(|id| categories.description(id))
+                    .or_else(|| categories.description("SubTree"))
+            } else {
+                categories.description(&runtime_node.type_id)
+            };
 
             if runtime_node.is_subtree() {
                 let tree_id = runtime_node

@@ -15,7 +15,8 @@ demo notes [M1](docs/demo/M1.md), [M2](docs/demo/M2.md),
 
 - Edit BT.CPP v4 XML files (`BTCPP_format="4"`) without loss of data:
   comments, attribute order and white space stay.
-- Projects with more than one XML file (`.ftproj`).
+- Projects with more than one XML file (`.ftproj`). FastTick finds the
+  files in the same folder that have the missing SubTrees and node models.
 - A tree editor: drag and drop, copy and paste, undo and redo, automatic
   layout, an inspector for ports and conditions, SubTree tools, a palette
   with node models, validation with the rules of BT.CPP, an XML panel and
@@ -26,6 +27,10 @@ demo notes [M1](docs/demo/M1.md), [M2](docs/demo/M2.md),
 - Replay of `.btlog` files (`BT::FileLogger2`) and SQLite logs
   (`BT::SqliteLogger`): timeline, transitions table, statistics, JSON and CSV
   export.
+- Descriptions of the node types when you hover over a node.
+- Twelve themes: FastTick Light and Dark, OpenWire Light and Dark,
+  Catppuccin (Latte, Frappé, Macchiato, Mocha) and VS Code (Dark Modern,
+  Dark+, Light Modern).
 - Smooth with trees of 5,000 nodes.
 
 ## Build

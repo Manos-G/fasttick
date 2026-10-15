@@ -167,9 +167,9 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
             ui.menu_button("Project", |ui| {
                 for (label, purpose, tip) in [
                     (
-                        "Add tree file…",
+                        "Add tree files…",
                         DialogPurpose::AddTreeFile,
-                        "Add an XML file to the project",
+                        "Add XML files to the project",
                     ),
                     (
                         "New tree file…",
@@ -177,9 +177,9 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                         "Make a new XML file in the project",
                     ),
                     (
-                        "Add model file…",
+                        "Add model files…",
                         DialogPurpose::AddModelFile,
-                        "Add a <TreeNodesModel> file (for example from BT::writeTreeNodesModelXML)",
+                        "Add <TreeNodesModel> files (for example from BT::writeTreeNodesModelXML)",
                     ),
                     (
                         "Save project as…",
@@ -194,6 +194,18 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                         });
                         ui.close();
                     }
+                }
+                ui.separator();
+                if ui
+                    .button("Add missing files from the folder")
+                    .on_hover_text(
+                        "Look in the folder of the project files for the XML files that \
+                         have the missing SubTrees and node models, and add them",
+                    )
+                    .clicked()
+                {
+                    cx.actions.push(AppAction::AddMissingFiles(doc_id));
+                    ui.close();
                 }
             });
         });

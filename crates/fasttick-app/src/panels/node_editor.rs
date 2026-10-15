@@ -54,6 +54,17 @@ pub fn show(
         .or_else(|| element.category_tag().map(NodeKind::tag))
         .unwrap_or("unknown kind");
     ui.label(RichText::new(format!("{type_id}  ·  {kind}")).weak());
+    let description = match element.subtree_id() {
+        Some(tree_id) => editor
+            .project()
+            .lookup_model(file_id, tree_id)
+            .and_then(|(m, _)| m.description())
+            .or_else(|| fasttick_core::builtin::description("SubTree")),
+        None => model.and_then(|(m, _)| m.description()),
+    };
+    if let Some(description) = description {
+        ui.label(RichText::new(description).small());
+    }
     if selected > 1 {
         ui.label(
             RichText::new(format!(
@@ -146,10 +157,15 @@ pub fn show(
         })
         .strong(),
     );
+    let tree_keys = element
+        .subtree_id()
+        .map(|tree_id| editor.project().tree_keys(file_id, tree_id))
+        .unwrap_or_default();
     ports(
         ui,
         &element,
-        model.map(|(m, _)| m),
+        model,
+        &tree_keys,
         node,
         &node_problems,
         &mut edit,
@@ -163,53 +179,52 @@ pub fn show(
         .id_salt(("conditions", node))
         .default_open(any_condition)
         .show(ui, |ui| {
-            egui::Grid::new(("node_editor_conditions", node))
-                .num_columns(2)
-                .spacing([10.0, 4.0])
-                .show(ui, |ui| {
-                    let pre = PreCondition::ALL
-                        .into_iter()
-                        .map(|c| (Condition::Pre(c), element.pre_condition(c), pre_help(c)));
-                    let post = PostCondition::ALL
-                        .into_iter()
-                        .map(|c| (Condition::Post(c), element.post_condition(c), post_help(c)));
-                    for (heading, rows) in [
-                        (
-                            "Pre-conditions: checked before each tick",
-                            pre.collect::<Vec<_>>(),
-                        ),
-                        (
-                            "Post-conditions: run after the node has a result",
-                            post.collect::<Vec<_>>(),
-                        ),
-                    ] {
-                        ui.label("");
-                        ui.label(RichText::new(heading).small().weak());
-                        ui.end_row();
-                        for (condition, script, help) in rows {
-                            let name = condition.attribute_name();
-                            let label = ui
-                                .label(RichText::new(name).monospace())
-                                .on_hover_text(help)
-                                .id;
-                            if let Some(text) = text_field(
-                                ui,
-                                label,
-                                ("cond", node, name),
-                                script.unwrap_or(""),
-                                "script",
-                            ) {
-                                edit(EditOp::SetCondition {
-                                    node,
-                                    condition,
-                                    script: (!text.is_empty()).then_some(text),
-                                });
-                            }
-                            ui.end_row();
-                            inline_problems(ui, &node_problems, name);
+            let pre = PreCondition::ALL
+                .into_iter()
+                .map(|c| (Condition::Pre(c), element.pre_condition(c), pre_help(c)));
+            let post = PostCondition::ALL
+                .into_iter()
+                .map(|c| (Condition::Post(c), element.post_condition(c), post_help(c)));
+            let label_width = CONDITION_LABEL_WIDTH;
+            for (heading, rows) in [
+                (
+                    "Pre-conditions: checked before each tick",
+                    pre.collect::<Vec<_>>(),
+                ),
+                (
+                    "Post-conditions: run after the node has a result",
+                    post.collect::<Vec<_>>(),
+                ),
+            ] {
+                ui.label(RichText::new(heading).small().weak());
+                for (condition, script, help) in rows {
+                    let name = condition.attribute_name();
+                    ui.horizontal_top(|ui| {
+                        let label = ui
+                            .add_sized(
+                                [label_width, FIELD_ROW_HEIGHT],
+                                egui::Label::new(RichText::new(name).monospace()),
+                            )
+                            .on_hover_text(help)
+                            .id;
+                        if let Some(text) = value_field(
+                            ui,
+                            label,
+                            ("cond", node, name),
+                            script.unwrap_or(""),
+                            "script",
+                        ) {
+                            edit(EditOp::SetCondition {
+                                node,
+                                condition,
+                                script: (!text.is_empty()).then_some(text),
+                            });
                         }
-                    }
-                });
+                    });
+                    inline_problems(ui, &node_problems, name);
+                }
+                ui.add_space(4.0);
+            }
         });
 
     // The other problems of the node (the problems of a field show below
@@ -251,27 +266,18 @@ fn has_field(element: &NodeView<'_>, model: Option<&NodeModel>, attribute: &str)
     }
 }
 
-/// A grid row below a field with the problems of its attribute, if any.
+/// The problems of an attribute, below its field.
 fn inline_problems(ui: &mut Ui, problems: &[&Problem], attribute: &str) {
-    let mut found = problems
+    for problem in problems
         .iter()
         .filter(|p| p.attribute.as_deref() == Some(attribute))
-        .peekable();
-    if found.peek().is_none() {
-        return;
+    {
+        let color = severity_color(ui, problem.severity);
+        ui.horizontal_wrapped(|ui| {
+            severity_badge(ui, problem.severity, color);
+            ui.label(RichText::new(&problem.message).small().color(color));
+        });
     }
-    ui.label("");
-    ui.vertical(|ui| {
-        ui.set_max_width(ui.available_width().max(160.0));
-        for problem in found {
-            let color = severity_color(ui, problem.severity);
-            ui.horizontal_wrapped(|ui| {
-                severity_badge(ui, problem.severity, color);
-                ui.label(RichText::new(&problem.message).small().color(color));
-            });
-        }
-    });
-    ui.end_row();
 }
 
 /// A single-line text field. Returns the new text if the user changed it.
@@ -291,6 +297,42 @@ fn text_field(
                 .desired_width(f32::INFINITY),
         )
         .labelled_by(label);
+    (response.changed() && text != current).then_some(text)
+}
+
+/// The width of the condition names.
+const CONDITION_LABEL_WIDTH: f32 = 82.0;
+
+/// The height of one line of a value field.
+const FIELD_ROW_HEIGHT: f32 = 24.0;
+
+/// A wide, monospace field for a port value or a script. A long value
+/// continues on the next lines; the field grows to show all of it. Enter
+/// ends the edit (it does not add a new line). Returns the new text if the
+/// user changed it.
+fn value_field(
+    ui: &mut Ui,
+    label: egui::Id,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    current: &str,
+    hint: &str,
+) -> Option<String> {
+    let mut text = current.to_owned();
+    let response = ui
+        .add(
+            egui::TextEdit::multiline(&mut text)
+                .id_salt(id_salt)
+                .hint_text(hint)
+                .font(egui::TextStyle::Monospace)
+                .desired_rows(1)
+                .return_key(None)
+                .margin(egui::vec2(6.0, 5.0))
+                .desired_width(ui.available_width()),
+        )
+        .labelled_by(label);
+    if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        response.surrender_focus();
+    }
     (response.changed() && text != current).then_some(text)
 }
 
@@ -335,11 +377,16 @@ fn type_combo(
 fn ports(
     ui: &mut Ui,
     element: &NodeView<'_>,
-    model: Option<&NodeModel>,
+    model: Option<(&NodeModel, ModelSource)>,
+    tree_keys: &[String],
     node: NodeId,
     problems: &[&Problem],
     edit: &mut dyn FnMut(EditOp),
 ) {
+    // A tree without a declared model accepts all remappings.
+    let declared =
+        model.is_some_and(|(_, source)| !matches!(source, ModelSource::InferredSubTree(_)));
+    let model = model.map(|(m, _)| m);
     let model_ports = model.map(|m| m.ports.as_slice()).unwrap_or_default();
     let extra: Vec<(String, String)> = element
         .attributes()
@@ -350,76 +397,144 @@ fn ports(
     if model_ports.is_empty() && extra.is_empty() {
         ui.label(RichText::new("This node has no ports.").weak());
     }
-    egui::Grid::new(("node_editor_ports", node))
-        .num_columns(4)
-        .spacing([6.0, 4.0])
-        .show(ui, |ui| {
-            for port in model_ports {
-                let required = model.is_some_and(|m| m.is_port_required(port));
-                let mut label = RichText::new(&port.name).monospace();
-                if required {
-                    label = label.strong();
-                }
-                let mut tip = format!("{} port", direction_text(port.direction));
-                if let Some(type_name) = &port.type_name {
-                    tip.push_str(&format!(" of type {type_name}"));
-                }
-                if required {
-                    tip.push_str(". Required: it has no default value");
-                }
-                if let Some(default) = &port.default {
-                    tip.push_str(&format!(". Default: \"{default}\""));
-                }
-                if let Some(description) = &port.description {
-                    tip.push_str(&format!(".\n{description}"));
-                }
-                let label_id = ui
-                    .horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 3.0;
-                        ui.label(RichText::new(direction_tag(port.direction)).small().weak())
-                            .on_hover_text(direction_text(port.direction));
-                        let id = ui.label(label).on_hover_text(&tip).id;
-                        if required {
-                            ui.label(RichText::new("*").color(ui.visuals().warn_fg_color))
-                                .on_hover_text("Required");
-                        }
-                        id
-                    })
-                    .inner;
-                let value = element.attribute(&port.name);
-                let hint = match &port.default {
-                    Some(default) if default.is_empty() => "(empty default)".to_owned(),
-                    Some(default) => default.clone(),
-                    None if port.direction == PortDirection::Output => "{key}".to_owned(),
-                    None => "required".to_owned(),
-                };
-                port_row(ui, label_id, node, &port.name, value, &hint, edit);
-                ui.end_row();
-                inline_problems(ui, problems, &port.name);
+    for port in model_ports {
+        let required = model.is_some_and(|m| m.is_port_required(port));
+        let mut label = RichText::new(&port.name).monospace();
+        if required {
+            label = label.strong();
+        }
+        let mut tip = format!("{} port", direction_text(port.direction));
+        if let Some(type_name) = &port.type_name {
+            tip.push_str(&format!(" of type {type_name}"));
+        }
+        if required {
+            tip.push_str(". Required: it has no default value");
+        }
+        if let Some(default) = &port.default {
+            tip.push_str(&format!(". Default: \"{default}\""));
+        }
+        if let Some(description) = &port.description {
+            tip.push_str(&format!(".\n{description}"));
+        }
+        let value = element.attribute(&port.name);
+        let label_id = port_header(ui, node, &port.name, value, edit, |ui| {
+            ui.label(RichText::new(direction_tag(port.direction)).small().weak())
+                .on_hover_text(direction_text(port.direction));
+            let id = ui.label(label).on_hover_text(&tip).id;
+            if required {
+                ui.label(RichText::new("*").color(ui.visuals().warn_fg_color))
+                    .on_hover_text("Required");
             }
-            for (name, value) in &extra {
-                let label_id = ui
-                    .horizontal(|ui| {
-                        let id = ui.label(RichText::new(name).monospace()).id;
-                        if model.is_some() {
-                            ui.label(RichText::new("?").color(ui.visuals().warn_fg_color))
-                                .on_hover_text(
-                                    "The model of this type has no port with this name.",
-                                );
-                        }
-                        id
-                    })
-                    .inner;
-                port_row(ui, label_id, node, name, Some(value), "", edit);
-                ui.end_row();
-                inline_problems(ui, problems, name);
+            if let Some(type_name) = &port.type_name {
+                ui.label(RichText::new(short_type(type_name)).small().weak())
+                    .on_hover_text(type_name);
             }
+            id
         });
+        if let Some(description) = &port.description {
+            ui.label(RichText::new(description).small().weak());
+        }
+        let hint = match &port.default {
+            Some(default) if default.is_empty() => "(empty default)".to_owned(),
+            Some(default) => default.clone(),
+            None if port.direction == PortDirection::Output => "{key}".to_owned(),
+            None => "required".to_owned(),
+        };
+        port_field(ui, label_id, node, &port.name, value, &hint, edit);
+        inline_problems(ui, problems, &port.name);
+        ui.add_space(6.0);
+    }
+    for (name, value) in &extra {
+        let label_id = port_header(ui, node, name, Some(value), edit, |ui| {
+            let id = ui.label(RichText::new(name).monospace()).id;
+            if tree_keys.contains(name) {
+                ui.label(RichText::new("key of the tree").small().weak());
+            } else if declared {
+                ui.label(RichText::new("?").color(ui.visuals().warn_fg_color))
+                    .on_hover_text("The model of this type has no port with this name.");
+            }
+            id
+        });
+        port_field(ui, label_id, node, name, Some(value), "", edit);
+        inline_problems(ui, problems, name);
+        ui.add_space(6.0);
+    }
+    // The keys of the tree of a SubTree that the node does not connect.
+    let autoremap = element.autoremap().and_then(Result::ok).unwrap_or(false);
+    for key in tree_keys {
+        if element.attribute(key).is_some() || model.is_some_and(|m| m.port(key).is_some()) {
+            continue;
+        }
+        let label_id = port_header(ui, node, key, None, edit, |ui| {
+            let id = ui.label(RichText::new(key).monospace()).id;
+            ui.label(RichText::new("key of the tree").small().weak())
+                .on_hover_text(
+                    "The tree uses this blackboard key. Type a value or {key} of this \
+                     tree to connect it.",
+                );
+            id
+        });
+        let hint = if autoremap {
+            format!("{{{key}}} (automatic)")
+        } else {
+            "not connected".to_owned()
+        };
+        port_field(ui, label_id, node, key, None, &hint, edit);
+        ui.add_space(6.0);
+    }
     add_port_row(ui, node, edit);
 }
 
-/// The value field, the reference toggle and the remove button of a port.
-fn port_row(
+/// The line above a port field: the name (from `name_ui`, which returns
+/// the ID of the name label), then at the right the reference toggle and
+/// the remove button. Returns the ID of the name label.
+fn port_header(
+    ui: &mut Ui,
+    node: NodeId,
+    port: &str,
+    value: Option<&str>,
+    edit: &mut dyn FnMut(EditOp),
+    name_ui: impl FnOnce(&mut Ui) -> egui::Id,
+) -> egui::Id {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let id = name_ui(ui);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add_enabled(value.is_some(), egui::Button::new("×").small())
+                .on_hover_text("Remove the attribute (use the default value)")
+                .clicked()
+            {
+                edit(EditOp::SetPort {
+                    node,
+                    port: port.to_owned(),
+                    value: None,
+                });
+            }
+            let current = value.unwrap_or("");
+            let is_reference = blackboard_pointer(current).is_some();
+            let toggle = ui
+                .selectable_label(is_reference, RichText::new("{ }").monospace())
+                .on_hover_text(if is_reference {
+                    "The value is a blackboard key. Click to use a literal value."
+                } else {
+                    "Click to use a blackboard key."
+                });
+            if toggle.clicked() {
+                edit(EditOp::SetPort {
+                    node,
+                    port: port.to_owned(),
+                    value: Some(toggle_reference(current, port)),
+                });
+            }
+        });
+        id
+    })
+    .inner
+}
+
+/// The value field of a port, the full width of the panel.
+fn port_field(
     ui: &mut Ui,
     label: egui::Id,
     node: NodeId,
@@ -428,41 +543,45 @@ fn port_row(
     hint: &str,
     edit: &mut dyn FnMut(EditOp),
 ) {
-    if let Some(text) = text_field(ui, label, ("port", node, port), value.unwrap_or(""), hint) {
+    if let Some(text) = value_field(ui, label, ("port", node, port), value.unwrap_or(""), hint) {
         edit(EditOp::SetPort {
             node,
             port: port.to_owned(),
             value: Some(text),
         });
     }
-    let current = value.unwrap_or("");
-    let is_reference = blackboard_pointer(current).is_some();
-    let toggle = ui
-        .selectable_label(is_reference, RichText::new("{ }").monospace())
-        .on_hover_text(if is_reference {
-            "The value is a blackboard key. Click to use a literal value."
-        } else {
-            "Click to use a blackboard key."
-        });
-    if toggle.clicked() {
-        let new = toggle_reference(current, port);
-        edit(EditOp::SetPort {
-            node,
-            port: port.to_owned(),
-            value: Some(new),
-        });
+}
+
+/// A short form of a C++ type name: `std::vector<int, std::allocator<int> >`
+/// becomes `vector<int>`, `std::string` becomes `string`.
+pub fn short_type(type_name: &str) -> String {
+    let without_std = type_name.replace("std::", "");
+    // Remove the allocator argument of the standard containers.
+    let mut out = String::with_capacity(without_std.len());
+    let mut rest = without_std.as_str();
+    while let Some(start) = rest.find(", allocator<") {
+        out.push_str(&rest[..start]);
+        let tail = &rest[start + 2..];
+        // Skip to the end of the allocator argument.
+        let mut depth = 0;
+        let mut end = tail.len();
+        for (i, c) in tail.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        rest = &tail[end..];
     }
-    if ui
-        .add_enabled(value.is_some(), egui::Button::new("×").small())
-        .on_hover_text("Remove the attribute (use the default value)")
-        .clicked()
-    {
-        edit(EditOp::SetPort {
-            node,
-            port: port.to_owned(),
-            value: None,
-        });
-    }
+    out.push_str(rest);
+    out.replace(" >", ">")
 }
 
 /// Changes a literal value to a blackboard reference and back. An empty
@@ -615,6 +734,20 @@ pub fn severity_color(ui: &Ui, severity: Severity) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_type_names() {
+        assert_eq!(
+            short_type("std::vector<int, std::allocator<int> >"),
+            "vector<int>"
+        );
+        assert_eq!(short_type("std::string"), "string");
+        assert_eq!(short_type("double"), "double");
+        assert_eq!(
+            short_type("std::map<std::string, std::vector<int, std::allocator<int> > >"),
+            "map<string, vector<int>>"
+        );
+    }
 
     #[test]
     fn reference_toggle() {

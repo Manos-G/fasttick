@@ -40,8 +40,8 @@ use super::drop::{self, DropPlacement, DropSpot, NewNodePayload};
 use super::hit;
 use super::layout::{self, LayoutDirection, TreeLayout};
 use super::model::{
-    BreakpointMarker, CanvasNode, CanvasNodeId, CanvasTree, NavStep, NodeCategory, NodeSource,
-    Substitution,
+    BreakpointMarker, CanvasNode, CanvasNodeId, CanvasTree, CardEntry, NavStep, NodeCategory,
+    NodeSource, Substitution,
 };
 use super::paint::{self, EdgeStyle};
 use super::viewport::{self, Viewport};
@@ -195,13 +195,12 @@ impl std::fmt::Debug for GalleyCache {
 /// Slots of the galley cache for one node.
 const SLOT_LABEL: u64 = 0;
 const SLOT_TYPE: u64 = 1;
-const SLOT_PORT: u64 = 2; // .. 2 + MAX_PORT_LINES
-const SLOT_MORE: u64 = 8;
 const SLOT_CHIP: u64 = 9;
 const SLOT_TAG: u64 = 10;
 const SLOT_LABEL_SMALL: u64 = 11;
 const SLOT_TAG_FAILURE: u64 = 12;
-const SLOT_CONDITION: u64 = 16; // .. 16 + 8
+/// The text lines of the ports, then of the conditions.
+const SLOT_LINES: u64 = 16;
 
 /// The smallest label size (screen points) at [`Detail::Labels`].
 const LABEL_MIN_PX: f32 = 9.5;
@@ -216,7 +215,7 @@ impl GalleyCache {
     }
 
     fn get(&mut self, node: u32, slot: u64, make: impl FnOnce() -> Arc<Galley>) -> Arc<Galley> {
-        let key = (u64::from(node) << 8) | slot;
+        let key = (u64::from(node) << 24) | slot;
         self.map.entry(key).or_insert_with(make).clone()
     }
 
@@ -986,6 +985,7 @@ fn handle_input(
                     state.direction,
                     p,
                     &state.moving,
+                    drop::SNAP_DISTANCE / state.viewport.zoom,
                 )
             });
             if let Some(p) = pointer {
@@ -1197,7 +1197,14 @@ fn handle_palette_drop(
     let pointer = ui.input(|i| i.pointer.hover_pos());
     let world = pointer.map(|p| state.viewport.to_world(rect.min, p));
     let spot_at = |state: &CanvasState, p: Pos2| {
-        drop::drop_spot(&state.tree, &state.layout.rects, state.direction, p, &[])
+        drop::drop_spot(
+            &state.tree,
+            &state.layout.rects,
+            state.direction,
+            p,
+            &[],
+            drop::SNAP_DISTANCE / state.viewport.zoom,
+        )
     };
     if let Some(payload) = response.dnd_release_payload::<NewNodePayload>() {
         if let Some(p) = world {
@@ -1340,6 +1347,71 @@ fn radius(value: f32) -> CornerRadius {
 /// True if a port value is a blackboard reference (`{key}`).
 fn is_reference(value: &str) -> bool {
     value.starts_with('{') && value.ends_with('}')
+}
+
+/// The colours of a port or condition line.
+#[derive(Clone, Copy)]
+struct EntryColors {
+    name: Color32,
+    value: Color32,
+    reference: Color32,
+}
+
+/// The layout of line `part` of a port or condition. The first line has
+/// the name; the next lines start below the first character of the value
+/// (an invisible copy of the name keeps the place).
+fn entry_line_job(
+    painter: &egui::Painter,
+    fonts: &CardFonts,
+    entry: &CardEntry,
+    part: usize,
+    colors: EntryColors,
+    text_zoom: f32,
+) -> Arc<Galley> {
+    let mut job = LayoutJob::default();
+    let name_format = TextFormat {
+        font_id: fonts.font(TextKind::PortName, card::PORT_SIZE * text_zoom),
+        color: if part == 0 {
+            colors.name
+        } else {
+            Color32::TRANSPARENT
+        },
+        ..TextFormat::default()
+    };
+    job.append(&entry.name, 0.0, name_format.clone());
+    job.append(card::PORT_SEPARATOR, 0.0, name_format);
+    let value = entry.value.get(part).map_or("", String::as_str);
+    let reference = entry.value.len() == 1 && is_reference(value);
+    job.append(
+        value,
+        0.0,
+        TextFormat {
+            font_id: fonts.font(TextKind::PortValue, card::PORT_SIZE * text_zoom),
+            color: if reference {
+                colors.reference
+            } else {
+                colors.value
+            },
+            ..TextFormat::default()
+        },
+    );
+    painter.layout_job(job)
+}
+
+/// For each text line of ports or conditions: the indent (world units, an
+/// estimate) and the number of characters. For the bars of small cards.
+fn entry_bars(entries: &[CardEntry]) -> impl Iterator<Item = (f32, usize)> + '_ {
+    entries.iter().flat_map(|entry| {
+        let name = entry.name.chars().count() + 2;
+        let indent = name as f32 * 6.0;
+        entry.value.iter().enumerate().map(move |(part, line)| {
+            if part == 0 {
+                (0.0, name + line.chars().count())
+            } else {
+                (indent, line.chars().count())
+            }
+        })
+    })
 }
 
 fn palette_key(palette: &CanvasPalette) -> u64 {
@@ -1921,6 +1993,7 @@ fn paint_card(
             pos.y += (card::TYPE_LINE * zoom - galley.size().y) * 0.5;
             shapes.push(Shape::galley(snap(pos, ppp), galley, weak));
         }
+        let value_color = palette.text_value.gamma_multiply(alpha);
         if geometry.port_lines > 0 {
             let y = local(pos2(0.0, geometry.separator_y())).y;
             shapes.push(Shape::hline(
@@ -1928,55 +2001,23 @@ fn paint_card(
                 y,
                 Stroke::new(1.0, palette.separator.gamma_multiply(alpha)),
             ));
-            let value_color = palette.text_value.gamma_multiply(alpha);
-            let reference_color = palette.text_reference.gamma_multiply(alpha);
-            for (line, (name, value)) in node.card.ports.iter().enumerate() {
-                let galley = state.galleys.get(index, SLOT_PORT + line as u64, || {
-                    let mut job = LayoutJob::default();
-                    let name_format = TextFormat {
-                        font_id: state
-                            .fonts
-                            .font(TextKind::PortName, card::PORT_SIZE * text_zoom),
-                        color: weak,
-                        ..TextFormat::default()
-                    };
-                    job.append(name, 0.0, name_format.clone());
-                    job.append(card::PORT_SEPARATOR, 0.0, name_format);
-                    job.append(
-                        value,
-                        0.0,
-                        TextFormat {
-                            font_id: state
-                                .fonts
-                                .font(TextKind::PortValue, card::PORT_SIZE * text_zoom),
-                            color: if is_reference(value) {
-                                reference_color
-                            } else {
-                                value_color
-                            },
-                            ..TextFormat::default()
-                        },
-                    );
-                    painter.layout_job(job)
-                });
-                let mut pos = local(geometry.port_pos(line));
-                pos.y += (card::PORT_LINE * zoom - galley.size().y) * 0.5;
-                shapes.push(Shape::galley(snap(pos, ppp), galley, value_color));
-            }
-            if let Some(more) = &node.card.more {
-                let galley = state.galleys.get(index, SLOT_MORE, || {
-                    painter.layout_job(LayoutJob::simple_singleline(
-                        more.clone(),
-                        FontId::new(
-                            TextKind::Note.size() * text_zoom,
-                            state.fonts.italic.clone(),
-                        ),
-                        weak,
-                    ))
-                });
-                let mut pos = local(geometry.port_pos(node.card.ports.len()));
-                pos.y += (card::PORT_LINE * zoom - galley.size().y) * 0.5;
-                shapes.push(Shape::galley(snap(pos, ppp), galley, weak));
+            let colors = EntryColors {
+                name: weak,
+                value: value_color,
+                reference: palette.text_reference.gamma_multiply(alpha),
+            };
+            let entries = &node.card.ports;
+            let mut line = 0;
+            for entry in entries {
+                for part in 0..entry.line_count() {
+                    let galley = state.galleys.get(index, SLOT_LINES + line as u64, || {
+                        entry_line_job(painter, &state.fonts, entry, part, colors, text_zoom)
+                    });
+                    let mut pos = local(geometry.port_pos(line));
+                    pos.y += (card::PORT_LINE * zoom - galley.size().y) * 0.5;
+                    shapes.push(Shape::galley(snap(pos, ppp), galley, value_color));
+                    line += 1;
+                }
             }
         }
         if geometry.condition_lines > 0 {
@@ -1986,36 +2027,23 @@ fn paint_card(
                 y,
                 Stroke::new(1.0, palette.separator.gamma_multiply(alpha)),
             ));
-            let name_color = palette.condition.gamma_multiply(alpha);
-            let value_color = palette.text_value.gamma_multiply(alpha);
-            for (line, (name, script)) in node.card.conditions.iter().enumerate() {
-                let galley = state.galleys.get(index, SLOT_CONDITION + line as u64, || {
-                    let mut job = LayoutJob::default();
-                    let name_format = TextFormat {
-                        font_id: state
-                            .fonts
-                            .font(TextKind::PortName, card::PORT_SIZE * text_zoom),
-                        color: name_color,
-                        ..TextFormat::default()
-                    };
-                    job.append(name, 0.0, name_format.clone());
-                    job.append(card::PORT_SEPARATOR, 0.0, name_format);
-                    job.append(
-                        script,
-                        0.0,
-                        TextFormat {
-                            font_id: state
-                                .fonts
-                                .font(TextKind::PortValue, card::PORT_SIZE * text_zoom),
-                            color: value_color,
-                            ..TextFormat::default()
-                        },
-                    );
-                    painter.layout_job(job)
-                });
-                let mut pos = local(geometry.condition_pos(line));
-                pos.y += (card::PORT_LINE * zoom - galley.size().y) * 0.5;
-                shapes.push(Shape::galley(snap(pos, ppp), galley, value_color));
+            let colors = EntryColors {
+                name: palette.condition.gamma_multiply(alpha),
+                value: value_color,
+                reference: value_color,
+            };
+            let first_slot = SLOT_LINES + geometry.port_lines as u64;
+            let mut line = 0;
+            for entry in &node.card.conditions {
+                for part in 0..entry.line_count() {
+                    let galley = state.galleys.get(index, first_slot + line as u64, || {
+                        entry_line_job(painter, &state.fonts, entry, part, colors, text_zoom)
+                    });
+                    let mut pos = local(geometry.condition_pos(line));
+                    pos.y += (card::PORT_LINE * zoom - galley.size().y) * 0.5;
+                    shapes.push(Shape::galley(snap(pos, ppp), galley, value_color));
+                    line += 1;
+                }
             }
         }
     }
@@ -2030,14 +2058,11 @@ fn paint_card(
             Stroke::new(1.0, bar_color),
         ));
         let max_bar = (node.card.size.x - card::BAND - 2.0 * card::PAD_X) * zoom;
-        for line in 0..geometry.port_lines {
-            let chars = node.card.ports.get(line).map_or(8, |(name, value)| {
-                name.chars().count() + value.chars().count() + 2
-            });
-            let width = (chars as f32 * 6.0 * zoom).min(max_bar);
+        for (line, (indent, chars)) in entry_bars(&node.card.ports).enumerate() {
+            let width = (chars as f32 * 6.0 * zoom).min(max_bar - indent * zoom);
             let top = local(geometry.port_pos(line));
             let bar = Rect::from_min_size(
-                pos2(top.x, top.y + card::PORT_LINE * zoom * 0.3),
+                pos2(top.x + indent * zoom, top.y + card::PORT_LINE * zoom * 0.3),
                 vec2(width, (card::PORT_LINE * zoom * 0.4).max(1.0)),
             );
             shapes.push(Shape::rect_filled(bar, radius(2.0), bar_color));
@@ -2053,12 +2078,11 @@ fn paint_card(
         ));
         let bar_color = palette.condition.gamma_multiply(alpha * 0.45);
         let max_bar = (node.card.size.x - card::BAND - 2.0 * card::PAD_X) * zoom;
-        for (line, (name, script)) in node.card.conditions.iter().enumerate() {
-            let chars = name.chars().count() + script.chars().count() + 2;
-            let width = (chars as f32 * 6.0 * zoom).min(max_bar);
+        for (line, (indent, chars)) in entry_bars(&node.card.conditions).enumerate() {
+            let width = (chars as f32 * 6.0 * zoom).min(max_bar - indent * zoom);
             let top = local(geometry.condition_pos(line));
             let bar = Rect::from_min_size(
-                pos2(top.x, top.y + card::PORT_LINE * zoom * 0.3),
+                pos2(top.x + indent * zoom, top.y + card::PORT_LINE * zoom * 0.3),
                 vec2(width, (card::PORT_LINE * zoom * 0.4).max(1.0)),
             );
             shapes.push(Shape::rect_filled(bar, radius(2.0), bar_color));
@@ -2380,6 +2404,9 @@ fn show_tooltip(state: &CanvasState, ui: &Ui, response: &Response, canvas: Id, n
         ui.label(
             egui::RichText::new(format!("{}  ·  {}", node.type_id, node.category.name())).weak(),
         );
+        if let Some(description) = &node.description {
+            ui.label(description);
+        }
         if node.category_inferred {
             ui.label(
                 egui::RichText::new("Category inferred: no model is known for this type.")
@@ -2425,15 +2452,14 @@ fn show_tooltip(state: &CanvasState, ui: &Ui, response: &Response, canvas: Id, n
                 .num_columns(2)
                 .spacing([12.0, 2.0])
                 .show(ui, |ui| {
-                    for port in node.ports.iter().take(16) {
+                    for port in &node.ports {
                         ui.label(egui::RichText::new(&port.name).weak());
-                        ui.label(egui::RichText::new(&port.value).monospace());
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(&port.value).monospace()).wrap(),
+                        );
                         ui.end_row();
                     }
                 });
-            if node.ports.len() > 16 {
-                ui.label(egui::RichText::new(format!("+{} more", node.ports.len() - 16)).weak());
-            }
         }
         if !node.conditions.is_empty() {
             ui.separator();
@@ -2443,7 +2469,9 @@ fn show_tooltip(state: &CanvasState, ui: &Ui, response: &Response, canvas: Id, n
                 .show(ui, |ui| {
                     for line in &node.conditions {
                         ui.label(egui::RichText::new(&line.name).weak());
-                        ui.label(egui::RichText::new(&line.value).monospace());
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(&line.value).monospace()).wrap(),
+                        );
                         ui.end_row();
                     }
                 });

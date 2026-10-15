@@ -255,9 +255,21 @@ fn context_menu_adds_a_child_node() {
     );
 }
 
-/// The text field with an accessible label.
+fn is_text_field(node: &egui_kittest::Node<'_>) -> bool {
+    matches!(
+        node.accesskit_node().role(),
+        Role::TextInput | Role::MultilineTextInput
+    )
+}
+
+/// The text field (one line or more) with an accessible label.
 fn input<'a>(harness: &'a Harness<'static, FastTickApp>, label: &'a str) -> egui_kittest::Node<'a> {
-    harness.get_by_role_and_label(Role::TextInput, label)
+    let mut found = harness.query_all_by_label(label).filter(is_text_field);
+    let node = found
+        .next()
+        .unwrap_or_else(|| panic!("a text field with the label {label:?}"));
+    assert!(found.next().is_none(), "more than one field {label:?}");
+    node
 }
 
 /// The text field with this hint text.
@@ -267,6 +279,7 @@ fn input_with_hint<'a>(
 ) -> egui_kittest::Node<'a> {
     harness
         .query_all_by_role(Role::TextInput)
+        .chain(harness.query_all_by_role(Role::MultilineTextInput))
         .find(|n| n.accesskit_node().placeholder() == Some(hint))
         .unwrap_or_else(|| panic!("a text field with the hint {hint:?}"))
 }
@@ -399,10 +412,9 @@ fn inspector_sets_the_name_and_a_condition() {
         let tree = app.workspace().active().unwrap().canvas.tree();
         let node = tree.nodes().iter().find(|n| n.label == "greet").unwrap();
         assert_eq!(node.conditions.len(), 1);
-        assert_eq!(
-            node.card.conditions,
-            [("_skipIf".to_owned(), "x == 1".to_owned())]
-        );
+        assert_eq!(node.card.conditions.len(), 1);
+        assert_eq!(node.card.conditions[0].name, "_skipIf");
+        assert_eq!(node.card.conditions[0].value, ["x == 1"]);
     }
     // An empty script removes the attribute.
     type_into(&mut harness, Field::Label("_skipIf"), "", true);
@@ -853,4 +865,88 @@ fn a_condition_script_with_an_error_shows_the_bt_cpp_message() {
     harness.run();
     assert_eq!(script_errors(&harness), 0);
     assert!(harness.query_by_label_contains("expected ')'").is_none());
+}
+
+#[test]
+fn opening_a_file_offers_the_files_with_the_missing_subtrees() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.xml");
+    std::fs::write(
+        &main,
+        r#"<root BTCPP_format="4" main_tree_to_execute="Main">
+  <BehaviorTree ID="Main">
+    <Sequence>
+      <SubTree ID="Get"/>
+    </Sequence>
+  </BehaviorTree>
+</root>
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("library.xml"),
+        r#"<root BTCPP_format="4">
+  <BehaviorTree ID="Get">
+    <SubTree ID="Reset"/>
+  </BehaviorTree>
+</root>
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("automation.xml"),
+        r#"<root BTCPP_format="4">
+  <BehaviorTree ID="Reset">
+    <AlwaysSuccess/>
+  </BehaviorTree>
+</root>
+"#,
+    )
+    .unwrap();
+    let options = StartOptions {
+        open: vec![main],
+        theme: Some(ThemeChoice::Light),
+        mode: Some(Mode::Edit),
+        connect: None,
+    };
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1400.0, 900.0))
+        .with_max_steps(64)
+        .with_step_dt(1.0 / 30.0)
+        .build_eframe(move |cc| FastTickApp::new(cc, options));
+    harness.run();
+    let missing = |h: &Harness<'static, FastTickApp>| {
+        let app = h.state();
+        let view = app.workspace().active().unwrap();
+        let doc = app.workspace().doc(view.doc).unwrap();
+        doc.editor
+            .as_ref()
+            .unwrap()
+            .problems()
+            .iter()
+            .filter(|p| p.code == fasttick_core::validate::ProblemCode::MissingSubTree)
+            .count()
+    };
+    assert_eq!(missing(&harness), 1);
+    let notice = harness
+        .state()
+        .notices()
+        .last()
+        .expect("a notice")
+        .text
+        .clone();
+    assert!(
+        notice.contains("main.xml uses 1 tree")
+            && notice.contains("2 XML files")
+            && notice.contains("library.xml"),
+        "{notice}"
+    );
+    harness
+        .get_by_role_and_label(Role::Button, "Add the files")
+        .click();
+    harness.run();
+    assert_eq!(missing(&harness), 0);
+    // The tree list has a header for each new file.
+    harness.get_by_label("library.xml");
+    harness.get_by_label("automation.xml");
 }

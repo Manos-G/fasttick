@@ -44,6 +44,12 @@ impl CategoryLookup for ProjectCategories<'_> {
             .lookup_model(self.file, type_id)
             .map(|(model, _)| category_of_kind(model.kind))
     }
+
+    fn description(&self, type_id: &str) -> Option<String> {
+        self.project
+            .lookup_model(self.file, type_id)
+            .and_then(|(model, _)| model.description().map(str::to_owned))
+    }
 }
 
 /// The canvas category of a model kind.
@@ -148,6 +154,17 @@ impl CanvasTree {
             let (category, inferred) = categorize(project, node_file, &view, children.len());
             canvas_node.category = category;
             canvas_node.category_inferred = inferred;
+            let lookup = ProjectCategories {
+                project,
+                file: node_file,
+            };
+            canvas_node.description = match view.subtree_id() {
+                // The model of the tree, else the text of SubTree.
+                Some(tree_id) => lookup
+                    .description(tree_id)
+                    .or_else(|| lookup.description("SubTree")),
+                None => view.type_id().and_then(|id| lookup.description(id)),
+            };
 
             if view.is_subtree() {
                 let tree_id = view.subtree_id().unwrap_or_default().to_owned();
@@ -304,7 +321,10 @@ mod tests {
         <Inverter><AlwaysFailure/></Inverter>
     </BehaviorTree>
     <TreeNodesModel>
-        <Condition ID="MyAction"><input_port name="goal"/></Condition>
+        <Condition ID="MyAction">
+            <input_port name="goal"/>
+            <MetadataFields><Metadata description="Checks the goal"/></MetadataFields>
+        </Condition>
     </TreeNodesModel>
 </root>"#;
 
@@ -334,6 +354,23 @@ mod tests {
         // A SubTree to the tree itself is a cycle: it cannot expand.
         assert!(!nodes[3].subtree.as_ref().unwrap().can_expand);
         assert!(matches!(nodes[0].source, NodeSource::Xml(f, _) if f == file));
+        // Descriptions: the built-in text, the metadata of a model, and the
+        // text of SubTree for a tree without a model.
+        assert!(
+            nodes[0]
+                .description
+                .as_deref()
+                .unwrap()
+                .starts_with("Ticks its children")
+        );
+        assert_eq!(nodes[1].description.as_deref(), Some("Checks the goal"));
+        assert!(
+            nodes[2]
+                .description
+                .as_deref()
+                .unwrap()
+                .starts_with("Runs another tree")
+        );
     }
 
     #[test]

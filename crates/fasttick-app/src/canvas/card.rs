@@ -5,9 +5,9 @@
 //!  │B│ [G]  label                   (S) │   B: category band
 //!  │a│      TypeID                      │   G: category glyph
 //!  │n├──────────────────────────────────┤   S: status badge
-//!  │d│ port: value                      │
-//!  │ │ port: value                      │
-//!  │ │ +2 more                          │
+//!  │d│ port: value                      │   all ports
+//!  │ │ code: a := 1; b := 2; c := 3;    │
+//!  │ │       d := 4                     │   a long value wraps
 //!  │ ├──────────────────────────────────┤
 //!  │ │ _skipIf: script                  │   pre- and post-conditions
 //!  └─┴──────────────────────────────────┘
@@ -19,7 +19,7 @@
 
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
-use super::model::{CanvasNode, CanvasTree, CardText};
+use super::model::{CanvasNode, CanvasTree, CardEntry, CardText, PortLine};
 
 /// Width of the category band.
 pub const BAND: f32 = 5.0;
@@ -54,10 +54,12 @@ pub const PORT_LINE: f32 = 15.0;
 pub const PORT_GAP: f32 = 9.0;
 /// The smallest card width.
 pub const MIN_WIDTH: f32 = 128.0;
-/// The largest card width. Longer text is shortened with an ellipsis.
+/// The largest card width. A longer label is shortened with an ellipsis;
+/// a longer port value continues on the next line.
 pub const MAX_WIDTH: f32 = 280.0;
-/// The most port lines that a card shows.
-pub const MAX_PORT_LINES: usize = 3;
+/// The most lines of one port value. The last line of a longer value ends
+/// with an ellipsis (the inspector and the tooltip show all of it).
+pub const MAX_VALUE_LINES: usize = 12;
 /// The separator between a port name and its value.
 pub const PORT_SEPARATOR: &str = ": ";
 /// The ellipsis character (Roboto has it).
@@ -74,7 +76,7 @@ pub enum TextKind {
     PortName,
     /// A port value (monospace).
     PortValue,
-    /// The "+N more" line and small chips.
+    /// Small chips.
     Note,
 }
 
@@ -153,6 +155,86 @@ pub fn elide(
     (out, out_width)
 }
 
+/// Breaks `text` into lines that are at most `max_width` wide. A line
+/// breaks after a space, `;` or `,` if it can, else between two
+/// characters. A new line in the text starts a new line; other control
+/// characters show as spaces. The result has at least one line and at most
+/// `max_lines`; if text remains, the last line ends with an ellipsis.
+/// Returns the lines and the width of the widest line.
+pub fn wrap(
+    measure: &mut dyn TextMeasure,
+    text: &str,
+    kind: TextKind,
+    max_width: f32,
+    max_lines: usize,
+) -> (Vec<String>, f32) {
+    let max_lines = max_lines.max(1);
+    let mut lines: Vec<String> = Vec::new();
+    // The text after the last line.
+    let mut rest = String::new();
+    'paragraphs: for paragraph in text.split('\n') {
+        let clean: String = paragraph
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect();
+        let clean = clean.trim_end();
+        if lines.len() == max_lines {
+            rest.push(' ');
+            rest.push_str(clean);
+            continue;
+        }
+        let mut start = 0;
+        let mut width = 0.0;
+        let mut last_break: Option<usize> = None;
+        for (i, c) in clean.char_indices() {
+            if i < start {
+                // A space after a break.
+                continue;
+            }
+            let w = measure.char_width(c, kind);
+            if width + w > max_width && i > start {
+                let cut = match last_break {
+                    // A space can stay at the end of the line.
+                    _ if c == ' ' => i,
+                    Some(b) if b > start => b,
+                    _ => i,
+                };
+                lines.push(clean[start..cut].trim_end().to_owned());
+                start = cut + (clean[cut..].len() - clean[cut..].trim_start().len());
+                last_break = None;
+                if lines.len() == max_lines {
+                    rest = clean[start..].to_owned();
+                    continue 'paragraphs;
+                }
+                if i < start {
+                    width = 0.0;
+                    continue;
+                }
+                width = measure.width(&clean[start..i], kind);
+            }
+            width += w;
+            if matches!(c, ' ' | ';' | ',') {
+                last_break = Some(i + c.len_utf8());
+            }
+        }
+        lines.push(clean[start..].to_owned());
+    }
+    if !rest.trim().is_empty()
+        && let Some(last) = lines.last_mut()
+    {
+        let joined = format!("{last} {}", rest.trim());
+        *last = elide(measure, &joined, kind, max_width).0;
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    let widest = lines
+        .iter()
+        .map(|line| measure.width(line, kind))
+        .fold(0.0, f32::max);
+    (lines, widest)
+}
+
 /// The x position of the label and the type line.
 pub const TEXT_LEFT: f32 = BAND + PAD_X + GLYPH + GLYPH_GAP;
 
@@ -171,45 +253,11 @@ pub fn measure_node(node: &CanvasNode, measure: &mut dyn TextMeasure) -> CardTex
     };
     let header_w = HEADER_EXTRA + label_w.max(type_w);
 
-    let max_port = MAX_WIDTH - BAND - 2.0 * PAD_X;
-    let separator_w = measure.width(PORT_SEPARATOR, TextKind::PortName);
-    let shown = if node.ports.len() > MAX_PORT_LINES {
-        MAX_PORT_LINES - 1
-    } else {
-        node.ports.len()
-    };
-    let mut ports = Vec::with_capacity(shown);
+    // All ports and all conditions show. A long value continues on the
+    // next lines.
     let mut ports_w: f32 = 0.0;
-    for port in &node.ports[..shown] {
-        let (name, name_w) = elide(measure, &port.name, TextKind::PortName, max_port * 0.45);
-        let (value, value_w) = elide(
-            measure,
-            &port.value,
-            TextKind::PortValue,
-            max_port - name_w - separator_w,
-        );
-        ports_w = ports_w.max(name_w + separator_w + value_w);
-        ports.push((name, value));
-    }
-    let more = (node.ports.len() > shown).then(|| {
-        let text = format!("+{} more", node.ports.len() - shown);
-        ports_w = ports_w.max(measure.width(&text, TextKind::Note));
-        text
-    });
-    // All conditions show: a node has 8 at most, and they change how the
-    // node runs.
-    let mut conditions = Vec::with_capacity(node.conditions.len());
-    for line in &node.conditions {
-        let (name, name_w) = elide(measure, &line.name, TextKind::PortName, max_port * 0.45);
-        let (value, value_w) = elide(
-            measure,
-            &line.value,
-            TextKind::PortValue,
-            max_port - name_w - separator_w,
-        );
-        ports_w = ports_w.max(name_w + separator_w + value_w);
-        conditions.push((name, value));
-    }
+    let ports = measure_entries(&node.ports, measure, &mut ports_w);
+    let conditions = measure_entries(&node.conditions, measure, &mut ports_w);
     let ports_needed = BAND + 2.0 * PAD_X + ports_w;
 
     let width = header_w.max(ports_needed).clamp(MIN_WIDTH, MAX_WIDTH);
@@ -217,12 +265,37 @@ pub fn measure_node(node: &CanvasNode, measure: &mut dyn TextMeasure) -> CardTex
         label,
         type_line,
         ports,
-        more,
         conditions,
         size: Vec2::ZERO,
     };
     card.size = vec2(width.round(), CardGeometry::height_of(&card));
     card
+}
+
+/// Shortens the names and wraps the values of ports or conditions.
+/// `widest` grows to the width of the widest line.
+fn measure_entries(
+    lines: &[PortLine],
+    measure: &mut dyn TextMeasure,
+    widest: &mut f32,
+) -> Vec<CardEntry> {
+    let max_port = MAX_WIDTH - BAND - 2.0 * PAD_X;
+    let separator_w = measure.width(PORT_SEPARATOR, TextKind::PortName);
+    lines
+        .iter()
+        .map(|line| {
+            let (name, name_w) = elide(measure, &line.name, TextKind::PortName, max_port * 0.45);
+            let (value, value_w) = wrap(
+                measure,
+                &line.value,
+                TextKind::PortValue,
+                max_port - name_w - separator_w,
+                MAX_VALUE_LINES,
+            );
+            *widest = widest.max(name_w + separator_w + value_w);
+            CardEntry { name, value }
+        })
+        .collect()
 }
 
 /// Computes the card text and size of all nodes.
@@ -248,7 +321,7 @@ pub fn measure_missing(tree: &mut CanvasTree, measure: &mut dyn TextMeasure) {
 pub struct CardGeometry {
     /// The height of the header (label, type line, padding).
     pub header_height: f32,
-    /// The number of lines in the port section (ports and "+N more").
+    /// The number of text lines of the ports.
     pub port_lines: usize,
     /// The number of condition lines.
     pub condition_lines: usize,
@@ -260,8 +333,8 @@ impl CardGeometry {
         let lines = if card.type_line.is_some() { 1.0 } else { 0.0 };
         CardGeometry {
             header_height: PAD_TOP + LABEL_LINE + lines * TYPE_LINE + PAD_BOTTOM,
-            port_lines: card.ports.len() + usize::from(card.more.is_some()),
-            condition_lines: card.conditions.len(),
+            port_lines: card.port_line_count(),
+            condition_lines: card.condition_line_count(),
         }
     }
 
@@ -400,6 +473,54 @@ mod tests {
     }
 
     #[test]
+    fn a_long_script_wraps_at_the_statements() {
+        let mut m = FixedMeasure(7.0);
+        let mut n = node("Script", "Script", 1);
+        n.ports[0].name = "code".into();
+        n.ports[0].value =
+            "crate1:=0;crate2:=0;crate3:=0;crate4:=0;@magazine:=0;@dynamic:=0".into();
+        let card = measure_node(&n, &mut m);
+        let lines = &card.ports[0].value;
+        assert!(lines.len() > 1, "{lines:?}");
+        // No text is lost, and each line ends at a statement.
+        assert_eq!(lines.concat(), n.ports[0].value);
+        for line in &lines[..lines.len() - 1] {
+            assert!(line.ends_with(';'), "{lines:?}");
+        }
+        assert_eq!(
+            card.size.y - measure_node(&node("Script", "Script", 1), &mut m).size.y,
+            (lines.len() - 1) as f32 * PORT_LINE
+        );
+    }
+
+    #[test]
+    fn wrap_breaks_at_spaces_and_new_lines() {
+        let mut m = FixedMeasure(10.0);
+        let (lines, widest) = wrap(&mut m, "aaa bbb ccc", TextKind::PortValue, 75.0, 10);
+        assert_eq!(lines, ["aaa bbb", "ccc"]);
+        assert_eq!(widest, 70.0);
+        // Without a break place, a line breaks between two characters.
+        let (lines, _) = wrap(&mut m, "abcdefghij", TextKind::PortValue, 40.0, 10);
+        assert_eq!(lines, ["abcd", "efgh", "ij"]);
+        // A new line starts a new line; other control characters are spaces.
+        let (lines, _) = wrap(&mut m, "a := 1\nb\t:= 2", TextKind::PortValue, 200.0, 10);
+        assert_eq!(lines, ["a := 1", "b := 2"]);
+        // Spaces at a break do not start the next line.
+        let (lines, _) = wrap(&mut m, "abc    def", TextKind::PortValue, 40.0, 10);
+        assert_eq!(lines, ["abc", "def"]);
+        // An empty value has one empty line.
+        assert_eq!(wrap(&mut m, "", TextKind::PortValue, 40.0, 10).0, [""]);
+        // The line limit: the last line ends with an ellipsis.
+        let (lines, _) = wrap(&mut m, "aaaa bbbb cccc dddd", TextKind::PortValue, 40.0, 2);
+        assert_eq!(lines, ["aaaa".to_owned(), format!("bbb{ELLIPSIS}")]);
+        let (lines, _) = wrap(&mut m, "a\nb\nc", TextKind::PortValue, 100.0, 2);
+        assert_eq!(lines, ["a", "b c"]);
+        // Multi-byte characters.
+        let (lines, _) = wrap(&mut m, "ééééé", TextKind::PortValue, 30.0, 10);
+        assert_eq!(lines, ["ééé", "éé"]);
+    }
+
+    #[test]
     fn elide_keeps_short_text() {
         let mut m = FixedMeasure(7.0);
         assert_eq!(
@@ -434,15 +555,17 @@ mod tests {
 
         let with_ports = measure_node(&node("n", "T", 2), &mut m);
         assert_eq!(with_ports.ports.len(), 2);
-        assert_eq!(with_ports.more, None);
         let geometry = CardGeometry::of(&with_ports);
         assert_eq!(geometry.port_lines, 2);
         assert!(with_ports.size.y > named.size.y);
 
+        // All ports show.
         let many = measure_node(&node("n", "T", 7), &mut m);
-        assert_eq!(many.ports.len(), MAX_PORT_LINES - 1);
-        assert_eq!(many.more.as_deref(), Some("+5 more"));
-        assert_eq!(CardGeometry::of(&many).port_lines, MAX_PORT_LINES);
+        assert_eq!(many.ports.len(), 7);
+        assert_eq!(many.ports[6].name, "port6");
+        assert_eq!(many.ports[6].value, ["{value_6}"]);
+        assert_eq!(CardGeometry::of(&many).port_lines, 7);
+        assert_eq!(many.size.y - with_ports.size.y, 5.0 * PORT_LINE);
 
         let long = measure_node(&node(&"x".repeat(200), "T", 0), &mut m);
         assert!(long.size.x <= MAX_WIDTH && long.size.x > MAX_WIDTH - 10.0);
@@ -458,18 +581,20 @@ mod tests {
         let geometry = CardGeometry::of(&card);
         let label_end = geometry.label_pos(true).x + m.width(&card.label, TextKind::Label);
         assert!(label_end <= geometry.badge_center(card.size.x).x - BADGE * 0.5);
-        let (name, value) = &card.ports[0];
-        let port_end = geometry.port_pos(0).x
-            + m.width(name, TextKind::PortName)
-            + m.width(PORT_SEPARATOR, TextKind::PortName)
-            + m.width(value, TextKind::PortValue);
-        assert!(
-            port_end <= card.size.x - PAD_X + 0.5,
-            "{port_end} > {}",
-            card.size.x
-        );
+        let entry = &card.ports[0];
+        // The value wraps to the line limit and ends with an ellipsis.
+        assert_eq!(entry.value.len(), MAX_VALUE_LINES);
+        assert!(entry.value.last().unwrap().ends_with(ELLIPSIS));
+        assert_eq!(geometry.port_lines, MAX_VALUE_LINES);
+        let value_x = geometry.port_pos(0).x
+            + m.width(&entry.name, TextKind::PortName)
+            + m.width(PORT_SEPARATOR, TextKind::PortName);
+        for line in &entry.value {
+            let end = value_x + m.width(line, TextKind::PortValue);
+            assert!(end <= card.size.x - PAD_X + 0.5, "{end} > {}", card.size.x);
+        }
         assert!(geometry.port_pos(0).y > geometry.separator_y());
-        assert!(geometry.port_pos(0).y + PORT_LINE <= card.size.y);
+        assert!(geometry.port_pos(MAX_VALUE_LINES - 1).y + PORT_LINE <= card.size.y);
     }
 
     #[test]

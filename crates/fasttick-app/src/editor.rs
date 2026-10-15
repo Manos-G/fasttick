@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use fasttick_core::bt::BtFile;
 use fasttick_core::edit::{Coalesce, CoalesceKey, CommandError, Editor, History};
-use fasttick_core::project::{FileId, FileRole, Project, TreeRef};
+use fasttick_core::project::{FileId, FileRole, MissingFiles, Project, TreeRef};
 use fasttick_core::validate::{Problem, ProblemCounts, validate_project};
 use fasttick_core::xml::NodeId;
 
@@ -270,6 +270,16 @@ impl EditorDoc {
             .map_err(|err| err.to_string())?;
         self.changed();
         Ok(id)
+    }
+
+    /// Adds the XML files of the folder that have the missing trees and
+    /// node models (see [`Project::add_missing_files`]). This change has no
+    /// undo.
+    pub fn add_missing_files(&mut self) -> Result<MissingFiles, String> {
+        let result = self.project.add_missing_files();
+        // Some files can be in the project also after an error.
+        self.changed();
+        result.map_err(|err| err.to_string())
     }
 
     /// Makes a new XML file with one empty tree (its ID comes from the file
