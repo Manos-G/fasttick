@@ -318,6 +318,7 @@ fn session_end_to_end() {
 
     send(&handle, SessionCommand::Disconnect);
     events.disconnected();
+    events.assert_no_problems();
     assert!(handle.join());
     assert!(wakes.load(Ordering::SeqCst) >= events.seen.len());
     assert!(live.executor.is_running().unwrap());
@@ -548,6 +549,16 @@ fn executor_restart_is_detected_and_the_hooks_come_back() {
     );
     assert_eq!(live_b.wait_result(before.runs), "SUCCESS");
     events.breakpoint(probe);
+    // The session waited for its notification socket before the hooks
+    // went back; it did not give up on it.
+    let socket_warnings: Vec<&SessionEvent> = events
+        .seen
+        .iter()
+        .filter(|event| {
+            matches!(event, SessionEvent::Warning(text) if text.contains("notification socket"))
+        })
+        .collect();
+    assert!(socket_warnings.is_empty(), "{socket_warnings:#?}");
     assert!(handle.join());
     // The cleanup on shutdown removed the hooks from the new executor.
     assert!(live_b.hooks().is_empty());

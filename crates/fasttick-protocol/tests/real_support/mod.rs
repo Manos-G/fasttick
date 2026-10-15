@@ -38,7 +38,7 @@ pub fn harness() -> Option<&'static Harness> {
             let explicit_prefix =
                 std::env::var_os(PREFIX_ENV).is_some_and(|value| !value.is_empty());
             if reason.is_fatal() || explicit_prefix {
-                panic!("the FastTick test harness is not usable ({PREFIX_ENV} is set): {reason}");
+                panic!("the FastTick test harness is not usable: {reason}");
             }
             eprintln!("{}", fasttick_testkit::skip_message(&reason));
             None
@@ -166,7 +166,12 @@ impl Live {
             .client
             .blackboards(&[PROBE_BLACKBOARD])
             .expect("BLACKBOARD");
-        ProbeCounters::from_json(&value[PROBE_BLACKBOARD])
+        // Without this check, the counters of another tree are all 0, and
+        // `assert_blocked` would pass for a tree that runs.
+        let blackboard = value
+            .get(PROBE_BLACKBOARD)
+            .unwrap_or_else(|| panic!("the tree has no blackboard {PROBE_BLACKBOARD}: {value}"));
+        ProbeCounters::from_json(blackboard)
     }
 
     /// Reads STATUS and gives the status of each node by name.

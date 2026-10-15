@@ -5,7 +5,9 @@
 //! the recording requests are in `real_recording.rs`.
 //!
 //! Each test skips cleanly when BT.CPP 4.x is not found. Run them with
-//! `FASTTICK_BTCPP_PREFIX=<BT.CPP install prefix>`.
+//! `FASTTICK_BTCPP_PREFIX=<BT.CPP install prefix>`: with this variable
+//! set, a test fails if the harness is not usable (see
+//! `real_support::harness`).
 
 mod real_support;
 
