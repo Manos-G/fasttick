@@ -23,6 +23,10 @@ use super::model::{CanvasNode, CanvasNodeId, CanvasTree, NodeCategory};
 /// The radius of the dot, in world units.
 pub const DOT_RADIUS: f32 = 7.0;
 
+/// The distance (world units) of the centre of the dot outside the card
+/// edge, so that the dot does not cover the last port line.
+pub const DOT_OFFSET: f32 = 3.0;
+
 /// The largest distance (screen points) from the centre of a dot at which
 /// the pointer grabs it.
 pub const DOT_GRAB: f32 = 11.0;
@@ -54,11 +58,12 @@ pub fn has_dot(node: &CanvasNode) -> bool {
     }
 }
 
-/// The centre of the dot of a card, in world units.
+/// The centre of the dot of a card, in world units: a little outside the
+/// middle of the child side.
 pub fn dot_center(rect: Rect, direction: LayoutDirection) -> Pos2 {
     match direction {
-        LayoutDirection::TopDown => pos2(rect.center().x, rect.max.y),
-        LayoutDirection::LeftRight => pos2(rect.max.x, rect.center().y),
+        LayoutDirection::TopDown => pos2(rect.center().x, rect.max.y + DOT_OFFSET),
+        LayoutDirection::LeftRight => pos2(rect.max.x + DOT_OFFSET, rect.center().y),
     }
 }
 
@@ -203,14 +208,14 @@ mod tests {
             .map(|i| has_dot(tree.get(CanvasNodeId(i)).unwrap()))
             .collect();
         assert_eq!(ids, [true, false, false, true, false]);
-        // The dot is at the middle of the bottom edge.
+        // The dot is at the middle of the bottom edge, a little outside.
         assert_eq!(
             dot_center(rects[0], LayoutDirection::TopDown),
-            pos2(200.0, 40.0)
+            pos2(200.0, 40.0 + DOT_OFFSET)
         );
         assert_eq!(
             dot_center(rects[0], LayoutDirection::LeftRight),
-            pos2(250.0, 20.0)
+            pos2(250.0 + DOT_OFFSET, 20.0)
         );
         let at = |p| dot_at(&tree, &rects, LayoutDirection::TopDown, p, 10.0);
         assert_eq!(at(pos2(203.0, 44.0)), Some(CanvasNodeId(0)));

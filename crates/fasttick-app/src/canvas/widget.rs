@@ -2641,8 +2641,8 @@ fn paint_card(
             ))
         });
         let center = match state.direction {
-            LayoutDirection::TopDown => pos2(screen.center().x, screen.max.y + 17.0 * zoom),
-            LayoutDirection::LeftRight => pos2(screen.max.x + 22.0 * zoom, screen.center().y),
+            LayoutDirection::TopDown => pos2(screen.center().x, screen.max.y + 20.0 * zoom),
+            LayoutDirection::LeftRight => pos2(screen.max.x + 25.0 * zoom, screen.center().y),
         };
         paint::pill(
             shapes,
