@@ -14,6 +14,7 @@ use fasttick_core::bt::BtFile;
 use fasttick_core::edit::{Coalesce, CoalesceKey, CommandError, Editor, History};
 use fasttick_core::project::{FileId, FileRole, Project};
 use fasttick_core::validate::{Problem, ProblemCounts, validate_project};
+use fasttick_core::xml::NodeId;
 
 use crate::canvas::{CanvasTree, Expansion};
 
@@ -144,6 +145,26 @@ impl EditorDoc {
     pub fn tree_id(&self, index: usize) -> Option<String> {
         self.file()
             .and_then(|f| f.index().trees.get(index).map(|t| t.id.clone()))
+    }
+
+    /// The index of the tree that holds `node` (an element of the main
+    /// file): the tree of its `<BehaviorTree>` ancestor, or the tree of an
+    /// unconnected node.
+    pub fn tree_of_node(&self, node: NodeId) -> Option<usize> {
+        let file = self.file()?;
+        let doc = file.doc();
+        let mut top = node;
+        while let Some(parent) = doc.parent(top) {
+            if let Some(index) = file.index().trees.iter().position(|t| t.element == parent) {
+                return Some(index);
+            }
+            top = parent;
+        }
+        let (_, tree, _) = self
+            .project
+            .all_unconnected()
+            .find(|(f, _, u)| *f == self.file && u.node == top)?;
+        self.tree_index(tree)
     }
 
     /// The revision. It increments after each change.

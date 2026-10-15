@@ -1,7 +1,4 @@
 //! Side panels. One function for each panel; [`show_panel`] picks it.
-//!
-//! Panels that are not built yet show a short placeholder text
-//! ([`placeholder_text`]).
 
 pub mod blackboard;
 pub mod breakpoints;
@@ -9,11 +6,14 @@ pub mod inspector;
 pub mod live_bar;
 pub mod node_editor;
 pub mod palette;
+pub mod problems;
+pub mod search;
 pub mod start;
 pub mod statistics;
 pub mod timeline;
 pub mod transitions;
 pub mod tree_list;
+pub mod xml_view;
 
 use egui::{RichText, Ui};
 
@@ -57,46 +57,16 @@ pub fn show_panel(tab: Tab, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         Tab::Trees => tree_list::show(ui, cx),
         Tab::Inspector => inspector::show(ui, cx),
         Tab::Palette => palette::show(ui, cx),
+        Tab::Problems => problems::show(ui, cx),
+        Tab::Xml => xml_view::show(ui, cx),
+        Tab::Search => search::show(ui, cx),
         Tab::Blackboard => blackboard::show(ui, cx),
         Tab::Breakpoints => breakpoints::show(ui, cx),
         Tab::Timeline => timeline::show(ui, cx),
         Tab::Transitions => transitions::show(ui, cx),
         Tab::Statistics => statistics::show(ui, cx),
         Tab::Document(_) => {}
-        other => placeholder(ui, other),
     }
-}
-
-/// The placeholder text of a panel that is not built yet.
-pub fn placeholder_text(tab: Tab) -> &'static str {
-    match tab {
-        Tab::Problems => "The problems list comes with validation.",
-        Tab::Xml => "The XML view comes with the tree editor.",
-        Tab::Search => "Search comes in a later version.",
-        Tab::Start
-        | Tab::Palette
-        | Tab::Document(_)
-        | Tab::Trees
-        | Tab::Inspector
-        | Tab::Blackboard
-        | Tab::Breakpoints
-        | Tab::Transitions
-        | Tab::Statistics
-        | Tab::Timeline => "",
-    }
-}
-
-/// True if a panel is built (it has no placeholder).
-pub fn is_built(tab: Tab) -> bool {
-    placeholder_text(tab).is_empty()
-}
-
-fn placeholder(ui: &mut Ui, tab: Tab) {
-    ui.add_space(8.0);
-    ui.vertical_centered(|ui| {
-        ui.label(RichText::new(tab.title()).strong());
-        ui.label(RichText::new(placeholder_text(tab)).weak());
-    });
 }
 
 /// A status with its badge (the same colour and shape as on the canvas)
@@ -149,26 +119,4 @@ pub(crate) fn active_edit(
 pub(crate) fn empty(ui: &mut Ui, text: &str) {
     ui.add_space(8.0);
     ui.label(RichText::new(text).weak());
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_unbuilt_panel_has_a_placeholder() {
-        let built = [
-            Tab::Trees,
-            Tab::Palette,
-            Tab::Inspector,
-            Tab::Blackboard,
-            Tab::Breakpoints,
-            Tab::Transitions,
-            Tab::Statistics,
-            Tab::Timeline,
-        ];
-        for tab in Tab::PANELS {
-            assert_eq!(is_built(tab), built.contains(&tab), "{tab:?}");
-        }
-    }
 }

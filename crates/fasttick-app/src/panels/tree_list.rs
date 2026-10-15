@@ -5,8 +5,9 @@ use egui::{RichText, Ui};
 use fasttick_core::runtime::{InstanceIndex, RuntimeTree};
 
 use super::PanelContext;
-use crate::actions::AppAction;
+use crate::actions::{AppAction, NamePurpose};
 use crate::canvas::SubtreeLinking;
+use crate::edit_ops::EditOp;
 
 /// One row of the tree list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +107,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     }
     let current = view.root_instance;
     let doc_id = doc.id;
+    let editable = doc.editor.is_some();
     let linking = doc.linking;
     let (list, main) = match &doc.editor {
         Some(editor) => (
@@ -134,6 +136,17 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         .small()
         .weak(),
     );
+    if editable
+        && ui
+            .button("Add tree…")
+            .on_hover_text("Add an empty <BehaviorTree> to the file")
+            .clicked()
+    {
+        cx.actions.push(AppAction::PromptName {
+            view: view_id,
+            purpose: NamePurpose::AddTree,
+        });
+    }
     ui.separator();
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
@@ -155,6 +168,10 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                     if !row.path.is_empty() {
                         ui.label(RichText::new(&row.path).small().weak());
                     }
+                    if editable && row.instance == main {
+                        ui.label(RichText::new("main").small().weak())
+                            .on_hover_text("main_tree_to_execute");
+                    }
                     if response.clicked() {
                         match linking {
                             SubtreeLinking::ByTreeId => {
@@ -171,6 +188,43 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                         if ui.button("Open in a new tab").clicked() {
                             cx.actions
                                 .push(AppAction::OpenTreeInNewTab(doc_id, row.instance));
+                            ui.close();
+                        }
+                        if !editable {
+                            return;
+                        }
+                        ui.separator();
+                        let edit = |op: EditOp| AppAction::Edit(view_id, op);
+                        if ui
+                            .add_enabled(
+                                row.instance != main,
+                                egui::Button::new("Set as main tree"),
+                            )
+                            .clicked()
+                        {
+                            cx.actions.push(edit(EditOp::SetMainTree {
+                                id: row.tree_id.clone(),
+                            }));
+                            ui.close();
+                        }
+                        if ui.button("Rename…").clicked() {
+                            cx.actions.push(AppAction::PromptName {
+                                view: view_id,
+                                purpose: NamePurpose::RenameTree {
+                                    old: row.tree_id.clone(),
+                                },
+                            });
+                            ui.close();
+                        }
+                        if ui
+                            .button("Delete tree")
+                            .on_hover_text("Undo brings it back.")
+                            .clicked()
+                        {
+                            cx.actions.push(edit(EditOp::DeleteTree {
+                                id: row.tree_id.clone(),
+                            }));
+                            ui.close();
                         }
                     });
                 });

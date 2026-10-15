@@ -295,6 +295,21 @@ impl Workspace {
     /// to it. Returns true if the node is on the canvas.
     pub fn reveal_xml(&mut self, id: ViewId, file: FileId, node: NodeId, select: bool) -> bool {
         self.refresh_editor_views();
+        // A node of another tree: show that tree first.
+        let shown = self.view(id).is_some_and(|v| {
+            v.canvas
+                .tree()
+                .find_source(NodeSource::Xml(file, node))
+                .is_some()
+        });
+        if !shown
+            && let Some(index) = self
+                .doc_of_view(id)
+                .and_then(|d| d.editor.as_deref())
+                .and_then(|e| e.tree_of_node(node))
+        {
+            self.set_view_root(id, InstanceIndex(index));
+        }
         let Some(view) = self.view_mut(id) else {
             return false;
         };

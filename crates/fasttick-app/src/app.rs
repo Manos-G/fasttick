@@ -652,7 +652,10 @@ impl FastTickApp {
                     view.canvas.select_all();
                 }
             }
-            Command::Find => dock::show_panel(&mut self.docks[self.mode.index()], Tab::Search),
+            Command::Find => {
+                dock::show_panel(&mut self.docks[self.mode.index()], Tab::Search);
+                panels::search::request_focus(ctx);
+            }
             Command::FitToView => self.with_active_canvas(|c| c.fit_to_view(true)),
             Command::ZoomIn => self.with_active_canvas(|c| c.zoom_in()),
             Command::ZoomOut => self.with_active_canvas(|c| c.zoom_out()),

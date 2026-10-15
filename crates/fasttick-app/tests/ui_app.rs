@@ -151,9 +151,10 @@ fn opening_the_sample_tree_shows_its_nodes() {
     }
     // The root is visible in the first view.
     tree_item(&harness, "main_sequence");
-    // The tree list shows the trees of the file.
+    // The tree list shows the trees of the file (the problems list can
+    // show the tree IDs too).
     for tree in ["MainTree", "Navigate", "Counting", "SecondTree"] {
-        harness.get_by_label(tree);
+        assert!(harness.query_all_by_label(tree).count() >= 1, "{tree}");
     }
 
     // After "Fit to view" all nodes are on screen.

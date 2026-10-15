@@ -1,6 +1,7 @@
 //! The document arena, queries and the writer.
 
 use std::fmt;
+use std::ops::Range;
 use std::sync::Arc;
 
 use super::node::{Attribute, Element, Node, NodeId, NodeKind, Slot};
@@ -322,6 +323,20 @@ impl Document {
         out.write_str(&s)
     }
 
+    /// Writes the document like [`Document::write`] and also returns the
+    /// byte range of each element in the text: from the `<` of the start
+    /// tag to the end of the end tag (or of the empty-element tag). The
+    /// ranges are in document order.
+    pub fn write_with_ranges(&self) -> (String, Vec<(NodeId, Range<usize>)>) {
+        let mut s = String::with_capacity(self.source.len() + 64);
+        if self.bom {
+            s.push('\u{feff}');
+        }
+        let mut ranges = Vec::new();
+        self.write_subtree_into(self.root(), false, &mut s, Some(&mut ranges));
+        (s, ranges)
+    }
+
     /// Writes one node and its subtree, for example for the clipboard.
     /// The result is empty for an unknown node. For the document node, the
     /// result is the full document.
@@ -351,9 +366,22 @@ impl Document {
     /// Writes a subtree without recursion, so that deep trees cannot
     /// overflow the stack.
     fn write_subtree(&self, id: NodeId, regenerate: bool, out: &mut String) {
+        self.write_subtree_into(id, regenerate, out, None);
+    }
+
+    /// See [`Document::write_subtree`]. With `ranges`, it also records the
+    /// byte range of each element.
+    fn write_subtree_into(
+        &self,
+        id: NodeId,
+        regenerate: bool,
+        out: &mut String,
+        mut ranges: Option<&mut Vec<(NodeId, Range<usize>)>>,
+    ) {
         enum Step {
             Enter(NodeId),
-            Leave(NodeId),
+            /// The element and the index of its range.
+            Leave(NodeId, usize),
         }
         let mut stack = vec![Step::Enter(id)];
         while let Some(step) = stack.pop() {
@@ -366,22 +394,35 @@ impl Document {
                         }
                         Node::Element(e) => {
                             let has_children = !slot.children.is_empty();
+                            let start = out.len();
                             if regenerate {
                                 e.generate_start(e.self_closing && !has_children, out);
                             } else {
                                 e.write_start(has_children, out);
                             }
+                            let index = match ranges.as_deref_mut() {
+                                Some(list) => {
+                                    list.push((n, start..out.len()));
+                                    list.len() - 1
+                                }
+                                None => usize::MAX,
+                            };
                             if !(e.self_closing && !has_children) {
-                                stack.push(Step::Leave(n));
+                                stack.push(Step::Leave(n, index));
                                 stack.extend(slot.children.iter().rev().map(|&c| Step::Enter(c)));
                             }
                         }
                         other => out.push_str(other.raw().unwrap_or("")),
                     }
                 }
-                Step::Leave(n) => {
+                Step::Leave(n, index) => {
                     if let Some(e) = self.element(n) {
                         e.write_end(out);
+                    }
+                    if let Some((_, range)) =
+                        ranges.as_deref_mut().and_then(|list| list.get_mut(index))
+                    {
+                        range.end = out.len();
                     }
                 }
             }
@@ -434,6 +475,25 @@ impl Iterator for Descendants<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn write_with_ranges_covers_each_element() {
+        let src = "<?xml version=\"1.0\"?>\n<root a=\"1\">\n  <A/>\n  <B x=\"y\">text<C></C></B>\n</root>\n";
+        let doc = Document::parse(src).unwrap();
+        let (text, ranges) = doc.write_with_ranges();
+        assert_eq!(text, src);
+        let parts: Vec<&str> = ranges.iter().map(|(_, r)| &text[r.clone()]).collect();
+        assert_eq!(
+            parts,
+            [
+                "<root a=\"1\">\n  <A/>\n  <B x=\"y\">text<C></C></B>\n</root>",
+                "<A/>",
+                "<B x=\"y\">text<C></C></B>",
+                "<C></C>",
+            ]
+        );
+        assert_eq!(doc.element(ranges[1].0).unwrap().name(), "A");
+    }
 
     #[test]
     fn line_col_basic() {

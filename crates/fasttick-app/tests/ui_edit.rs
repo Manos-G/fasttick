@@ -481,3 +481,171 @@ fn model_dialog_adds_a_model_to_the_file() {
     // The palette lists the new type.
     harness.get_by_label("MoveArm");
 }
+
+fn primary_label(harness: &Harness<'static, FastTickApp>) -> Option<String> {
+    let app = harness.state();
+    let view = app.workspace().active().unwrap();
+    let id = view.canvas.primary()?;
+    Some(view.canvas.tree().get(id)?.label.clone())
+}
+
+#[test]
+fn problems_list_shows_new_problems_and_reveals_the_node() {
+    let mut harness = harness();
+    harness.state_mut().show_panel(Tab::Problems);
+    harness.run();
+    // An empty Fallback is an error.
+    for label in ["check_blocked", "check_flag"] {
+        right_click(&mut harness, label);
+        harness
+            .get_by_role_and_label(Role::Button, "Delete")
+            .click();
+        harness.run();
+    }
+    let message = {
+        let app = harness.state();
+        let view = app.workspace().active().unwrap();
+        let doc = app.workspace().doc(view.doc).unwrap();
+        let editor = doc.editor.as_ref().unwrap();
+        let tree = view.canvas.tree();
+        let fallback = tree
+            .nodes()
+            .iter()
+            .find(|n| n.label == "fallback")
+            .map(|n| n.source)
+            .unwrap();
+        editor
+            .problems()
+            .iter()
+            .find(|p| {
+                p.node
+                    .map(|n| fasttick_app::canvas::NodeSource::Xml(p.file, n))
+                    == Some(fallback)
+            })
+            .expect("a problem of the Fallback")
+            .message
+            .clone()
+    };
+    let row = harness
+        .query_all(egui_kittest::kittest::by().label(&message))
+        .find(|n| n.accesskit_node().role() == Role::Label)
+        .expect("the problem row")
+        .rect()
+        .center();
+    // Select another node first, then click the problem.
+    select(&mut harness, "init");
+    harness.event(Event::PointerMoved(row));
+    for pressed in [true, false] {
+        harness.event(Event::PointerButton {
+            pos: row,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    harness.run();
+    assert_eq!(primary_label(&harness).as_deref(), Some("fallback"));
+}
+
+#[test]
+fn xml_panel_follows_the_document() {
+    let mut harness = harness();
+    harness.state_mut().show_panel(Tab::Xml);
+    harness.run();
+    harness.get_by_label_contains("<SayMessage name=\"say_text\"");
+    select(&mut harness, "say_text");
+    type_into(&mut harness, Field::Label("Name"), "said", true);
+    harness.get_by_label_contains("<SayMessage name=\"said\"");
+}
+
+#[test]
+fn search_finds_nodes_and_reveals_them() {
+    let mut harness = harness();
+    command(&mut harness, Command::Find);
+    harness.run();
+    assert!(input(&harness, "Find").is_focused());
+    input(&harness, "Find").type_text("count_t");
+    harness.run();
+    harness.get_by_label("1 matches in 1 nodes");
+    {
+        let app = harness.state();
+        let tree = app.workspace().active().unwrap().canvas.tree();
+        let marked: Vec<String> = tree
+            .nodes()
+            .iter()
+            .filter(|n| n.deco.search_match)
+            .map(|n| n.label.clone())
+            .collect();
+        assert_eq!(marked, ["count_twice"]);
+    }
+    harness
+        .query_all(egui_kittest::kittest::by().label_contains("count_twice"))
+        .find(|n| n.accesskit_node().role() == Role::Button)
+        .expect("the result row")
+        .click();
+    harness.run();
+    assert_eq!(primary_label(&harness).as_deref(), Some("count_twice"));
+
+    // Wildcards match the whole text.
+    harness.get_by_label("* ?").click();
+    type_into(&mut harness, Field::Label("Find"), "count_*", true);
+    // All trees of the file: count_once, count_twice and count_in_subtree.
+    harness.get_by_label("3 matches in 3 nodes");
+}
+
+#[test]
+fn tree_list_adds_renames_and_sets_the_main_tree() {
+    let mut harness = harness();
+    harness
+        .get_by_role_and_label(Role::Button, "Add tree…")
+        .click();
+    harness.run();
+    input(&harness, "Tree ID").type_text("Extra");
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Add").click();
+    harness.run();
+    let trees = |h: &Harness<'static, FastTickApp>| {
+        let app = h.state();
+        let view = app.workspace().active().unwrap();
+        let doc = app.workspace().doc(view.doc).unwrap();
+        doc.editor
+            .as_ref()
+            .unwrap()
+            .trees()
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect::<Vec<_>>()
+    };
+    assert!(trees(&harness).contains(&"Extra".to_owned()));
+    // The view shows the new tree.
+    assert_eq!(
+        harness
+            .state()
+            .workspace()
+            .active()
+            .unwrap()
+            .canvas
+            .tree()
+            .title,
+        "Extra"
+    );
+
+    // Rename it with the context menu of the tree list.
+    harness.get_by_label("Extra").click_secondary();
+    harness.run();
+    harness.get_by_label("Rename…").click();
+    harness.run();
+    type_into(&mut harness, Field::Label("Tree ID"), "Spare", true);
+    harness
+        .get_by_role_and_label(Role::Button, "Rename")
+        .click();
+    harness.run();
+    assert!(trees(&harness).contains(&"Spare".to_owned()));
+    assert!(!trees(&harness).contains(&"Extra".to_owned()));
+
+    harness.get_by_label("Spare").click_secondary();
+    harness.run();
+    harness.get_by_label("Set as main tree").click();
+    harness.run();
+    assert!(xml(&harness).contains("main_tree_to_execute=\"Spare\""));
+}
