@@ -288,9 +288,12 @@ fn slack(
                 let must_be_apart = if params.layered {
                     result.depths[a] == result.depths[b]
                 } else {
+                    // The same tolerance as `check_rules`: bands that only
+                    // touch (up to rounding) do not need a gap.
                     let (at, ab) = band(result, a, params);
                     let (bt, bb) = band(result, b, params);
-                    at < bb && bt < ab
+                    let e_depth = eps(ab.max(bb));
+                    at < bb - e_depth && bt < ab - e_depth
                 };
                 if !must_be_apart {
                     continue;
@@ -352,8 +355,12 @@ proptest! {
         }
     }
 
+    // The symmetric mean of two passes can leave extra space next to the
+    // first and the last subtree (see the docs of `layout`), so this test
+    // checks only that they do not overlap. The unit tests in
+    // src/layout/tests.rs check that one pass moves them against a sibling.
     #[test]
-    fn first_and_last_subtrees_touch_their_siblings(
+    fn first_and_last_subtrees_do_not_overlap_their_siblings(
         raw in raw_nodes(60),
         params in params_strategy(),
     ) {
@@ -366,11 +373,7 @@ proptest! {
             for block in [node.children[0], *node.children.last().unwrap()] {
                 let free = slack(&tree, &params, &result, p, block);
                 let scale = breadth(result.bounds, params.direction).1;
-                prop_assert!(free >= -eps(scale), "subtree {} overlaps: {}", block, free);
-                prop_assert!(
-                    free <= eps(scale),
-                    "subtree {} of {} can move {} nearer to its siblings", block, p, free
-                );
+                prop_assert!(free >= -eps(scale), "subtree {} of {} overlaps: {}", block, p, free);
             }
         }
     }

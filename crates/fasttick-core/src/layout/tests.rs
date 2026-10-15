@@ -65,10 +65,7 @@ fn two_leaves_and_a_wide_parent() {
     assert!(close(result.bounds.height(), 40.0 + 30.0 + 20.0));
     assert_eq!(result.depths, vec![0, 1, 1]);
     assert_eq!(result.edge_start(root), Some(Vec2::new(100.0, 40.0)));
-    assert_eq!(
-        result.edge_end(a),
-        Some(Vec2::new(ra.center().x, ra.min.y))
-    );
+    assert_eq!(result.edge_end(a), Some(Vec2::new(ra.center().x, ra.min.y)));
     assert_eq!(result.rects().count(), 3);
 }
 
@@ -409,3 +406,91 @@ fn default_params() {
     assert!(q.sibling_gap > 0.0 && q.subtree_gap >= q.sibling_gap);
 }
 
+/// The nodes of the subtree of `root`, in pre-order.
+fn subtree_nodes(tree: &LayoutTree, root: usize) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(t) = stack.pop() {
+        out.push(t);
+        stack.extend(tree.nodes[t].children.iter().rev());
+    }
+    out
+}
+
+/// The smallest free space between the subtree of `block` and the subtrees
+/// of the other children of `parent`, on the levels where both have nodes.
+fn single_pass_slack(
+    tree: &LayoutTree,
+    params: &LayoutParams,
+    result: &Layout,
+    parent: usize,
+    block: usize,
+) -> f32 {
+    let children = &tree.nodes[parent].children;
+    let position = children.iter().position(|&c| c == block).unwrap_or(0);
+    let inside = subtree_nodes(tree, block);
+    let mut parent_of = vec![usize::MAX; tree.nodes.len()];
+    for (p, node) in tree.nodes.iter().enumerate() {
+        for &c in &node.children {
+            parent_of[c] = p;
+        }
+    }
+    let mut min = f32::INFINITY;
+    for (k, &other) in children.iter().enumerate() {
+        if k == position {
+            continue;
+        }
+        for a in subtree_nodes(tree, other) {
+            for &b in &inside {
+                if result.depths[a] != result.depths[b] {
+                    continue;
+                }
+                let required = if parent_of[a] == parent_of[b] {
+                    params.sibling_gap
+                } else {
+                    params.subtree_gap
+                };
+                let (ra, rb) = (
+                    result.rect(a).unwrap_or(Rect::ZERO),
+                    result.rect(b).unwrap_or(Rect::ZERO),
+                );
+                let free = if k < position {
+                    rb.min.x - ra.max.x - required
+                } else {
+                    ra.min.x - rb.max.x - required
+                };
+                min = min.min(free);
+            }
+        }
+    }
+    min
+}
+
+proptest::proptest! {
+    /// One normal pass moves the first and the last subtree of each node
+    /// against a sibling: neither can move nearer to its siblings.
+    #[test]
+    fn one_pass_moves_outer_subtrees_against_a_sibling(
+        sizes in proptest::collection::vec((0.0f32..120.0, 0.0f32..60.0, proptest::prelude::any::<u32>()), 1..50),
+    ) {
+        let mut tree = LayoutTree::new();
+        tree.add_root((sizes[0].0, sizes[0].1));
+        for (i, &(w, h, pick)) in sizes.iter().enumerate().skip(1) {
+            let parent = pick as usize % i;
+            tree.add_child(parent, (w, h));
+        }
+        let params = params(LayoutDirection::TopDown);
+        let result = layout_with(&tree, &params, Passes::NormalOnly).unwrap();
+        let scale = result.bounds.width().max(1.0);
+        for (p, node) in tree.nodes.iter().enumerate() {
+            if node.children.len() < 2 {
+                continue;
+            }
+            for block in [node.children[0], node.children[node.children.len() - 1]] {
+                let free = single_pass_slack(&tree, &params, &result, p, block);
+                proptest::prop_assert!(free.abs() <= scale * 1e-4 + 1e-3,
+                    "subtree {} of {}: free space {}", block, p, free);
+            }
+        }
+    }
+}

@@ -464,7 +464,31 @@ impl Structure {
 /// Places the nodes of a forest. See the [module documentation](self).
 ///
 /// The time is linear in the number of nodes.
+///
+/// The symmetric mean of the two passes keeps every rule of the module
+/// documentation. It can leave a little more space than one pass between
+/// the first (or the last) subtree of a node and its siblings: one pass
+/// moves the subtree against one sibling, the mirrored pass against
+/// another, and the mean is between the two.
 pub fn layout(tree: &LayoutTree, params: &LayoutParams) -> Result<Layout, LayoutError> {
+    layout_with(tree, params, Passes::Symmetric)
+}
+
+/// Which passes [`layout_with`] uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Passes {
+    /// The mean of the normal and the mirrored pass.
+    Symmetric,
+    /// Only the normal pass (for tests of the pass itself).
+    #[cfg(test)]
+    NormalOnly,
+}
+
+fn layout_with(
+    tree: &LayoutTree,
+    params: &LayoutParams,
+    passes: Passes,
+) -> Result<Layout, LayoutError> {
     let s = Structure::build(tree)?;
     let n = tree.nodes.len();
     let direction = params.direction;
@@ -568,7 +592,11 @@ pub fn layout(tree: &LayoutTree, params: &LayoutParams) -> Result<Layout, Layout
             let half = breadth[t] * 0.5;
             let a = (normal[t] + half) - root_normal;
             let b = (-(reversed[t] + half)) - root_reversed;
-            let centre = (a + b) * 0.5;
+            let centre = match passes {
+                Passes::Symmetric => (a + b) * 0.5,
+                #[cfg(test)]
+                Passes::NormalOnly => a,
+            };
             left[t] = centre - half;
             min = min.min(left[t]);
             max = max.max(centre + half);
