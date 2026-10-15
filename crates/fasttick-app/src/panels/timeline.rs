@@ -58,11 +58,23 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     time_bar(ui, model, &palette);
 }
 
-fn hint(ui: &Ui, keymap: &crate::shortcuts::KeyMap, command: Command, text: &str) -> String {
-    match keymap.shortcut_text(ui.ctx(), command) {
-        Some(shortcut) => format!("{text} ({shortcut})"),
-        None => text.to_owned(),
-    }
+/// A transport button. The label is also the accessibility label; the
+/// shortcut is in a second tooltip line.
+fn transport_button(
+    ui: &mut Ui,
+    keymap: &crate::shortcuts::KeyMap,
+    command: Command,
+    icon: Icon,
+    label: &str,
+    enabled: bool,
+    color: Option<Color32>,
+) -> bool {
+    let response = widgets::icon_button_colored(ui, icon, label, enabled, color);
+    let response = match keymap.shortcut_text(ui.ctx(), command) {
+        Some(shortcut) => response.on_hover_text(RichText::new(shortcut).small().weak()),
+        None => response,
+    };
+    response.clicked()
 }
 
 fn transport(
@@ -79,12 +91,12 @@ fn transport(
             let (start, end) = model.cursor().bounds(index);
             (index.count_before_time(start), index.count_at_time(end))
         };
-        let label = hint(ui, keymap, Command::GoToStart, "Go to the start");
-        if widgets::icon_button(ui, Icon::First, &label, applied > low).clicked() {
+        let back = applied > low;
+        let forward = applied < high;
+        if transport_button(ui, keymap, Command::GoToStart, Icon::First, "Go to the start", back, None) {
             model.go_to_start();
         }
-        let label = hint(ui, keymap, Command::StepBack, "One transition back");
-        if widgets::icon_button(ui, Icon::Previous, &label, applied > low).clicked() {
+        if transport_button(ui, keymap, Command::StepBack, Icon::Previous, "One transition back", back, None) {
             model.step_back();
         }
         let playing = model.cursor().is_playing();
@@ -93,17 +105,13 @@ fn transport(
         } else {
             (Icon::Play, "Play")
         };
-        let label = hint(ui, keymap, Command::PlayPause, text);
-        if widgets::icon_button_colored(ui, icon, &label, total > 0, Some(palette.accent)).clicked()
-        {
+        if transport_button(ui, keymap, Command::PlayPause, icon, text, total > 0, Some(palette.accent)) {
             model.toggle_play();
         }
-        let label = hint(ui, keymap, Command::StepForward, "One transition forward");
-        if widgets::icon_button(ui, Icon::Next, &label, applied < high).clicked() {
+        if transport_button(ui, keymap, Command::StepForward, Icon::Next, "One transition forward", forward, None) {
             model.step_forward();
         }
-        let label = hint(ui, keymap, Command::GoToEnd, "Go to the end");
-        if widgets::icon_button(ui, Icon::Last, &label, applied < high).clicked() {
+        if transport_button(ui, keymap, Command::GoToEnd, Icon::Last, "Go to the end", forward, None) {
             model.go_to_end();
         }
         ui.separator();

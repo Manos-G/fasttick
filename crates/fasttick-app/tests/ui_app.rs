@@ -116,9 +116,14 @@ fn mode_switching() {
     mode_button(&harness, Mode::Live).click();
     harness.run();
     assert_eq!(harness.state().mode(), Mode::Live);
-    // The live start page has a connect form.
-    harness.get_by_role_and_label(Role::Button, "Connect");
-    harness.get_by_label("Host");
+    // The live bar and the live start page have a connect form.
+    assert_eq!(
+        harness
+            .query_all_by_role_and_label(Role::Button, "Connect")
+            .count(),
+        2
+    );
+    assert_eq!(harness.query_all_by_label("Host").count(), 2);
 
     mode_button(&harness, Mode::Replay).click();
     harness.run();
@@ -379,7 +384,7 @@ fn replay_log_shows_statuses() {
     assert_eq!(harness.state().mode(), Mode::Replay);
     let doc = &harness.state().workspace().docs()[0];
     let replay = doc.replay.as_ref().unwrap();
-    assert_eq!(replay.position, replay.index.len());
+    assert_eq!(replay.cursor().applied(), replay.index().len());
     // At the end of the log, the root finished with SUCCESS and is IDLE.
     {
         let view = harness.state().workspace().active().unwrap();

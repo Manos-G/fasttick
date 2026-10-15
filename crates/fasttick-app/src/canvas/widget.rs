@@ -734,7 +734,7 @@ impl<'a> TreeCanvas<'a> {
             state,
             palette,
             id_salt,
-            mut node_menu,
+            node_menu,
         } = self;
         let id = ui.make_persistent_id(id_salt);
         let available = ui.available_rect_before_wrap();
@@ -787,7 +787,7 @@ impl<'a> TreeCanvas<'a> {
         // Context menu, for the node under the pointer at the right-click.
         let target = state.context_target;
         response.context_menu(|ui| {
-            context_menu(state, ui, target, &mut events, node_menu.as_deref_mut());
+            context_menu(state, ui, target, &mut events, node_menu);
         });
 
         CanvasOutput { response, events }

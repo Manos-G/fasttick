@@ -204,6 +204,14 @@ struct StatsCache {
     order: Vec<usize>,
 }
 
+/// The cached transition density for one range and one number of bins.
+#[derive(Debug, Clone)]
+struct DensityCache {
+    bounds: (u64, u64),
+    bins: usize,
+    counts: Arc<Vec<u32>>,
+}
+
 /// The view model of one replay document. See the module documentation.
 #[derive(Debug)]
 pub struct ReplayModel {
@@ -225,7 +233,7 @@ pub struct ReplayModel {
     /// Hide the nodes without transitions in the statistics table.
     pub hide_unchanged: bool,
     stats: Option<StatsCache>,
-    density: Option<((u64, u64), usize, Arc<Vec<u32>>)>,
+    density: Option<DensityCache>,
     last_frame: Option<f64>,
     /// The sorted position of the transition that the user clicked in the
     /// table, if any.
@@ -539,14 +547,18 @@ impl ReplayModel {
     /// range `bounds`. The result is cached.
     pub fn density(&mut self, bounds: (u64, u64), bins: usize) -> Arc<Vec<u32>> {
         let bins = bins.clamp(1, 4096);
-        if let Some((cached_bounds, cached_bins, counts)) = &self.density
-            && *cached_bounds == bounds
-            && *cached_bins == bins
+        if let Some(cache) = &self.density
+            && cache.bounds == bounds
+            && cache.bins == bins
         {
-            return Arc::clone(counts);
+            return Arc::clone(&cache.counts);
         }
         let counts = Arc::new(density(&self.index, bounds, bins));
-        self.density = Some((bounds, bins, Arc::clone(&counts)));
+        self.density = Some(DensityCache {
+            bounds,
+            bins,
+            counts: Arc::clone(&counts),
+        });
         counts
     }
 }
