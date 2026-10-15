@@ -1307,7 +1307,9 @@ fn paint_edges(
         let start = state
             .viewport
             .to_screen(origin, state.layout.edge_start(*parent_rect));
-        let bus_world = state.layout.bus_position(parent.depth);
+        let bus_world = state
+            .layout
+            .bus_of(CanvasNodeId(index as u32), parent.depth);
         for child in &parent.children {
             let Some(child_rect) = state.layout.rect(*child) else {
                 continue;

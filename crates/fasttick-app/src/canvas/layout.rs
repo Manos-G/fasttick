@@ -4,12 +4,11 @@
 //! ([`CardText::size`](super::model::CardText::size)) and gives one world
 //! rectangle for each node.
 //!
-//! TODO(after the merge of `fasttick_core::layout`): implement
-//! [`LayoutEngine`] with the tidy-tree layout of the core crate (Walker
-//! algorithm, variable node sizes) and use it in [`layout`]. The
-//! temporary [`LayeredLayout`] below is simple and correct (no overlaps,
-//! parents centred over their children, one row or column for each level),
-//! but it does not pack subtrees as tightly as a tidy tree.
+//! The default engine is [`TidyLayout`]: the tidy-tree layout of
+//! `fasttick_core::layout` (van der Ploeg's extension of the Walker
+//! algorithm, for nodes of different sizes). It packs subtrees tightly and
+//! lays out a forest (the tree and its unconnected nodes). [`LayeredLayout`]
+//! is a simpler engine that the tests use for comparison.
 
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
@@ -100,6 +99,10 @@ pub struct TreeLayout {
     pub level_starts: Vec<f32>,
     /// The spacing that the layout used.
     pub level_gap: f32,
+    /// For each node: the position on the depth axis where the edges to
+    /// its children turn (the middle of the gap below the node). Empty if
+    /// the engine uses [`TreeLayout::level_starts`] for that.
+    pub node_bus: Vec<f32>,
 }
 
 impl Default for TreeLayout {
@@ -110,6 +113,7 @@ impl Default for TreeLayout {
             bounds: Rect::NOTHING,
             level_starts: Vec::new(),
             level_gap: 0.0,
+            node_bus: Vec::new(),
         }
     }
 }
@@ -126,6 +130,15 @@ impl TreeLayout {
     pub fn bus_position(&self, depth: u32) -> Option<f32> {
         let next = self.level_starts.get(depth as usize + 1)?;
         Some(next - self.level_gap * 0.5)
+    }
+
+    /// The point on the depth axis where the edges from node `id` (at
+    /// `depth`) turn towards its children.
+    pub fn bus_of(&self, id: CanvasNodeId, depth: u32) -> Option<f32> {
+        match self.node_bus.get(id.index()) {
+            Some(bus) => Some(*bus),
+            None => self.bus_position(depth),
+        }
     }
 
     /// The point where the edge leaves the parent card.
@@ -159,8 +172,79 @@ pub trait LayoutEngine {
 
 /// Places the nodes of a tree with the default engine and spacing.
 pub fn layout(tree: &CanvasTree, direction: LayoutDirection) -> TreeLayout {
-    // TODO(after the merge of `fasttick_core::layout`): use the core engine.
-    LayeredLayout.layout(tree, direction, &LayoutParams::for_direction(direction))
+    TidyLayout.layout(tree, direction, &LayoutParams::for_direction(direction))
+}
+
+/// The tidy-tree layout of `fasttick_core::layout`. The roots of the
+/// canvas tree (the tree and its unconnected nodes) form a forest; each
+/// root starts a new tree to the right (top-down) or below (left-right).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TidyLayout;
+
+impl LayoutEngine for TidyLayout {
+    fn layout(
+        &self,
+        tree: &CanvasTree,
+        direction: LayoutDirection,
+        params: &LayoutParams,
+    ) -> TreeLayout {
+        use fasttick_core::layout as core;
+
+        let nodes = tree.nodes();
+        let mut input = core::LayoutTree::with_capacity(nodes.len());
+        for node in nodes {
+            let size = node.card.size;
+            input.nodes.push(core::LayoutNode::with_children(
+                (sanitize(size.x), sanitize(size.y)),
+                node.children.iter().map(|c| c.index()).collect(),
+            ));
+        }
+        input.roots = nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| node.parent.is_none())
+            .map(|(index, _)| index)
+            .collect();
+        let core_params = core::LayoutParams {
+            direction: match direction {
+                LayoutDirection::TopDown => core::LayoutDirection::TopDown,
+                LayoutDirection::LeftRight => core::LayoutDirection::LeftRight,
+            },
+            sibling_gap: params.sibling_gap,
+            subtree_gap: params.subtree_gap,
+            level_gap: params.level_gap,
+            forest_gap: params.subtree_gap * 2.0,
+            layered: true,
+        };
+        let Ok(result) = core::layout(&input, &core_params) else {
+            // A canvas tree is always a valid forest; this is a fallback.
+            return LayeredLayout.layout(tree, direction, params);
+        };
+        let depth_axis = direction.depth_axis();
+        let mut level_starts: Vec<f32> = Vec::new();
+        let mut rects = Vec::with_capacity(nodes.len());
+        let mut bounds = Rect::NOTHING;
+        for (index, node) in nodes.iter().enumerate() {
+            let position = result.positions[index];
+            let size = result.sizes[index];
+            let rect = Rect::from_min_size(pos2(position.x, position.y), vec2(size.x, size.y));
+            let depth = node.depth as usize;
+            if level_starts.len() <= depth {
+                level_starts.resize(depth + 1, f32::INFINITY);
+            }
+            level_starts[depth] = level_starts[depth].min(rect.min[depth_axis]);
+            bounds = bounds.union(rect);
+            rects.push(rect);
+        }
+        TreeLayout {
+            direction,
+            rects,
+            bounds,
+            level_starts,
+            level_gap: params.level_gap,
+            node_bus: result.bus_positions,
+        }
+    }
 }
 
 /// A temporary layered layout. See the module documentation.
@@ -288,6 +372,7 @@ impl LayoutEngine for LayeredLayout {
             bounds,
             level_starts,
             level_gap: params.level_gap,
+            node_bus: Vec::new(),
         }
     }
 }
@@ -480,6 +565,41 @@ mod tests {
         assert_eq!(result.level_starts.len(), 2001);
         // A chain is a straight line.
         assert!(result.rects.iter().all(|r| r.min.x == 0.0));
+    }
+
+    #[test]
+    fn forest_roots_do_not_overlap() {
+        // A tree and two unconnected nodes (one with a child).
+        let tree = tree(&[
+            (None, 100.0, 40.0),
+            (Some(0), 80.0, 30.0),
+            (Some(0), 80.0, 30.0),
+            (None, 60.0, 30.0),
+            (None, 90.0, 30.0),
+            (Some(4), 70.0, 30.0),
+        ]);
+        for direction in [LayoutDirection::TopDown, LayoutDirection::LeftRight] {
+            let result = layout(&tree, direction);
+            no_overlaps(&result);
+            assert_eq!(result.node_bus.len(), tree.len());
+            // Each root is on the first level.
+            for root in [0, 3, 4] {
+                assert_eq!(
+                    result.rects[root].min[direction.depth_axis()],
+                    result.level_starts[0]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tidy_is_not_wider_than_layered() {
+        let tree = sample();
+        let params = LayoutParams::for_direction(LayoutDirection::TopDown);
+        let tidy = TidyLayout.layout(&tree, LayoutDirection::TopDown, &params);
+        let layered = LayeredLayout.layout(&tree, LayoutDirection::TopDown, &params);
+        assert!(tidy.bounds.width() <= layered.bounds.width() + 1e-3);
+        no_overlaps(&layered);
     }
 
     #[test]
