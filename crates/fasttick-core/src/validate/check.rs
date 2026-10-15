@@ -125,7 +125,7 @@ impl<'c, 'p> FileChecker<'c, 'p> {
             tree: tree.map(str::to_owned),
             node,
             attribute: attribute.map(str::to_owned),
-            message,
+            message: one_line(message),
         });
     }
 
@@ -1707,6 +1707,24 @@ impl<'c, 'p> FileChecker<'c, 'p> {
             }
         }
     }
+}
+
+/// Writes the control characters of a message (which can come from quoted
+/// names and values) as escapes, so that the message is one line: `\n`,
+/// `\r`, `\t` and `\u{..}`.
+fn one_line(message: String) -> String {
+    if !message.chars().any(char::is_control) {
+        return message;
+    }
+    let mut out = String::with_capacity(message.len() + 8);
+    for c in message.chars() {
+        if c.is_control() {
+            out.extend(c.escape_default());
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// The list of the ports of a model, for a message.

@@ -236,8 +236,17 @@ problem_codes! {
     /// (`createNodeFromXML`: "can not be converted to").
     InvalidPortValue => "A port value cannot be converted to the port type.",
     /// An output port has a literal value instead of a blackboard
-    /// reference. BT.CPP accepts the tree, but `TreeNode::setOutput` fails
-    /// ("setOutput requires a blackboard pointer") (Warning).
+    /// reference (Warning). BT.CPP creates the tree, but
+    /// `TreeNode::setOutput` (`include/behaviortree_cpp/tree_node.h`) fails
+    /// with "setOutput requires a blackboard pointer". `"{=}"` and `"="`
+    /// are correct (the port name is the key). For a SubTree, the value
+    /// goes only into the blackboard of the SubTree.
+    ///
+    /// `createNodeFromXML` converts each literal value of a strongly typed
+    /// port, also of an output port. A value that does not convert is an
+    /// [`ProblemCode::InvalidPortValue`] error. This includes `"="` for a
+    /// strongly typed port that is not a string: only `"{=}"` is a
+    /// reference there.
     OutputPortLiteral => "An output port has a fixed value.",
     /// A value looks like a blackboard reference but is not a correct one:
     /// unbalanced braces, an empty key, braces or spaces in the key
@@ -264,7 +273,9 @@ problem_codes! {
     CircularSubTree => "SubTrees make a cycle.",
     /// A SubTree remapping is not correct: `_autoremap` is not a boolean
     /// (Error; `convertFromString<bool>`), `"="` instead of `"{=}"`, or
-    /// `_autoremap` on a node that is not a SubTree (Warning).
+    /// `_autoremap` on a node that is not a SubTree (Warning). A remapping
+    /// of a port that the SubTree model does not declare is an
+    /// [`ProblemCode::UnknownPort`] warning.
     BadRemapping => "A SubTree remapping is not correct.",
     /// Two SubTree nodes in one tree have the same `name`, or an empty
     /// `name` gives the path of the root tree (`recursivelyCreateSubtree`:

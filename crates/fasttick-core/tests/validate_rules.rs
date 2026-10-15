@@ -1756,3 +1756,17 @@ fn project_and_file_results_agree() {
     // A file that is not in the project gives no problems.
     assert!(validator.run_file(FileId(99)).is_empty());
 }
+
+#[test]
+fn messages_have_one_line() {
+    // Control characters of quoted values are written as escapes.
+    let found = problems("<SayMessage message=\"{a&#10;b\"/>");
+    let p = single(&found, C::BadBlackboardRef);
+    assert!(p.message.contains("\"{a\\nb\""), "{}", p.message);
+    let found = problems("<AlwaysSuccess name=\"a&#1;b\"/>");
+    assert!(
+        found
+            .iter()
+            .all(|p| !p.message.chars().any(char::is_control))
+    );
+}
