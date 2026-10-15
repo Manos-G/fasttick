@@ -325,6 +325,7 @@ impl CanvasState {
     /// screen; else the view does not move.
     pub fn replace_tree(&mut self, mut tree: CanvasTree, anchor: Option<NodeSource>) {
         tree.copy_decorations_from(&self.tree);
+        tree.copy_measurements_from(&self.tree);
         let primary_source = self
             .primary
             .and_then(|id| self.tree.get(id))
@@ -805,6 +806,10 @@ impl<'a> TreeCanvas<'a> {
             state.fonts = card_fonts;
             state.needs_layout = true;
             state.galleys.clear();
+            // Measure all cards again with the new fonts.
+            for node in state.tree.nodes_mut() {
+                node.card.size = Vec2::ZERO;
+            }
         }
         if state.needs_layout {
             let ids = [
@@ -817,7 +822,7 @@ impl<'a> TreeCanvas<'a> {
             .map(|kind| state.fonts.font(kind, kind.size()));
             ui.ctx().fonts_mut(|fonts| {
                 let mut measure = EguiMeasure { fonts, ids };
-                card::measure_tree(&mut state.tree, &mut measure);
+                card::measure_missing(&mut state.tree, &mut measure);
             });
             state.relayout();
         }
@@ -2527,6 +2532,36 @@ mod tests {
         assert!((after - before).length() < 0.01);
         assert!(state.tree().is_selected(CanvasNodeId(2)));
         assert_eq!(state.primary(), Some(CanvasNodeId(2)));
+    }
+
+    #[test]
+    fn replace_tree_keeps_new_problem_markers_and_old_measurements() {
+        let mut state = CanvasState::new(chain_tree(4));
+        state.prepare_with(&mut FixedMeasure(7.0));
+        state
+            .tree_mut()
+            .get_mut(CanvasNodeId(1))
+            .unwrap()
+            .deco
+            .problem = Some(crate::canvas::ProblemMarker::Error);
+        let measured = state.tree().get(CanvasNodeId(0)).unwrap().card.clone();
+        assert_ne!(measured.size, Vec2::ZERO);
+
+        // The new tree has no problem at node 1 and a new label at node 2.
+        let mut tree = chain_tree(4);
+        tree.get_mut(CanvasNodeId(2)).unwrap().label = "renamed".into();
+        state.replace_tree(tree, None);
+        let tree = state.tree();
+        assert_eq!(tree.get(CanvasNodeId(1)).unwrap().deco.problem, None);
+        assert_eq!(tree.get(CanvasNodeId(0)).unwrap().card, measured);
+        assert_eq!(tree.get(CanvasNodeId(2)).unwrap().card.size, Vec2::ZERO);
+        // Only the changed node waits for a measurement.
+        let missing = tree
+            .nodes()
+            .iter()
+            .filter(|n| n.card.size == Vec2::ZERO)
+            .count();
+        assert_eq!(missing, 1);
     }
 
     #[test]

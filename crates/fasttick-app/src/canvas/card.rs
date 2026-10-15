@@ -215,6 +215,16 @@ pub fn measure_tree(tree: &mut CanvasTree, measure: &mut dyn TextMeasure) {
     }
 }
 
+/// Computes the card text and size of the nodes that have no size yet
+/// (see [`CanvasTree::copy_measurements_from`]).
+pub fn measure_missing(tree: &mut CanvasTree, measure: &mut dyn TextMeasure) {
+    for node in tree.nodes_mut() {
+        if node.card.size == Vec2::ZERO {
+            node.card = measure_node(node, measure);
+        }
+    }
+}
+
 /// The places of the parts of a card, relative to the top-left corner of
 /// the card, in world units.
 #[derive(Debug, Clone, Copy, PartialEq)]

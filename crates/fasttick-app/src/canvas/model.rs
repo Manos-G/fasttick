@@ -742,7 +742,30 @@ impl CanvasTree {
     pub fn copy_decorations_from(&mut self, old: &CanvasTree) {
         for node in &mut self.nodes {
             if let Some(old_id) = old.find_source(node.source) {
+                // The builder sets the problem markers of the new tree; they
+                // describe the new document.
+                let problem = node.deco.problem;
                 node.deco = old.nodes[old_id.index()].deco;
+                node.deco.problem = problem;
+            }
+        }
+    }
+
+    /// Copies the measured card text of the nodes whose label, type and
+    /// ports did not change, so that the canvas measures only the other
+    /// nodes (see [`crate::canvas::card::measure_missing`]). Use it before
+    /// a rebuilt tree replaces `old`; the fonts must be the same.
+    pub fn copy_measurements_from(&mut self, old: &CanvasTree) {
+        for node in &mut self.nodes {
+            if let Some(old_id) = old.find_source(node.source) {
+                let previous = &old.nodes[old_id.index()];
+                if previous.card.size != egui::Vec2::ZERO
+                    && previous.label == node.label
+                    && previous.type_id == node.type_id
+                    && previous.ports == node.ports
+                {
+                    node.card = previous.card.clone();
+                }
             }
         }
     }
