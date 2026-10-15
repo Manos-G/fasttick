@@ -474,6 +474,39 @@ mod tests {
         }
     }
 
+    proptest::proptest! {
+        /// Without a bare `&`, the strict decoding is the decoding of
+        /// tinyxml2 (the value that the xml module gives). With a bare
+        /// `&`, the functions do not panic.
+        #[test]
+        fn strict_decoding_matches_tinyxml2(
+            raw in "([a-z {}@=;#x0-9\\r\\n\\t]|&|&amp;|&lt;|&gt;|&quot;|&apos;|&#[0-9]{1,3};|&#x[0-9a-fA-F]{1,4};){0,12}"
+        ) {
+            let text = format!("<a v=\"{raw}\"/>");
+            let doc = crate::xml::Document::parse(&text).unwrap();
+            let element = doc.document_element().unwrap();
+            let attribute = &doc.attributes(element)[0];
+            assert_eq!(attribute.raw_value(), raw);
+            let strict = decode_strict(&raw);
+            if bad_ampersand(&raw).is_none() {
+                proptest::prop_assert_eq!(strict, attribute.value());
+            }
+            let _ = check_blackboard_ref(attribute.value());
+            let _ = literal_converts("int", attribute.value());
+            let _ = literal_converts("double", attribute.value());
+        }
+
+        #[test]
+        fn no_panics_on_any_text(text in "\\PC{0,16}") {
+            let _ = check_blackboard_ref(&text);
+            let _ = bad_ampersand(&text);
+            let _ = decode_strict(&text);
+            for t in ["int", "unsigned long", "long", "double", "float", "bool"] {
+                let _ = literal_converts(t, &text);
+            }
+        }
+    }
+
     #[test]
     fn other_types() {
         assert_eq!(literal_converts("bool", "true"), Some(true));
