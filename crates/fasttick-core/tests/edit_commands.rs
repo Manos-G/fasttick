@@ -618,6 +618,20 @@ fn copy_keeps_tabs_and_crlf_of_the_file() {
         copy(&p, f, &[a, sequence, a]).unwrap(),
         "<Sequence>\r\n\t<A/>\r\n</Sequence>"
     );
+
+    // Two nodes: the line end between them is CR LF too, and the text
+    // pastes again.
+    let (mut p, f) = project(&source.replace("<A/>", "<A/>\r\n\t\t\t<B/>"));
+    let sequence = tag(&p, f, "Sequence");
+    let a = tag(&p, f, "A");
+    let b = tag(&p, f, "B");
+    let clip = copy(&p, f, &[b, a]).unwrap();
+    assert_eq!(clip, "<A/>\r\n<B/>");
+    let pasted = check(&mut p, |ed| ed.paste(f, &clip, sequence, 0));
+    assert_eq!(pasted.len(), 2);
+    assert!(text(&p, f).contains(
+        "<Sequence>\r\n\t\t\t<A/>\r\n\t\t\t<B/>\r\n\t\t\t<A/>\r\n\t\t\t<B/>\r\n\t\t</Sequence>"
+    ));
 }
 
 #[test]

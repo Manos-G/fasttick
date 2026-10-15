@@ -49,7 +49,8 @@ pub fn copy(project: &Project, file: FileId, nodes: &[NodeId]) -> Result<String,
         // copy is indented from column 1.
         out.insert_element_pretty(root, i, copy)?;
         if i > 0 {
-            let line = out.create_text(source.line_ending().as_str())?;
+            // `create_text` writes "\n" with the line end of the document.
+            let line = out.create_text("\n")?;
             let at = out.children(root).len() - 1;
             out.insert_child(root, at, line)?;
         }
