@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc cb5e98c326f2d6c8fc0be4b1fea617e2ba87d0d4f3fdaf63305579368fa94d65 # shrinks to doc = GenDoc { format: None, main: None, models: false, trees: [(None, [GenNode { tag: "Sequence", attributes: [], children: [GenNode { tag: "Sequence", attributes: [], children: [GenNode { tag: "Sequence", attributes: [("name", "  &#")], children: [] }] }] }])] }
