@@ -40,7 +40,9 @@ impl CanvasNodeId {
 
 /// The category of a node. The canvas gives each category its own colour
 /// band and glyph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum NodeCategory {
     /// A leaf that does work.
     Action,

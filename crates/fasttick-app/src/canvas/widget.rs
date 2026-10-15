@@ -1,0 +1,1781 @@
+//! The [`TreeCanvas`] widget and its persistent [`CanvasState`].
+//!
+//! The canvas draws a [`CanvasTree`] with its own painter code:
+//!
+//! - It draws only the nodes and edges in the visible rectangle.
+//! - It keeps the text layouts (galleys) of the visible nodes in a cache.
+//!   Zoom values in one "bucket" (about 9 %) share a font size, so a zoom
+//!   gesture does not lay out text again on each frame.
+//! - It has three levels of detail: full cards, labels only, and plain
+//!   boxes when the cards are very small ([`Detail`]).
+//! - It collects all shapes in one buffer and gives them to egui in one
+//!   call.
+//!
+//! Input: drag with the middle mouse button (or Space + drag, or drag on a
+//! node) to pan; mouse wheel or touchpad scroll to pan; Ctrl + wheel or a
+//! pinch to zoom at the pointer; click, Shift-click (add) and Ctrl-click
+//! (toggle) to select; drag on the background to select with a rubber
+//! band; double-click a SubTree to expand or collapse it; arrow keys to
+//! move the selection to the parent, a child or a sibling.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use egui::epaint::Mesh;
+use egui::text::{LayoutJob, TextFormat};
+use egui::{
+    Color32, CornerRadius, EventFilter, FontFamily, FontId, Galley, Id, Key, Modifiers,
+    PointerButton, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
+};
+use fasttick_core::status::NodeStatus;
+
+use super::card::{self, CardGeometry, TextKind, TextMeasure};
+use super::hit;
+use super::layout::{self, LayoutDirection, TreeLayout};
+use super::model::{CanvasNodeId, CanvasTree, NavStep, NodeCategory, NodeSource, Substitution};
+use super::paint::{self, EdgeStyle};
+use super::viewport::{self, Viewport};
+use crate::fonts;
+use crate::theme::{CanvasPalette, mix};
+
+/// The level of detail of the cards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum Detail {
+    /// Plain boxes: no text.
+    Boxes,
+    /// Glyph, label and status badge.
+    Labels,
+    /// All text, including the type line and the ports.
+    #[default]
+    Full,
+}
+
+impl Detail {
+    /// The detail level for a zoom factor.
+    pub fn for_zoom(zoom: f32) -> Detail {
+        if zoom >= 0.62 {
+            Detail::Full
+        } else if zoom >= 0.42 {
+            Detail::Labels
+        } else {
+            Detail::Boxes
+        }
+    }
+}
+
+/// Statistics of the last frame.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CanvasStats {
+    /// The number of nodes in the tree.
+    pub total_nodes: usize,
+    /// The number of nodes that the canvas drew.
+    pub visible_nodes: usize,
+    /// The time to build the shapes, in milliseconds.
+    pub paint_ms: f32,
+    /// The detail level.
+    pub detail: Detail,
+    /// The number of cached text layouts.
+    pub cached_galleys: usize,
+}
+
+/// Something that happened on the canvas. The owner of the canvas reacts.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CanvasEvent {
+    /// The selection changed.
+    SelectionChanged,
+    /// The user asked to expand or collapse a SubTree node. The owner
+    /// rebuilds the tree (see [`CanvasState::replace_tree`]).
+    ToggleSubtree(NodeSource),
+    /// The user asked to expand (true) or collapse (false) all SubTrees.
+    SetAllSubtrees(bool),
+    /// The user double-clicked a node that is not a SubTree.
+    Activated(CanvasNodeId),
+}
+
+/// The result of [`TreeCanvas::show`].
+#[derive(Debug)]
+pub struct CanvasOutput {
+    /// The response of the canvas area.
+    pub response: Response,
+    /// The events of this frame.
+    pub events: Vec<CanvasEvent>,
+}
+
+/// A view change that waits for the canvas size.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PendingView {
+    Fit { animate: bool },
+    Focus { id: CanvasNodeId, animate: bool },
+    Reveal { id: CanvasNodeId },
+    /// Keep a node at the same place on the screen after a rebuild.
+    Anchor { source: NodeSource, offset: Vec2 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ViewAnimation {
+    from: Viewport,
+    to: Viewport,
+    start: f64,
+    duration: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum DragMode {
+    #[default]
+    None,
+    Pan,
+    Band {
+        start: Pos2,
+        additive: bool,
+    },
+}
+
+/// Cached text layouts of the visible cards.
+#[derive(Default)]
+struct GalleyCache {
+    bucket: i32,
+    palette_key: u64,
+    map: HashMap<u64, Arc<Galley>>,
+}
+
+impl std::fmt::Debug for GalleyCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GalleyCache")
+            .field("bucket", &self.bucket)
+            .field("entries", &self.map.len())
+            .finish()
+    }
+}
+
+/// Slots of the galley cache for one node.
+const SLOT_LABEL: u64 = 0;
+const SLOT_TYPE: u64 = 1;
+const SLOT_PORT: u64 = 2; // .. 2 + MAX_PORT_LINES
+const SLOT_MORE: u64 = 8;
+const SLOT_CHIP: u64 = 9;
+const SLOT_TAG: u64 = 10;
+
+impl GalleyCache {
+    fn prepare(&mut self, bucket: i32, palette_key: u64) {
+        if bucket != self.bucket || palette_key != self.palette_key {
+            self.map.clear();
+            self.bucket = bucket;
+            self.palette_key = palette_key;
+        }
+    }
+
+    fn get(&mut self, node: u32, slot: u64, make: impl FnOnce() -> Arc<Galley>) -> Arc<Galley> {
+        let key = (u64::from(node) << 8) | slot;
+        self.map.entry(key).or_insert_with(make).clone()
+    }
+
+    fn clear(&mut self) {
+        self.map.clear();
+    }
+}
+
+/// The persistent state of a canvas: the tree, its layout, the viewport,
+/// the interaction state and the caches. Keep one for each view.
+#[derive(Debug)]
+pub struct CanvasState {
+    tree: CanvasTree,
+    layout: TreeLayout,
+    groups: Vec<(CanvasNodeId, Rect)>,
+    edge_bounds: Vec<Option<Rect>>,
+    direction: LayoutDirection,
+    edge_style: EdgeStyle,
+    viewport: Viewport,
+    needs_layout: bool,
+    pending: Option<PendingView>,
+    animation: Option<ViewAnimation>,
+    primary: Option<CanvasNodeId>,
+    hovered: Option<CanvasNodeId>,
+    hover_start: f64,
+    drag: DragMode,
+    band_end: Option<Pos2>,
+    galleys: GalleyCache,
+    visible: Vec<u32>,
+    shapes: Vec<Shape>,
+    points: Vec<Pos2>,
+    size: Vec2,
+    stats: CanvasStats,
+}
+
+/// The duration of view animations, in seconds.
+const ANIMATION_SECONDS: f32 = 0.35;
+/// The duration of short animations (keyboard navigation), in seconds.
+const SHORT_ANIMATION_SECONDS: f32 = 0.15;
+/// The delay before the hover tooltip, in seconds.
+const TOOLTIP_DELAY: f64 = 0.45;
+
+impl CanvasState {
+    /// A state for a tree. The first frame fits the tree to the view.
+    pub fn new(tree: CanvasTree) -> Self {
+        CanvasState {
+            stats: CanvasStats {
+                total_nodes: tree.len(),
+                ..CanvasStats::default()
+            },
+            tree,
+            layout: TreeLayout::default(),
+            groups: Vec::new(),
+            edge_bounds: Vec::new(),
+            direction: LayoutDirection::default(),
+            edge_style: EdgeStyle::default(),
+            viewport: Viewport::default(),
+            needs_layout: true,
+            pending: Some(PendingView::Fit { animate: false }),
+            animation: None,
+            primary: None,
+            hovered: None,
+            hover_start: 0.0,
+            drag: DragMode::None,
+            band_end: None,
+            galleys: GalleyCache::default(),
+            visible: Vec::new(),
+            shapes: Vec::new(),
+            points: Vec::new(),
+            size: Vec2::ZERO,
+        }
+    }
+
+    /// The tree.
+    pub fn tree(&self) -> &CanvasTree {
+        &self.tree
+    }
+
+    /// The tree, for changes of the decorations (status, markers,
+    /// selection). Do not change the structure or the text: use
+    /// [`CanvasState::replace_tree`] for that.
+    pub fn tree_mut(&mut self) -> &mut CanvasTree {
+        &mut self.tree
+    }
+
+    /// Replaces the tree, for example after a SubTree expands. The
+    /// decorations and the selection carry over by [`NodeSource`]. If
+    /// `anchor` is a node of both trees, it stays at the same place on the
+    /// screen; else the view does not move.
+    pub fn replace_tree(&mut self, mut tree: CanvasTree, anchor: Option<NodeSource>) {
+        tree.copy_decorations_from(&self.tree);
+        let primary_source = self
+            .primary
+            .and_then(|id| self.tree.get(id))
+            .map(|node| node.source);
+        if let Some(source) = anchor
+            && let Some(old) = self.tree.find_source(source)
+            && let Some(rect) = self.layout.rect(old)
+        {
+            let screen = self.viewport.to_screen(Pos2::ZERO, rect.min);
+            self.pending = Some(PendingView::Anchor {
+                source,
+                offset: screen.to_vec2(),
+            });
+        }
+        self.primary = primary_source.and_then(|source| tree.find_source(source));
+        self.hovered = None;
+        self.stats.total_nodes = tree.len();
+        self.tree = tree;
+        self.needs_layout = true;
+        self.galleys.clear();
+    }
+
+    /// The layout direction.
+    pub fn direction(&self) -> LayoutDirection {
+        self.direction
+    }
+
+    /// Sets the layout direction. The tree is laid out again and fits the
+    /// view.
+    pub fn set_direction(&mut self, direction: LayoutDirection) {
+        if direction != self.direction {
+            self.direction = direction;
+            self.needs_layout = true;
+            self.pending = Some(PendingView::Fit { animate: false });
+        }
+    }
+
+    /// The edge style.
+    pub fn edge_style(&self) -> EdgeStyle {
+        self.edge_style
+    }
+
+    /// Sets the edge style.
+    pub fn set_edge_style(&mut self, style: EdgeStyle) {
+        self.edge_style = style;
+    }
+
+    /// The viewport.
+    pub fn viewport(&self) -> Viewport {
+        self.viewport
+    }
+
+    /// Sets the viewport (stops an animation).
+    pub fn set_viewport(&mut self, viewport: Viewport) {
+        if viewport.is_valid() {
+            self.viewport = viewport;
+            self.animation = None;
+        }
+    }
+
+    /// The layout of the last frame.
+    pub fn layout(&self) -> &TreeLayout {
+        &self.layout
+    }
+
+    /// True if the tree must be measured and laid out before the next
+    /// frame.
+    pub fn needs_layout(&self) -> bool {
+        self.needs_layout
+    }
+
+    /// The statistics of the last frame.
+    pub fn stats(&self) -> CanvasStats {
+        self.stats
+    }
+
+    /// The node that keyboard navigation starts from.
+    pub fn primary(&self) -> Option<CanvasNodeId> {
+        self.primary
+    }
+
+    /// The node under the pointer.
+    pub fn hovered(&self) -> Option<CanvasNodeId> {
+        self.hovered
+    }
+
+    /// Fits the whole tree in the view.
+    pub fn fit_to_view(&mut self, animate: bool) {
+        self.pending = Some(PendingView::Fit { animate });
+    }
+
+    /// Centres the view on a node and selects it. If the zoom is too small
+    /// to read the node, the view zooms in to 100 %. Breakpoints use this
+    /// to show the node that stopped.
+    pub fn focus_on(&mut self, id: CanvasNodeId, animate: bool) {
+        if self.tree.get(id).is_some() {
+            self.tree.select_only(id);
+            self.primary = Some(id);
+            self.pending = Some(PendingView::Focus { id, animate });
+        }
+    }
+
+    /// Multiplies the zoom by a factor, around the centre of the view.
+    pub fn zoom_by(&mut self, factor: f32) {
+        let center = (self.size * 0.5).to_pos2();
+        let mut target = self.animation.map_or(self.viewport, |a| a.to);
+        target.zoom_around(Pos2::ZERO, center, factor);
+        self.animate_to(target, SHORT_ANIMATION_SECONDS);
+    }
+
+    /// Zooms in one step.
+    pub fn zoom_in(&mut self) {
+        self.zoom_by(viewport::ZOOM_STEP);
+    }
+
+    /// Zooms out one step.
+    pub fn zoom_out(&mut self) {
+        self.zoom_by(1.0 / viewport::ZOOM_STEP);
+    }
+
+    /// Sets the zoom to 100 %, around the centre of the view.
+    pub fn zoom_reset(&mut self) {
+        let factor = 1.0 / self.viewport.zoom;
+        self.zoom_by(factor);
+    }
+
+    /// Selects all nodes.
+    pub fn select_all(&mut self) -> bool {
+        self.tree.select_all()
+    }
+
+    /// Clears the selection.
+    pub fn clear_selection(&mut self) -> bool {
+        self.primary = None;
+        self.tree.clear_selection()
+    }
+
+    /// Measures and lays out the tree with a given text measure. The
+    /// canvas calls this itself with the egui fonts; tests can call it with
+    /// a [`card::FixedMeasure`].
+    pub fn prepare_with(&mut self, measure: &mut dyn TextMeasure) {
+        card::measure_tree(&mut self.tree, measure);
+        self.relayout();
+    }
+
+    fn relayout(&mut self) {
+        self.layout = layout::layout(&self.tree, self.direction);
+        let bounds = layout::subtree_bounds(&self.tree, &self.layout);
+        self.groups = self
+            .tree
+            .ids()
+            .filter(|id| {
+                self.tree.get(*id).is_some_and(|node| {
+                    node.subtree.as_ref().is_some_and(|s| s.expanded) && !node.children.is_empty()
+                })
+            })
+            .map(|id| (id, bounds[id.index()]))
+            .collect();
+        self.edge_bounds = self
+            .tree
+            .ids()
+            .map(|id| layout::edge_bounds(&self.tree, &self.layout, id))
+            .collect();
+        self.needs_layout = false;
+        self.stats.total_nodes = self.tree.len();
+    }
+
+    fn animate_to(&mut self, target: Viewport, duration: f32) {
+        self.pending = None;
+        self.animation = Some(ViewAnimation {
+            from: self.viewport,
+            to: target,
+            start: f64::NAN,
+            duration,
+        });
+    }
+
+    /// Applies a pending view change. Needs the canvas size.
+    fn apply_pending(&mut self, size: Vec2) {
+        let Some(pending) = self.pending.take() else {
+            return;
+        };
+        let target = match pending {
+            PendingView::Fit { animate } => {
+                let target = Viewport::fit(
+                    self.layout.bounds,
+                    size,
+                    viewport::FIT_MARGIN,
+                    viewport::FIT_MAX_ZOOM,
+                );
+                if !animate {
+                    self.viewport = target;
+                    self.animation = None;
+                    return;
+                }
+                target
+            }
+            PendingView::Focus { id, animate } => {
+                let Some(rect) = self.layout.rect(id) else {
+                    return;
+                };
+                let zoom = if self.viewport.zoom < 0.6 {
+                    1.0
+                } else {
+                    self.viewport.zoom
+                };
+                let target = Viewport::centered_on(rect.center(), size, zoom);
+                if !animate {
+                    self.viewport = target;
+                    self.animation = None;
+                    return;
+                }
+                target
+            }
+            PendingView::Reveal { id } => {
+                let Some(rect) = self.layout.rect(id) else {
+                    return;
+                };
+                let target = self.viewport.reveal(rect, size, 24.0);
+                if target == self.viewport {
+                    return;
+                }
+                self.animate_to(target, SHORT_ANIMATION_SECONDS);
+                return;
+            }
+            PendingView::Anchor { source, offset } => {
+                if let Some(id) = self.tree.find_source(source)
+                    && let Some(rect) = self.layout.rect(id)
+                {
+                    let now = self.viewport.to_screen(Pos2::ZERO, rect.min);
+                    self.viewport.pan_by(offset - now.to_vec2());
+                }
+                return;
+            }
+        };
+        self.animate_to(target, ANIMATION_SECONDS);
+    }
+
+    fn step_animation(&mut self, now: f64) -> bool {
+        let Some(animation) = &mut self.animation else {
+            return false;
+        };
+        if animation.start.is_nan() {
+            animation.start = now;
+        }
+        let t = ((now - animation.start) as f32 / animation.duration.max(1e-3)).clamp(0.0, 1.0);
+        let eased = viewport::ease_out_cubic(t);
+        self.viewport = Viewport::lerp(animation.from, animation.to, self.size, eased);
+        if t >= 1.0 {
+            self.viewport = animation.to;
+            self.animation = None;
+        }
+        true
+    }
+
+    /// The world rectangle of a node in screen coordinates for a canvas at
+    /// `origin`.
+    pub fn node_screen_rect(&self, origin: Pos2, id: CanvasNodeId) -> Option<Rect> {
+        self.layout
+            .rect(id)
+            .map(|rect| self.viewport.rect_to_screen(origin, rect))
+    }
+}
+
+/// Measures text with the egui fonts (sum of glyph advances).
+struct EguiMeasure<'a, 'b> {
+    fonts: &'a mut egui::epaint::text::FontsView<'b>,
+    ids: [FontId; 5],
+}
+
+impl EguiMeasure<'_, '_> {
+    fn font(&self, kind: TextKind) -> &FontId {
+        &self.ids[kind_index(kind)]
+    }
+}
+
+fn kind_index(kind: TextKind) -> usize {
+    match kind {
+        TextKind::Label => 0,
+        TextKind::Type => 1,
+        TextKind::PortName => 2,
+        TextKind::PortValue => 3,
+        TextKind::Note => 4,
+    }
+}
+
+fn font_for(kind: TextKind, size: f32) -> FontId {
+    let family = match kind {
+        TextKind::Label => FontFamily::Name(fonts::MEDIUM.into()),
+        TextKind::PortValue => FontFamily::Monospace,
+        TextKind::Type | TextKind::PortName | TextKind::Note => FontFamily::Proportional,
+    };
+    FontId::new(size, family)
+}
+
+impl TextMeasure for EguiMeasure<'_, '_> {
+    fn width(&mut self, text: &str, kind: TextKind) -> f32 {
+        let font = self.font(kind).clone();
+        text.chars().map(|c| self.fonts.glyph_width(&font, c)).sum()
+    }
+
+    fn char_width(&mut self, c: char, kind: TextKind) -> f32 {
+        let font = self.font(kind).clone();
+        self.fonts.glyph_width(&font, c)
+    }
+}
+
+/// The tree canvas widget. See the module documentation.
+#[derive(Debug)]
+pub struct TreeCanvas<'a> {
+    state: &'a mut CanvasState,
+    palette: &'a CanvasPalette,
+    id_salt: Id,
+}
+
+impl<'a> TreeCanvas<'a> {
+    /// A canvas for a state, drawn with a palette.
+    pub fn new(state: &'a mut CanvasState, palette: &'a CanvasPalette) -> Self {
+        TreeCanvas {
+            state,
+            palette,
+            id_salt: Id::new("tree_canvas"),
+        }
+    }
+
+    /// Sets the ID salt. Use a different salt for each canvas on screen.
+    pub fn id_salt(mut self, salt: impl std::hash::Hash + std::fmt::Debug) -> Self {
+        self.id_salt = Id::new(salt);
+        self
+    }
+
+    /// Shows the canvas in all the available space.
+    pub fn show(self, ui: &mut Ui) -> CanvasOutput {
+        let TreeCanvas {
+            state,
+            palette,
+            id_salt,
+        } = self;
+        let id = ui.make_persistent_id(id_salt);
+        let available = ui.available_rect_before_wrap();
+        let rect = Rect::from_min_size(available.min, available.size().max(vec2(64.0, 64.0)));
+        ui.advance_cursor_after_rect(rect);
+        let response = ui.interact(rect, id, Sense::click_and_drag());
+        state.size = rect.size();
+
+        if state.needs_layout {
+            let ids = [
+                TextKind::Label,
+                TextKind::Type,
+                TextKind::PortName,
+                TextKind::PortValue,
+                TextKind::Note,
+            ]
+            .map(|kind| font_for(kind, kind.size()));
+            ui.ctx().fonts_mut(|fonts| {
+                let mut measure = EguiMeasure { fonts, ids };
+                card::measure_tree(&mut state.tree, &mut measure);
+            });
+            state.relayout();
+        }
+        state.apply_pending(rect.size());
+
+        let mut events = Vec::new();
+        handle_input(state, ui, &response, rect, &mut events);
+
+        let now = ui.input(|i| i.time);
+        if state.step_animation(now) {
+            ui.ctx().request_repaint();
+        }
+
+        let started = std::time::Instant::now();
+        paint_canvas(state, ui, rect, palette, response.has_focus());
+        state.stats.paint_ms = started.elapsed().as_secs_f32() * 1000.0;
+
+        describe_for_accesskit(state, ui, rect, id);
+        show_tooltip(state, ui, &response, id, now);
+
+        // Context menu.
+        let hovered = state.hovered;
+        response.context_menu(|ui| context_menu(state, ui, hovered, &mut events));
+
+        CanvasOutput { response, events }
+    }
+}
+
+/// How a click changes the selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SelectMode {
+    Replace,
+    Add,
+    Toggle,
+}
+
+fn select_mode(modifiers: Modifiers) -> SelectMode {
+    if modifiers.command {
+        SelectMode::Toggle
+    } else if modifiers.shift {
+        SelectMode::Add
+    } else {
+        SelectMode::Replace
+    }
+}
+
+fn handle_input(
+    state: &mut CanvasState,
+    ui: &Ui,
+    response: &Response,
+    rect: Rect,
+    events: &mut Vec<CanvasEvent>,
+) {
+    let origin = rect.min;
+    let (pointer, modifiers, zoom_delta, scroll, space) = ui.input(|i| {
+        (
+            i.pointer.hover_pos(),
+            i.modifiers,
+            i.zoom_delta(),
+            i.smooth_scroll_delta(),
+            i.key_down(Key::Space),
+        )
+    });
+
+    // Zoom and scroll.
+    if response.contains_pointer() {
+        if (zoom_delta - 1.0).abs() > 1e-4 {
+            let anchor = pointer.unwrap_or(rect.center());
+            state.animation = None;
+            state.viewport.zoom_around(origin, anchor, zoom_delta);
+        }
+        if scroll != Vec2::ZERO {
+            state.animation = None;
+            state.viewport.pan_by(scroll);
+        }
+    }
+
+    // Hover.
+    let world_pointer = pointer.map(|p| state.viewport.to_world(origin, p));
+    let hovered = if response.hovered() && state.drag == DragMode::None {
+        world_pointer.and_then(|p| hit::hit_node(&state.layout.rects, p, 2.0 / state.viewport.zoom))
+    } else {
+        None
+    };
+    if hovered != state.hovered {
+        state.hovered = hovered;
+        state.hover_start = ui.input(|i| i.time);
+    }
+
+    // Drags.
+    if response.drag_started() {
+        let press = ui.input(|i| i.pointer.press_origin()).or(pointer);
+        let on_node = press
+            .map(|p| state.viewport.to_world(origin, p))
+            .and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
+        state.drag = if response.dragged_by(PointerButton::Middle)
+            || (response.dragged_by(PointerButton::Primary) && (space || on_node.is_some()))
+        {
+            DragMode::Pan
+        } else if response.dragged_by(PointerButton::Primary) {
+            DragMode::Band {
+                start: press.map_or(Pos2::ZERO, |p| state.viewport.to_world(origin, p)),
+                additive: modifiers.shift || modifiers.command,
+            }
+        } else {
+            DragMode::None
+        };
+        state.animation = None;
+    }
+    match state.drag {
+        DragMode::Pan if response.dragged() => {
+            state.viewport.pan_by(response.drag_delta());
+        }
+        DragMode::Band { .. } if response.dragged() => {
+            state.band_end = world_pointer;
+        }
+        _ => {}
+    }
+    if response.drag_stopped() {
+        if let DragMode::Band { start, additive } = state.drag
+            && let Some(end) = state.band_end.or(world_pointer)
+        {
+            let band = hit::rect_from_corners(start, end);
+            let inside = hit::nodes_in_rect(&state.layout.rects, band);
+            let mut changed = false;
+            if !additive {
+                changed |= state.tree.clear_selection();
+            }
+            for id in &inside {
+                changed |= state.tree.set_selected(*id, true);
+            }
+            if let Some(first) = inside.first() {
+                state.primary = Some(*first);
+            }
+            if changed {
+                events.push(CanvasEvent::SelectionChanged);
+            }
+        }
+        state.drag = DragMode::None;
+        state.band_end = None;
+    }
+
+    // Clicks.
+    if response.clicked() || response.secondary_clicked() {
+        response.request_focus();
+    }
+    if response.clicked() {
+        let target = world_pointer.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
+        if click_select(state, target, select_mode(modifiers)) {
+            events.push(CanvasEvent::SelectionChanged);
+        }
+    }
+    if response.secondary_clicked() {
+        // Right-click selects the node under the pointer (if it is not
+        // selected), so that the context menu acts on it.
+        let target = world_pointer.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
+        if let Some(id) = target
+            && !state.tree.is_selected(id)
+            && click_select(state, Some(id), SelectMode::Replace)
+        {
+            events.push(CanvasEvent::SelectionChanged);
+        }
+    }
+    if response.double_clicked()
+        && let Some(id) = world_pointer.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0))
+        && let Some(node) = state.tree.get(id)
+    {
+        if node.subtree.as_ref().is_some_and(|s| s.can_expand) {
+            events.push(CanvasEvent::ToggleSubtree(node.source));
+        } else {
+            events.push(CanvasEvent::Activated(id));
+        }
+    }
+
+    // Accessibility actions on the node items (screen readers, tests).
+    let mut clicked_items = Vec::new();
+    ui.input(|i| {
+        for event in &i.events {
+            if let egui::Event::AccessKitActionRequest(request) = event
+                && matches!(
+                    request.action,
+                    egui::accesskit::Action::Click | egui::accesskit::Action::Focus
+                )
+            {
+                clicked_items.push(request.target_node);
+            }
+        }
+    });
+    if !clicked_items.is_empty() {
+        for id in state.tree.ids() {
+            let item = node_item_id(response.id, id).accesskit_id();
+            if clicked_items.contains(&item) && click_select(state, Some(id), SelectMode::Replace) {
+                events.push(CanvasEvent::SelectionChanged);
+            }
+        }
+    }
+
+    // Keyboard.
+    if response.has_focus() {
+        ui.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                response.id,
+                EventFilter {
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    escape: true,
+                    tab: false,
+                },
+            );
+        });
+        let keys = ui.input(|i| {
+            [
+                Key::ArrowUp,
+                Key::ArrowDown,
+                Key::ArrowLeft,
+                Key::ArrowRight,
+                Key::Escape,
+                Key::Enter,
+                Key::Home,
+            ]
+            .map(|k| i.key_pressed(k))
+        });
+        let [up, down, left, right, escape, enter, home] = keys;
+        let step = match (state.direction, up, down, left, right) {
+            (LayoutDirection::TopDown, true, ..) => Some(NavStep::Parent),
+            (LayoutDirection::TopDown, _, true, ..) => Some(NavStep::FirstChild),
+            (LayoutDirection::TopDown, _, _, true, _) => Some(NavStep::PreviousSibling),
+            (LayoutDirection::TopDown, _, _, _, true) => Some(NavStep::NextSibling),
+            (LayoutDirection::LeftRight, true, ..) => Some(NavStep::PreviousSibling),
+            (LayoutDirection::LeftRight, _, true, ..) => Some(NavStep::NextSibling),
+            (LayoutDirection::LeftRight, _, _, true, _) => Some(NavStep::Parent),
+            (LayoutDirection::LeftRight, _, _, _, true) => Some(NavStep::FirstChild),
+            _ => None,
+        };
+        let target = if home {
+            state.tree.root()
+        } else if let Some(step) = step {
+            match state.primary {
+                Some(from) => state.tree.navigate(from, step),
+                None => state.tree.root(),
+            }
+        } else {
+            None
+        };
+        if let Some(target) = target {
+            let mode = if modifiers.shift {
+                SelectMode::Add
+            } else {
+                SelectMode::Replace
+            };
+            if click_select(state, Some(target), mode) {
+                events.push(CanvasEvent::SelectionChanged);
+            }
+            state.pending = Some(PendingView::Reveal { id: target });
+        }
+        if escape && state.clear_selection() {
+            events.push(CanvasEvent::SelectionChanged);
+        }
+        if enter
+            && let Some(node) = state.primary.and_then(|id| state.tree.get(id))
+        {
+            if node.subtree.as_ref().is_some_and(|s| s.can_expand) {
+                events.push(CanvasEvent::ToggleSubtree(node.source));
+            } else if let Some(id) = state.primary {
+                events.push(CanvasEvent::Activated(id));
+            }
+        }
+    }
+}
+
+/// Changes the selection for a click on `target` (or on the background).
+/// Returns true if the selection changed.
+fn click_select(state: &mut CanvasState, target: Option<CanvasNodeId>, mode: SelectMode) -> bool {
+    match (target, mode) {
+        (None, SelectMode::Replace) => state.clear_selection(),
+        (None, _) => false,
+        (Some(id), SelectMode::Replace) => {
+            state.primary = Some(id);
+            state.tree.select_only(id)
+        }
+        (Some(id), SelectMode::Add) => {
+            state.primary = Some(id);
+            state.tree.set_selected(id, true)
+        }
+        (Some(id), SelectMode::Toggle) => {
+            let selected = !state.tree.is_selected(id);
+            if selected {
+                state.primary = Some(id);
+            } else if state.primary == Some(id) {
+                state.primary = None;
+            }
+            state.tree.set_selected(id, selected)
+        }
+    }
+}
+
+/// The ID of the accessibility item of a node.
+fn node_item_id(canvas: Id, node: CanvasNodeId) -> Id {
+    canvas.with(("node", node.0))
+}
+
+fn context_menu(
+    state: &mut CanvasState,
+    ui: &mut Ui,
+    hovered: Option<CanvasNodeId>,
+    events: &mut Vec<CanvasEvent>,
+) {
+    let target = state.primary.or(hovered);
+    if let Some(node) = target.and_then(|id| state.tree.get(id)) {
+        let source = node.source;
+        let label = node.label.clone();
+        let path = node.path.clone();
+        if let Some(info) = node.subtree.as_ref().filter(|s| s.can_expand) {
+            let text = if info.expanded {
+                "Collapse SubTree"
+            } else {
+                "Expand SubTree"
+            };
+            if ui.button(text).clicked() {
+                events.push(CanvasEvent::ToggleSubtree(source));
+            }
+        }
+        if ui.button("Center on node").clicked()
+            && let Some(id) = target
+        {
+            state.focus_on(id, true);
+        }
+        if ui.button("Copy name").clicked() {
+            ui.ctx().copy_text(label);
+        }
+        if !path.is_empty() && ui.button("Copy path").clicked() {
+            ui.ctx().copy_text(path);
+        }
+        ui.separator();
+    }
+    if ui.button("Expand all SubTrees").clicked() {
+        events.push(CanvasEvent::SetAllSubtrees(true));
+    }
+    if ui.button("Collapse all SubTrees").clicked() {
+        events.push(CanvasEvent::SetAllSubtrees(false));
+    }
+    ui.separator();
+    if ui.button("Fit to view").clicked() {
+        state.fit_to_view(true);
+    }
+    if ui.button("Select all").clicked() && state.select_all() {
+        events.push(CanvasEvent::SelectionChanged);
+    }
+}
+
+/// Rounds a point to the pixel grid (crisp text).
+fn snap(p: Pos2, ppp: f32) -> Pos2 {
+    pos2((p.x * ppp).round() / ppp, (p.y * ppp).round() / ppp)
+}
+
+fn radius(value: f32) -> CornerRadius {
+    CornerRadius::same(value.round().clamp(0.0, 255.0) as u8)
+}
+
+/// True if a port value is a blackboard reference (`{key}`).
+fn is_reference(value: &str) -> bool {
+    value.starts_with('{') && value.ends_with('}')
+}
+
+fn palette_key(palette: &CanvasPalette) -> u64 {
+    let c = palette.text.to_array();
+    u64::from(palette.dark) | (u64::from(u32::from_le_bytes(c)) << 1)
+}
+
+fn paint_canvas(
+    state: &mut CanvasState,
+    ui: &Ui,
+    rect: Rect,
+    palette: &CanvasPalette,
+    has_focus: bool,
+) {
+    let painter = ui.painter_at(rect);
+    let origin = rect.min;
+    let zoom = state.viewport.zoom;
+    let detail = Detail::for_zoom(zoom);
+    let ppp = ui.ctx().pixels_per_point();
+    let mut shapes = std::mem::take(&mut state.shapes);
+    shapes.clear();
+
+    // Background and dots.
+    shapes.push(Shape::rect_filled(rect, CornerRadius::ZERO, palette.background));
+    background_dots(&mut shapes, rect, state.viewport, palette.grid);
+
+    // Margin for markers outside the cards.
+    let view = state
+        .viewport
+        .visible_world(rect)
+        .expand(24.0 / zoom.max(viewport::MIN_ZOOM));
+    hit::visible_into(&state.layout.rects, view, &mut state.visible);
+
+    // Expanded SubTree regions.
+    if detail != Detail::Boxes {
+        for (_, bounds) in &state.groups {
+            let region = bounds.expand(14.0);
+            if !region.intersects(view) {
+                continue;
+            }
+            let screen = state.viewport.rect_to_screen(origin, region);
+            let r = radius(10.0 * zoom);
+            shapes.push(Shape::rect_filled(screen, r, palette.group_fill));
+            shapes.push(Shape::rect_stroke(
+                screen,
+                r,
+                Stroke::new(1.0, palette.group_border),
+                StrokeKind::Inside,
+            ));
+        }
+    }
+
+    paint_edges(state, &mut shapes, origin, view, palette, detail);
+
+    // Bucketed text size.
+    let bucket = viewport::zoom_bucket(zoom);
+    let text_zoom = viewport::bucket_zoom(bucket);
+    state.galleys.prepare(bucket, palette_key(palette));
+
+    let visible = std::mem::take(&mut state.visible);
+    for &index in &visible {
+        paint_card(
+            state, ui, &mut shapes, origin, index, palette, detail, text_zoom, ppp, has_focus,
+        );
+    }
+    state.visible = visible;
+
+    // Rubber band.
+    if let (DragMode::Band { start, .. }, Some(end)) = (state.drag, state.band_end) {
+        let band = state
+            .viewport
+            .rect_to_screen(origin, hit::rect_from_corners(start, end));
+        shapes.push(Shape::rect_filled(band, CornerRadius::same(2), palette.band_fill));
+        shapes.push(Shape::rect_stroke(
+            band,
+            CornerRadius::same(2),
+            Stroke::new(1.0, palette.accent),
+            StrokeKind::Inside,
+        ));
+    }
+
+    // Focus ring of the canvas (keyboard focus).
+    if has_focus && ui.memory(|m| m.focused().is_some()) && state.primary.is_none() {
+        shapes.push(Shape::rect_stroke(
+            rect.shrink(1.0),
+            CornerRadius::ZERO,
+            Stroke::new(1.0, palette.accent.gamma_multiply(0.6)),
+            StrokeKind::Inside,
+        ));
+    }
+
+    painter.extend(shapes.drain(..));
+    state.shapes = shapes;
+    state.stats.visible_nodes = state.visible.len();
+    state.stats.detail = detail;
+    state.stats.cached_galleys = state.galleys.map.len();
+}
+
+/// Dots on a world grid. The spacing grows when the zoom is small, so that
+/// the number of dots stays low. All dots are one mesh.
+fn background_dots(shapes: &mut Vec<Shape>, rect: Rect, view: Viewport, color: Color32) {
+    let mut spacing = 24.0 * view.zoom;
+    while spacing < 18.0 {
+        spacing *= 4.0;
+    }
+    if spacing > 400.0 {
+        return;
+    }
+    let offset = rect.min + view.pan;
+    let start_x = rect.min.x + (offset.x - rect.min.x).rem_euclid(spacing);
+    let start_y = rect.min.y + (offset.y - rect.min.y).rem_euclid(spacing);
+    let dot = Vec2::splat(1.6);
+    let mut mesh = Mesh::default();
+    let mut y = start_y;
+    while y < rect.max.y {
+        let mut x = start_x;
+        while x < rect.max.x {
+            mesh.add_colored_rect(Rect::from_center_size(pos2(x, y), dot), color);
+            x += spacing;
+        }
+        y += spacing;
+    }
+    shapes.push(Shape::mesh(mesh));
+}
+
+fn paint_edges(
+    state: &mut CanvasState,
+    shapes: &mut Vec<Shape>,
+    origin: Pos2,
+    view: Rect,
+    palette: &CanvasPalette,
+    detail: Detail,
+) {
+    let zoom = state.viewport.zoom;
+    let vertical = state.direction == LayoutDirection::TopDown;
+    let width = (1.6 * zoom).clamp(1.0, 2.6);
+    let corner = if detail == Detail::Boxes {
+        0.0
+    } else {
+        8.0 * zoom
+    };
+    let mut active: Vec<(Shape, u8)> = Vec::new();
+    let mut points = std::mem::take(&mut state.points);
+    for (index, bounds) in state.edge_bounds.iter().enumerate() {
+        let Some(bounds) = bounds else {
+            continue;
+        };
+        if !bounds.intersects(view) {
+            continue;
+        }
+        let parent = &state.tree.nodes()[index];
+        let Some(parent_rect) = state.layout.rects.get(index) else {
+            continue;
+        };
+        let start = state
+            .viewport
+            .to_screen(origin, state.layout.edge_start(*parent_rect));
+        let bus_world = state.layout.bus_position(parent.depth);
+        for child in &parent.children {
+            let Some(child_rect) = state.layout.rect(*child) else {
+                continue;
+            };
+            let end = state
+                .viewport
+                .to_screen(origin, state.layout.edge_end(child_rect));
+            let status = state.tree.nodes()[child.index()].deco.status;
+            let (color, rank) = match status {
+                NodeStatus::Running => (palette.running, 3),
+                NodeStatus::Failure => (palette.failure, 2),
+                NodeStatus::Success => (palette.success, 1),
+                NodeStatus::Idle | NodeStatus::Skipped => (palette.edge, 0),
+            };
+            let stroke = Stroke::new(if rank > 0 { width * 1.4 } else { width }, color);
+            let shape = match state.edge_style {
+                EdgeStyle::Curved if detail != Detail::Boxes => {
+                    paint::curved_edge(start, end, vertical, stroke)
+                }
+                _ => {
+                    let bus = bus_world.map_or(
+                        if vertical {
+                            (start.y + end.y) * 0.5
+                        } else {
+                            (start.x + end.x) * 0.5
+                        },
+                        |b| {
+                            let p = state.viewport.to_screen(origin, pos2(b, b));
+                            if vertical { p.y } else { p.x }
+                        },
+                    );
+                    paint::orthogonal_edge_points(start, end, bus, vertical, corner, &mut points);
+                    Shape::line(points.clone(), stroke)
+                }
+            };
+            if rank > 0 {
+                active.push((shape, rank));
+            } else {
+                shapes.push(shape);
+            }
+        }
+    }
+    state.points = points;
+    // Active edges on top, the most important last.
+    active.sort_by_key(|(_, rank)| *rank);
+    shapes.extend(active.into_iter().map(|(shape, _)| shape));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_card(
+    state: &mut CanvasState,
+    ui: &Ui,
+    shapes: &mut Vec<Shape>,
+    origin: Pos2,
+    index: u32,
+    palette: &CanvasPalette,
+    detail: Detail,
+    text_zoom: f32,
+    ppp: f32,
+    has_focus: bool,
+) {
+    let id = CanvasNodeId(index);
+    let zoom = state.viewport.zoom;
+    let Some(world) = state.layout.rect(id) else {
+        return;
+    };
+    let node = &state.tree.nodes()[index as usize];
+    let screen = state.viewport.rect_to_screen(origin, world);
+    let deco = node.deco;
+    let category_color = palette.category(node.category);
+    let status_color = palette.status(deco.status);
+    let hovered = state.hovered == Some(id);
+    let r = radius(6.0 * zoom);
+    let skipped = deco.status == NodeStatus::Skipped;
+
+    // Search match halo.
+    if deco.search_match {
+        shapes.push(Shape::rect_filled(
+            screen.expand(5.0 * zoom.max(0.5)),
+            radius(9.0 * zoom),
+            palette.search,
+        ));
+    }
+
+    if detail == Detail::Boxes {
+        let fill = match status_color {
+            Some(color) => mix(palette.card, color, 0.55),
+            None => mix(palette.card, category_color, 0.28),
+        };
+        shapes.push(Shape::rect_filled(screen, r, fill));
+        let band_width = card::BAND * zoom;
+        if band_width >= 0.75 {
+            let band = Rect::from_min_max(screen.min, pos2(screen.min.x + band_width.max(1.0), screen.max.y));
+            shapes.push(Shape::rect_filled(band, CornerRadius::ZERO, category_color));
+        }
+        if deco.selected {
+            shapes.push(Shape::rect_stroke(
+                screen.expand(2.0),
+                r,
+                Stroke::new(2.0, palette.accent),
+                StrokeKind::Outside,
+            ));
+        }
+        return;
+    }
+
+    let geometry = CardGeometry::of(&node.card);
+    let card_fill = if deco.status == NodeStatus::Running {
+        mix(palette.card, palette.running, if palette.dark { 0.12 } else { 0.08 })
+    } else {
+        palette.card
+    };
+    let alpha = if skipped { 0.55 } else { 1.0 };
+
+    // Collapsed SubTree: two cards behind this one.
+    if node.is_collapsed_subtree() {
+        for step in [2.0, 1.0] {
+            let offset = vec2(4.0, 4.0) * step * zoom;
+            let behind = screen.translate(offset);
+            shapes.push(Shape::rect_filled(behind, r, palette.card.gamma_multiply(alpha)));
+            shapes.push(Shape::rect_stroke(
+                behind,
+                r,
+                Stroke::new(1.0, palette.card_border.gamma_multiply(alpha)),
+                StrokeKind::Inside,
+            ));
+        }
+    }
+
+    // Shadow, body, band.
+    shapes.push(Shape::rect_filled(
+        screen.translate(vec2(0.0, 1.5 * zoom.min(1.5))).expand(0.5),
+        r,
+        palette.shadow.gamma_multiply(alpha),
+    ));
+    shapes.push(Shape::rect_filled(screen, r, card_fill.gamma_multiply(alpha)));
+    let band = Rect::from_min_max(
+        screen.min,
+        pos2(screen.min.x + card::BAND * zoom, screen.max.y),
+    );
+    shapes.push(Shape::rect_filled(
+        band,
+        CornerRadius {
+            nw: r.nw,
+            sw: r.sw,
+            ne: 0,
+            se: 0,
+        },
+        category_color.gamma_multiply(alpha),
+    ));
+
+    // Border.
+    let border = match (status_color, deco.status) {
+        (Some(color), NodeStatus::Running) => Stroke::new(2.0, color),
+        (Some(color), NodeStatus::Skipped) => Stroke::new(1.2, color),
+        (Some(color), _) => Stroke::new(1.6, color),
+        (None, _) if hovered => Stroke::new(1.0, palette.card_border_hover),
+        (None, _) => Stroke::new(1.0, palette.card_border),
+    };
+    if skipped {
+        paint::dashed_rect(shapes, screen, border, 4.0, 3.0);
+    } else {
+        shapes.push(Shape::rect_stroke(screen, r, border, StrokeKind::Inside));
+    }
+    if deco.status == NodeStatus::Running {
+        shapes.push(Shape::rect_stroke(
+            screen.expand(2.0),
+            radius(6.0 * zoom + 2.0),
+            Stroke::new(3.0, palette.running.gamma_multiply(0.3)),
+            StrokeKind::Outside,
+        ));
+    }
+
+    // Glyph.
+    let local = |p: Pos2| card::to_screen(screen, zoom, p);
+    let glyph_center = local(geometry.glyph_center());
+    let glyph_box = Rect::from_center_size(glyph_center, Vec2::splat(card::GLYPH * zoom));
+    shapes.push(Shape::rect_filled(
+        glyph_box,
+        radius(4.0 * zoom),
+        mix(palette.card, category_color, if palette.dark { 0.22 } else { 0.14 }).gamma_multiply(alpha),
+    ));
+    paint::category_glyph(
+        shapes,
+        glyph_center,
+        card::GLYPH * zoom,
+        node.category,
+        category_color.gamma_multiply(alpha),
+    );
+
+    // Text.
+    let text_color = palette.text.gamma_multiply(alpha);
+    let weak = palette.text_weak.gamma_multiply(alpha);
+    let painter = ui.painter();
+    let label_line = card::LABEL_LINE * zoom;
+    let has_type = node.card.type_line.is_some();
+    {
+        let label = state.galleys.get(index, SLOT_LABEL, || {
+            painter.layout_job(LayoutJob::simple_singleline(
+                node.card.label.clone(),
+                font_for(TextKind::Label, card::LABEL_SIZE * text_zoom),
+                text_color,
+            ))
+        });
+        let mut pos = local(geometry.label_pos(has_type && detail == Detail::Full));
+        if !has_type || detail != Detail::Full {
+            pos = local(geometry.label_pos(false));
+        }
+        pos.y += (label_line - label.size().y) * 0.5;
+        shapes.push(Shape::galley(snap(pos, ppp), label, text_color));
+    }
+    if detail == Detail::Full {
+        if let Some(type_line) = &node.card.type_line {
+            let galley = state.galleys.get(index, SLOT_TYPE, || {
+                painter.layout_job(LayoutJob::simple_singleline(
+                    type_line.clone(),
+                    font_for(TextKind::Type, card::TYPE_SIZE * text_zoom),
+                    weak,
+                ))
+            });
+            let mut pos = local(geometry.type_pos());
+            pos.y += (card::TYPE_LINE * zoom - galley.size().y) * 0.5;
+            shapes.push(Shape::galley(snap(pos, ppp), galley, weak));
+        }
+        if geometry.port_lines > 0 {
+            let y = local(pos2(0.0, geometry.separator_y())).y;
+            shapes.push(Shape::hline(
+                (screen.min.x + card::BAND * zoom)..=(screen.max.x - 1.0),
+                y,
+                Stroke::new(1.0, palette.separator.gamma_multiply(alpha)),
+            ));
+            let value_color = palette.text_value.gamma_multiply(alpha);
+            let reference_color = palette.text_reference.gamma_multiply(alpha);
+            for (line, (name, value)) in node.card.ports.iter().enumerate() {
+                let galley = state.galleys.get(index, SLOT_PORT + line as u64, || {
+                    let mut job = LayoutJob::default();
+                    let name_format = TextFormat {
+                        font_id: font_for(TextKind::PortName, card::PORT_SIZE * text_zoom),
+                        color: weak,
+                        ..TextFormat::default()
+                    };
+                    job.append(name, 0.0, name_format.clone());
+                    job.append(card::PORT_SEPARATOR, 0.0, name_format);
+                    job.append(
+                        value,
+                        0.0,
+                        TextFormat {
+                            font_id: font_for(TextKind::PortValue, card::PORT_SIZE * text_zoom),
+                            color: if is_reference(value) {
+                                reference_color
+                            } else {
+                                value_color
+                            },
+                            ..TextFormat::default()
+                        },
+                    );
+                    painter.layout_job(job)
+                });
+                let mut pos = local(geometry.port_pos(line));
+                pos.y += (card::PORT_LINE * zoom - galley.size().y) * 0.5;
+                shapes.push(Shape::galley(snap(pos, ppp), galley, value_color));
+            }
+            if let Some(more) = &node.card.more {
+                let galley = state.galleys.get(index, SLOT_MORE, || {
+                    painter.layout_job(LayoutJob::simple_singleline(
+                        more.clone(),
+                        FontId::new(
+                            TextKind::Note.size() * text_zoom,
+                            FontFamily::Name(fonts::ITALIC.into()),
+                        ),
+                        weak,
+                    ))
+                });
+                let mut pos = local(geometry.port_pos(node.card.ports.len()));
+                pos.y += (card::PORT_LINE * zoom - galley.size().y) * 0.5;
+                shapes.push(Shape::galley(snap(pos, ppp), galley, weak));
+            }
+        }
+    }
+
+    // Status badge.
+    let badge_center = local(geometry.badge_center(node.card.size.x));
+    match (deco.status, deco.previous_status) {
+        (NodeStatus::Idle, Some(previous)) => {
+            paint::status_badge(shapes, badge_center, card::BADGE * zoom, previous, true, palette);
+        }
+        (status, _) => {
+            paint::status_badge(shapes, badge_center, card::BADGE * zoom, status, false, palette);
+        }
+    }
+
+    // Collapsed SubTree: the number of hidden nodes.
+    if let Some(info) = node.subtree.as_ref().filter(|_| node.is_collapsed_subtree()) {
+        let text = format!("+{}", info.inner_count);
+        let galley = state.galleys.get(index, SLOT_CHIP, || {
+            painter.layout_job(LayoutJob::simple_singleline(
+                text,
+                font_for(TextKind::Note, TextKind::Note.size() * text_zoom),
+                palette.on_color,
+            ))
+        });
+        let center = match state.direction {
+            LayoutDirection::TopDown => pos2(screen.center().x, screen.max.y + 4.0 * zoom),
+            LayoutDirection::LeftRight => pos2(screen.max.x + 6.0 * zoom, screen.center().y),
+        };
+        paint::pill(
+            shapes,
+            center,
+            galley,
+            palette.category(NodeCategory::SubTree),
+            palette.on_color,
+            vec2(5.0, 1.0) * zoom,
+        );
+    }
+
+    // Substitution tag.
+    if let Some(substitution) = deco.substitution {
+        let (text, color) = match substitution {
+            Substitution::ForcedSuccess => ("forced SUCCESS", palette.success),
+            Substitution::ForcedFailure => ("forced FAILURE", palette.failure),
+        };
+        let galley = state.galleys.get(index, SLOT_TAG, || {
+            painter.layout_job(LayoutJob::simple_singleline(
+                text.to_owned(),
+                font_for(TextKind::Note, 9.5 * text_zoom),
+                palette.on_color,
+            ))
+        });
+        let size = galley.size();
+        let center = pos2(
+            screen.min.x + (card::BAND + card::PAD_X) * zoom + size.x * 0.5 + 4.0 * zoom,
+            screen.min.y,
+        );
+        paint::pill(shapes, center, galley, color, palette.on_color, vec2(4.0, 1.0) * zoom);
+    }
+
+    // Breakpoint marker (left of the card, at the header).
+    if let Some(marker) = deco.breakpoint {
+        let radius = (5.5 * zoom).clamp(3.0, 8.0);
+        let center = pos2(
+            screen.min.x - radius - 3.0 * zoom,
+            screen.min.y + geometry.header_height * 0.5 * zoom,
+        );
+        paint::breakpoint_marker(shapes, center, radius, marker, palette);
+    }
+
+    // Problem marker (top-right corner).
+    if let Some(problem) = deco.problem {
+        let radius = (7.0 * zoom).clamp(4.0, 9.0);
+        paint::problem_marker(
+            shapes,
+            pos2(screen.max.x - 1.0, screen.min.y + 1.0),
+            radius,
+            problem,
+            palette,
+        );
+    }
+
+    // Selection.
+    if deco.selected {
+        let primary = state.primary == Some(id);
+        if primary {
+            shapes.push(Shape::rect_stroke(
+                screen.expand(3.0),
+                radius(6.0 * zoom + 3.0),
+                Stroke::new(5.0, palette.accent.gamma_multiply(if has_focus { 0.22 } else { 0.12 })),
+                StrokeKind::Outside,
+            ));
+        }
+        shapes.push(Shape::rect_stroke(
+            screen.expand(2.0),
+            radius(6.0 * zoom + 2.0),
+            Stroke::new(2.0, palette.accent),
+            StrokeKind::Outside,
+        ));
+    }
+}
+
+/// Describes the visible nodes for screen readers (and for UI tests).
+fn describe_for_accesskit(state: &CanvasState, ui: &Ui, rect: Rect, canvas: Id) {
+    let ctx = ui.ctx();
+    let title = state.tree.title.clone();
+    let enabled = ctx
+        .accesskit_node_builder(canvas, |builder| {
+            builder.set_role(egui::accesskit::Role::Tree);
+            builder.set_label(format!("Tree canvas: {title}"));
+        })
+        .is_some();
+    if !enabled {
+        return;
+    }
+    for &index in &state.visible {
+        let id = CanvasNodeId(index);
+        let Some(node) = state.tree.get(id) else {
+            continue;
+        };
+        let Some(screen) = state.node_screen_rect(rect.min, id) else {
+            continue;
+        };
+        let screen = screen.intersect(rect);
+        if !screen.is_positive() {
+            continue;
+        }
+        let description = match node.deco.status {
+            NodeStatus::Idle => format!("{} ({})", node.type_id, node.category.name()),
+            status => format!("{} ({}), {status}", node.type_id, node.category.name()),
+        };
+        ctx.accesskit_node_builder(node_item_id(canvas, id), |builder| {
+            builder.set_role(egui::accesskit::Role::TreeItem);
+            builder.set_label(node.label.clone());
+            builder.set_description(description);
+            builder.set_bounds(egui::accesskit::Rect {
+                x0: screen.min.x.into(),
+                y0: screen.min.y.into(),
+                x1: screen.max.x.into(),
+                y1: screen.max.y.into(),
+            });
+            builder.set_selected(node.deco.selected);
+            if let Some(info) = &node.subtree
+                && info.can_expand
+            {
+                builder.set_expanded(info.expanded);
+            }
+            builder.add_action(egui::accesskit::Action::Click);
+        });
+    }
+}
+
+fn show_tooltip(state: &CanvasState, ui: &Ui, response: &Response, canvas: Id, now: f64) {
+    let Some(id) = state.hovered else {
+        return;
+    };
+    if state.drag != DragMode::None
+        || now - state.hover_start < TOOLTIP_DELAY
+        || ui.input(|i| i.pointer.any_down())
+        || response.context_menu_opened()
+    {
+        if now - state.hover_start < TOOLTIP_DELAY {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(TOOLTIP_DELAY));
+        }
+        return;
+    }
+    let Some(node) = state.tree.get(id) else {
+        return;
+    };
+    egui::Tooltip::always_open(
+        ui.ctx().clone(),
+        response.layer_id,
+        canvas.with("tooltip"),
+        egui::PopupAnchor::Pointer,
+    )
+    .gap(14.0)
+    .show(|ui| {
+        ui.set_max_width(360.0);
+        ui.label(egui::RichText::new(&node.label).strong().size(14.0));
+        ui.label(
+            egui::RichText::new(format!("{}  ·  {}", node.type_id, node.category.name()))
+                .weak(),
+        );
+        if node.category_inferred {
+            ui.label(egui::RichText::new("Category inferred: no model is known for this type.").small().weak());
+        }
+        egui::Grid::new(canvas.with("tooltip_grid"))
+            .num_columns(2)
+            .spacing([12.0, 2.0])
+            .show(ui, |ui| {
+                if !node.path.is_empty() && node.path != node.label {
+                    ui.label(egui::RichText::new("Path").weak());
+                    ui.label(&node.path);
+                    ui.end_row();
+                }
+                if let Some(uid) = node.uid {
+                    ui.label(egui::RichText::new("UID").weak());
+                    ui.label(uid.to_string());
+                    ui.end_row();
+                }
+                let status = match (node.deco.status, node.deco.previous_status) {
+                    (NodeStatus::Idle, Some(previous)) => format!("IDLE (before: {previous})"),
+                    (status, _) => status.to_string(),
+                };
+                ui.label(egui::RichText::new("Status").weak());
+                ui.label(status);
+                ui.end_row();
+                if let Some(info) = &node.subtree {
+                    ui.label(egui::RichText::new("Tree").weak());
+                    let state = match (info.can_expand, info.expanded) {
+                        (false, _) => "not found".to_owned(),
+                        (true, true) => format!("expanded, {} nodes", info.inner_count),
+                        (true, false) => format!("collapsed, {} nodes", info.inner_count),
+                    };
+                    ui.label(format!("{} ({state})", info.tree_id));
+                    ui.end_row();
+                }
+            });
+        if !node.ports.is_empty() {
+            ui.separator();
+            egui::Grid::new(canvas.with("tooltip_ports"))
+                .num_columns(2)
+                .spacing([12.0, 2.0])
+                .show(ui, |ui| {
+                    for port in node.ports.iter().take(16) {
+                        ui.label(egui::RichText::new(&port.name).weak());
+                        ui.label(egui::RichText::new(&port.value).monospace());
+                        ui.end_row();
+                    }
+                });
+            if node.ports.len() > 16 {
+                ui.label(egui::RichText::new(format!("+{} more", node.ports.len() - 16)).weak());
+            }
+        }
+        if node.subtree.as_ref().is_some_and(|s| s.can_expand) {
+            ui.label(egui::RichText::new("Double-click to expand or collapse.").small().weak());
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::canvas::card::FixedMeasure;
+    use crate::canvas::model::{CanvasNode, CanvasTreeBuilder};
+    use fasttick_core::runtime::NodeIndex;
+
+    fn chain_tree(n: usize) -> CanvasTree {
+        let mut builder = CanvasTreeBuilder::new();
+        let root = builder.push(None, CanvasNode::new(NodeSource::Runtime(NodeIndex(0)), "root", "Sequence"));
+        for i in 1..n {
+            builder.push(Some(root), CanvasNode::new(NodeSource::Runtime(NodeIndex(i)), format!("n{i}"), "Action"));
+        }
+        builder.finish("T")
+    }
+
+    #[test]
+    fn detail_levels() {
+        assert_eq!(Detail::for_zoom(1.0), Detail::Full);
+        assert_eq!(Detail::for_zoom(0.5), Detail::Labels);
+        assert_eq!(Detail::for_zoom(0.1), Detail::Boxes);
+        assert!(Detail::Boxes < Detail::Full);
+    }
+
+    #[test]
+    fn pending_fit_and_focus() {
+        let mut state = CanvasState::new(chain_tree(10));
+        state.prepare_with(&mut FixedMeasure(7.0));
+        assert!(!state.needs_layout());
+        let size = vec2(800.0, 600.0);
+        state.size = size;
+        state.apply_pending(size);
+        // The fit happened without animation.
+        let bounds = state.layout().bounds;
+        let screen = state.viewport().rect_to_screen(Pos2::ZERO, bounds);
+        assert!(Rect::from_min_size(Pos2::ZERO, size).contains_rect(screen));
+
+        // Focus with animation: the view arrives at the node.
+        state.set_viewport(Viewport::new(vec2(5000.0, 0.0), 0.3));
+        state.focus_on(CanvasNodeId(5), true);
+        assert!(state.tree().is_selected(CanvasNodeId(5)));
+        state.apply_pending(size);
+        assert!(state.step_animation(0.0));
+        assert!(state.step_animation(10.0));
+        assert!(!state.step_animation(10.1));
+        assert_eq!(state.viewport().zoom, 1.0);
+        let center = state.layout().rect(CanvasNodeId(5)).unwrap().center();
+        let on_screen = state.viewport().to_screen(Pos2::ZERO, center);
+        assert!((on_screen - pos2(400.0, 300.0)).length() < 0.01);
+    }
+
+    #[test]
+    fn zoom_steps_animate_to_target() {
+        let mut state = CanvasState::new(chain_tree(3));
+        state.prepare_with(&mut FixedMeasure(7.0));
+        state.size = vec2(400.0, 300.0);
+        state.set_viewport(Viewport::new(Vec2::ZERO, 1.0));
+        state.zoom_in();
+        state.step_animation(0.0);
+        state.step_animation(5.0);
+        assert!((state.viewport().zoom - viewport::ZOOM_STEP).abs() < 1e-4);
+        state.zoom_reset();
+        state.step_animation(5.0);
+        state.step_animation(10.0);
+        assert!((state.viewport().zoom - 1.0).abs() < 1e-4);
+        state.zoom_out();
+        state.step_animation(10.0);
+        state.step_animation(20.0);
+        assert!(state.viewport().zoom < 1.0);
+        // An invalid viewport is ignored.
+        let before = state.viewport();
+        state.set_viewport(Viewport { pan: Vec2::ZERO, zoom: f32::NAN });
+        assert_eq!(state.viewport(), before);
+    }
+
+    #[test]
+    fn replace_tree_keeps_anchor_and_selection() {
+        let mut state = CanvasState::new(chain_tree(4));
+        state.prepare_with(&mut FixedMeasure(7.0));
+        state.size = vec2(800.0, 600.0);
+        state.apply_pending(state.size);
+        assert!(click_select(&mut state, Some(CanvasNodeId(2)), SelectMode::Replace));
+        let anchor = state.tree().get(CanvasNodeId(2)).unwrap().source;
+        let before = state
+            .viewport()
+            .to_screen(Pos2::ZERO, state.layout().rect(CanvasNodeId(2)).unwrap().min);
+
+        // A new tree with one more node: the layout moves the anchor.
+        state.replace_tree(chain_tree(9), Some(anchor));
+        assert!(state.needs_layout());
+        state.prepare_with(&mut FixedMeasure(7.0));
+        state.apply_pending(state.size);
+        let after = state
+            .viewport()
+            .to_screen(Pos2::ZERO, state.layout().rect(CanvasNodeId(2)).unwrap().min);
+        assert!((after - before).length() < 0.01);
+        assert!(state.tree().is_selected(CanvasNodeId(2)));
+        assert_eq!(state.primary(), Some(CanvasNodeId(2)));
+    }
+
+    #[test]
+    fn click_selection_modes() {
+        let mut state = CanvasState::new(chain_tree(4));
+        assert!(click_select(&mut state, Some(CanvasNodeId(1)), SelectMode::Replace));
+        assert!(click_select(&mut state, Some(CanvasNodeId(2)), SelectMode::Add));
+        assert_eq!(state.tree().selected_count(), 2);
+        assert!(click_select(&mut state, Some(CanvasNodeId(2)), SelectMode::Toggle));
+        assert_eq!(state.tree().selected_count(), 1);
+        // The primary node was deselected.
+        assert_eq!(state.primary(), None);
+        assert!(!click_select(&mut state, None, SelectMode::Add));
+        assert!(click_select(&mut state, None, SelectMode::Replace));
+        assert_eq!(state.tree().selected_count(), 0);
+        assert_eq!(state.primary(), None);
+        assert_eq!(select_mode(Modifiers::COMMAND), SelectMode::Toggle);
+        assert_eq!(select_mode(Modifiers::SHIFT), SelectMode::Add);
+        assert_eq!(select_mode(Modifiers::NONE), SelectMode::Replace);
+    }
+
+    #[test]
+    fn helpers() {
+        assert!(is_reference("{goal}"));
+        assert!(!is_reference("3.0"));
+        assert_eq!(snap(pos2(1.26, 2.74), 2.0), pos2(1.5, 2.5));
+        assert_eq!(radius(300.0), CornerRadius::same(255));
+        assert_eq!(radius(-1.0), CornerRadius::same(0));
+    }
+}

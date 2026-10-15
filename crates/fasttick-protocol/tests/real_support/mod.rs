@@ -19,8 +19,31 @@ use fasttick_core::status::NodeStatus;
 use fasttick_protocol::client::{Client, ClientConfig};
 use fasttick_protocol::messages::{Hook, HookPosition, StatusSnapshot};
 use fasttick_protocol::wire::TreeUuid;
-use fasttick_testkit::{Executor, ExecutorOptions, Harness, free_port_pair};
+use fasttick_testkit::{Executor, ExecutorOptions, Harness, PREFIX_ENV, free_port_pair};
 use serde_json::Value;
+
+/// Gets the test harness, or gives `None` when the test must skip.
+///
+/// This is `require_harness!` with one more rule: if
+/// `FASTTICK_BTCPP_PREFIX` is set, the test fails instead of a skip. The
+/// testkit skips an explicit prefix that is not valid (for example a
+/// wrong path) unless `FASTTICK_REQUIRE_HARNESS=1` is set. A run with the
+/// prefix set must not pass with no test done.
+///
+/// Use it as `let Some(harness) = real_support::harness() else { return };`.
+pub fn harness() -> Option<&'static Harness> {
+    match fasttick_testkit::harness() {
+        Ok(harness) => Some(harness),
+        Err(reason) => {
+            let explicit_prefix = std::env::var_os(PREFIX_ENV).is_some_and(|value| !value.is_empty());
+            if reason.is_fatal() || explicit_prefix {
+                panic!("the FastTick test harness is not usable ({PREFIX_ENV} is set): {reason}");
+            }
+            eprintln!("{}", fasttick_testkit::skip_message(&reason));
+            None
+        }
+    }
+}
 
 /// The longest wait for a condition that should come soon. The waits end
 /// early, so a long value costs nothing when the test passes. It is long

@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[lib]
+name = "fasttick_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "fasttick"
 path = "src/main.rs"
@@ -21,11 +25,11 @@ serde_json.workspace = true
 egui.workspace = true
 eframe.workspace = true
 egui_extras.workspace = true
-egui_dock.workspace = true
+egui_dock = { workspace = true, features = ["serde"] }
 rfd.workspace = true
 
 [dev-dependencies]
-egui_kittest.workspace = true
+egui_kittest = { workspace = true, features = ["eframe"] }
 tempfile.workspace = true
 
 [lints]

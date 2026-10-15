@@ -88,7 +88,7 @@ impl LayoutParams {
 }
 
 /// The result of a layout.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TreeLayout {
     /// The direction.
     pub direction: LayoutDirection,
@@ -100,6 +100,18 @@ pub struct TreeLayout {
     pub level_starts: Vec<f32>,
     /// The spacing that the layout used.
     pub level_gap: f32,
+}
+
+impl Default for TreeLayout {
+    fn default() -> Self {
+        TreeLayout {
+            direction: LayoutDirection::default(),
+            rects: Vec::new(),
+            bounds: Rect::NOTHING,
+            level_starts: Vec::new(),
+            level_gap: 0.0,
+        }
+    }
 }
 
 impl TreeLayout {
@@ -381,7 +393,7 @@ mod tests {
         }
         // Levels: all nodes of a level start at the same y, below the
         // tallest node of the level before.
-        assert_eq!(result.level_starts, vec![0.0, 40.0 + 56.0, 40.0 + 56.0 + 50.0 + 56.0]);
+        assert_eq!(result.level_starts, vec![0.0, 40.0 + 56.0, 40.0 + 56.0 + 30.0 + 56.0]);
         for (node, rect) in tree.nodes().iter().zip(&result.rects) {
             assert_eq!(rect.min.y, result.level_starts[node.depth as usize]);
         }

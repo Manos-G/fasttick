@@ -16,7 +16,6 @@ use fasttick_core::runtime::{RuntimeTree, Uid};
 use fasttick_core::status::NodeStatus;
 use fasttick_protocol::client::ClientError;
 use fasttick_protocol::messages::{Hook, HookMode, HookPosition, UnlockRequest};
-use fasttick_testkit::require_harness;
 use real_support::{Live, WAIT, client, options, statuses_by_name, wait_until};
 use serde_json::{Value, json};
 
@@ -49,7 +48,9 @@ fn all_uids(tree: &RuntimeTree) -> BTreeSet<u16> {
 
 #[test]
 fn full_tree_matches_the_executed_xml() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::start(options(harness, LONG_RUNNING));
 
     // The reply UUID is the random version-4 UUID of the publisher
@@ -135,7 +136,9 @@ fn full_tree_matches_the_executed_xml() {
 
 #[test]
 fn status_covers_every_node_and_changes_over_time() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::start(options(harness, LONG_RUNNING));
     let tree_uids = all_uids(&live.tree);
     let slow_action = Uid(live.uid("slow_action"));
@@ -187,7 +190,9 @@ fn status_covers_every_node_and_changes_over_time() {
 
 #[test]
 fn blackboards_of_the_root_tree_and_of_a_subtree_instance() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::start(options(harness, LONG_RUNNING));
     let root_name = live.tree.root_instance().blackboard_name().to_owned();
     assert_eq!(root_name, "LongRunning");
@@ -261,7 +266,9 @@ fn blackboards_of_the_root_tree_and_of_a_subtree_instance() {
 
 #[test]
 fn hook_requests_insert_dump_remove_and_report_errors() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::start(options(harness, LONG_RUNNING));
     let say = live.uid("say_cycle");
     let write = live.uid("write_cycle_values");

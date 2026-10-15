@@ -310,6 +310,15 @@ impl Client {
     /// connected. ZeroMQ connects the REQ and the SUB socket independently,
     /// so after a restart of the executor the REQ socket can be connected
     /// some time before the SUB socket.
+    ///
+    /// A true result does not yet mean that the publisher has the
+    /// subscription. The SUB socket sends it after the handshake, and the
+    /// publisher reads it a little later. A request after this call is
+    /// enough: the client sends the subscription before the request, and
+    /// the publisher handles both on one I/O thread. A notification that
+    /// the publisher sends in reply to the request (a hook that the request
+    /// enables) therefore arrives. A notification that the publisher sends
+    /// on its own at the same time as the handshake can be lost.
     pub fn notifications_connected(&mut self) -> bool {
         self.update_notifications();
         self.notification_socket

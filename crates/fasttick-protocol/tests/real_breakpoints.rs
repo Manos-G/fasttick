@@ -21,7 +21,6 @@ use fasttick_core::runtime::Uid;
 use fasttick_core::status::NodeStatus;
 use fasttick_protocol::client::ClientError;
 use fasttick_protocol::messages::{Hook, HookMode, HookPosition, UnlockRequest};
-use fasttick_testkit::require_harness;
 use real_support::{
     Live, ProbeCounters, QUIET, WAIT, options, wait_hit_with_heartbeat, wait_until,
 };
@@ -30,7 +29,7 @@ use real_support::{
 /// enabled breakpoint on "probe" and waits until the tree stops there.
 /// Gives the executor and the counters at the stop.
 fn stopped_at_probe() -> Option<(Live, ProbeCounters)> {
-    let harness = require_harness!(None);
+    let harness = real_support::harness()?;
     let mut live = Live::probe(harness);
     let probe = live.uid("probe");
     live.sync_notifications(live.uid("count_runs"));
@@ -111,7 +110,9 @@ fn breakpoint_stops_the_node_until_an_unlock() {
 
 #[test]
 fn once_breakpoint_is_removed_after_the_first_hit() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::probe(harness);
     let probe = live.uid("probe");
     live.sync_notifications(live.uid("count_runs"));
@@ -163,7 +164,9 @@ fn once_breakpoint_is_removed_after_the_first_hit() {
 
 #[test]
 fn disabled_breakpoint_does_not_stop_until_it_is_enabled() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::probe(harness);
     let probe = live.uid("probe");
     live.sync_notifications(live.uid("count_runs"));
@@ -276,7 +279,9 @@ fn an_unlock_before_the_hit_lets_one_hit_pass() {
     // BT.CPP sets the "ready" flag of a breakpoint also when the node does
     // not wait (unlockBreakpoint of the publisher). The next hit then sends
     // a notification but does not stop.
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::probe(harness);
     let probe = live.uid("probe");
     live.sync_notifications(live.uid("count_runs"));
@@ -303,7 +308,9 @@ fn an_unlock_before_the_hit_lets_one_hit_pass() {
 fn post_hooks_are_stored_and_run_as_pre_hooks() {
     // Protocol facts 1 and 2 (docs/PLAN.md): BT.CPP 4.9.0 runs a hook with
     // position POST before the tick and stores it with the PRE hooks.
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::probe(harness);
     let probe = live.uid("probe");
     live.sync_notifications(live.uid("count_runs"));
@@ -348,7 +355,9 @@ fn post_hooks_are_stored_and_run_as_pre_hooks() {
 
 #[test]
 fn replace_hooks_return_the_status_without_a_tick() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::probe(harness);
     let probe = live.uid("probe");
     live.sync_notifications(live.uid("count_runs"));
@@ -398,7 +407,9 @@ fn replace_hooks_return_the_status_without_a_tick() {
 
 #[test]
 fn replace_hook_with_once_replaces_one_tick() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::probe(harness);
     let probe = live.uid("probe");
 
@@ -445,7 +456,9 @@ fn changing_a_blocked_breakpoint_to_replace_releases_it() {
 
 #[test]
 fn heartbeat_loss_disables_the_hooks_and_requests_enable_them_again() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let heartbeat = Duration::from_millis(500);
     let mut options = options(harness, "probe.xml");
     options.heartbeat_ms = Some(heartbeat.as_millis() as u64);

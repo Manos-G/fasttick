@@ -21,7 +21,7 @@ use fasttick_log::{BtLog, BtLogWriter, NodeState, ReplayIndex, Transition};
 use fasttick_protocol::messages::{
     Hook, RECORDING_BUFFER_CAPACITY, RecordedTransition, StatusSnapshot, UnlockRequest,
 };
-use fasttick_testkit::{TempDir, require_harness};
+use fasttick_testkit::TempDir;
 use real_support::{Live, QUIET, options, wait_until};
 
 const LONG_RUNNING: &str = "long_running.xml";
@@ -66,7 +66,9 @@ fn read_batch(live: &mut Live, all: &mut Vec<RecordedTransition>) {
 
 #[test]
 fn recording_start_stop_and_transitions() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::start(options(harness, LONG_RUNNING));
 
     // The reply to "start" is the system time of the executor, in
@@ -165,7 +167,9 @@ fn recording_start_stop_and_transitions() {
 
 #[test]
 fn the_buffer_keeps_only_the_last_1000_transitions() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut options = options(harness, LONG_RUNNING);
     options.tick_ms = 1;
     let mut live = Live::start(options);
@@ -174,6 +178,8 @@ fn the_buffer_keeps_only_the_last_1000_transitions() {
         value["LongRunning"]["cycles"].as_u64().unwrap_or(0)
     };
 
+    // Notifications must arrive before the tree is stopped below.
+    live.sync_notifications(live.uid("check_keep_going"));
     live.client.start_recording().unwrap();
     let first = cycles(&mut live);
     // A cycle has more than 20 transitions, so 60 cycles have more than
@@ -181,16 +187,51 @@ fn the_buffer_keeps_only_the_last_1000_transitions() {
     wait_until("60 cycles", || {
         (cycles(&mut live) >= first + 60).then_some(())
     });
+    // Stop the tree before "say_cycle", so that the newest transitions are
+    // known: the last change is "check_keep_going" to SUCCESS.
+    let say = live.uid("say_cycle");
+    live.client.insert_hook(&Hook::breakpoint(say)).unwrap();
+    live.wait_hit(say);
+    let status = live.client.status().unwrap();
     let batch = live.client.transitions().unwrap();
     assert_eq!(batch.len(), RECORDING_BUFFER_CAPACITY);
     check_transitions(&live.tree, &batch);
-    // The publisher dropped the oldest transitions, not the newest ones.
-    assert!(batch[0].timestamp_us > 0);
-    let next = live.client.transitions().unwrap();
-    assert!(next.len() < RECORDING_BUFFER_CAPACITY);
-    if let (Some(last_old), Some(first_new)) = (batch.last(), next.first()) {
-        assert!(last_old.timestamp_us <= first_new.timestamp_us);
+
+    // The publisher dropped the oldest transitions and kept the newest
+    // ones (callback of the publisher pops the front of the queue). The
+    // batch therefore ends with the changes just before the stop: the last
+    // status of each node in the batch is its status now.
+    let check = Uid(live.uid("check_keep_going"));
+    let last = batch.last().unwrap();
+    assert_eq!((last.uid, last.status), (check, NodeStatus::Success));
+    let mut last_status: BTreeMap<Uid, NodeStatus> = BTreeMap::new();
+    for transition in &batch {
+        last_status.insert(transition.uid, transition.status);
     }
+    for (uid, recorded) in &last_status {
+        assert_eq!(
+            status.get(*uid).unwrap().current,
+            *recorded,
+            "node {uid}: the batch does not end with its newest change"
+        );
+    }
+    // The oldest changes are gone: the batch holds fewer cycles than the
+    // tree completed during the recording.
+    let count_cycle = Uid(live.uid("count_cycle"));
+    let cycles_in_batch = batch
+        .iter()
+        .filter(|transition| {
+            transition.uid == count_cycle && transition.status == NodeStatus::Success
+        })
+        .count() as u64;
+    let completed = cycles(&mut live) - first;
+    assert!(
+        cycles_in_batch < completed,
+        "{cycles_in_batch} cycles in the batch, {completed} cycles completed"
+    );
+    // GET_TRANSITIONS cleared the buffer, and the stopped tree adds nothing.
+    assert_eq!(live.client.transitions().unwrap(), []);
+    live.client.remove_all_hooks().unwrap();
     live.client.stop_recording().unwrap();
 }
 
@@ -216,7 +257,9 @@ fn node_states(snapshot: &StatusSnapshot) -> BTreeMap<Uid, NodeState> {
 
 #[test]
 fn recording_round_trip_through_a_btlog_file() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let temp = TempDir::new("fasttick-real-recording").unwrap();
     let executor_log = temp.join("executor.btlog");
     let live_log = temp.join("live.btlog");

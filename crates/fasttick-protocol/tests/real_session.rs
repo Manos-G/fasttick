@@ -21,7 +21,7 @@ use fasttick_protocol::session::{
     SessionHandle,
 };
 use fasttick_protocol::wire::TreeUuid;
-use fasttick_testkit::{Executor, require_harness};
+use fasttick_testkit::Executor;
 use real_support::{Live, ProbeCounters, WAIT, client, options, wait_until};
 
 /// The event receiver, with a log of the events seen so far.
@@ -147,7 +147,9 @@ fn send(handle: &SessionHandle, command: SessionCommand) {
 
 #[test]
 fn session_end_to_end() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::probe(harness);
     let probe = live.uid("probe");
 
@@ -318,7 +320,9 @@ fn session_end_to_end() {
 
 #[test]
 fn disconnect_removes_the_hooks_and_the_executor_keeps_running() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::probe(harness);
     let probe = live.uid("probe");
     let count_done = live.uid("count_done");
@@ -381,7 +385,9 @@ fn disconnect_removes_the_hooks_and_the_executor_keeps_running() {
 
 #[test]
 fn disabling_a_hit_breakpoint_through_the_session_releases_the_node() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let mut live = Live::probe(harness);
     let probe = live.uid("probe");
     let (handle, mut events) = connect(&live, fast_config());
@@ -432,7 +438,9 @@ fn disabling_a_hit_breakpoint_through_the_session_releases_the_node() {
 
 #[test]
 fn session_heartbeat_keeps_a_breakpoint_active() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let heartbeat = Duration::from_millis(300);
     let mut options = options(harness, "probe.xml");
     options.heartbeat_ms = Some(heartbeat.as_millis() as u64);
@@ -467,7 +475,9 @@ fn session_heartbeat_keeps_a_breakpoint_active() {
 
 #[test]
 fn executor_restart_is_detected_and_the_hooks_come_back() {
-    let harness = require_harness!();
+    let Some(harness) = real_support::harness() else {
+        return;
+    };
     let options_a = options(harness, "probe.xml");
     let port = options_a.port;
     let mut live = Live::start(options_a.clone());

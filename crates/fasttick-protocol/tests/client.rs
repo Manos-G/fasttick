@@ -530,6 +530,10 @@ fn notifications_connected_follows_the_publisher() {
     };
     // The handshake with the PUB socket completes in the background.
     wait_for(&mut client, true);
+    // A request after the handshake makes sure that the publisher has the
+    // subscription (see `Client::notifications_connected`). Without it, a
+    // notification sent at once can be lost (2 % of the tries under load).
+    client.status().unwrap();
     // The subscription is active: a notification arrives.
     fake.notify(3);
     let notification = client
@@ -549,6 +553,7 @@ fn notifications_connected_follows_the_publisher() {
     // The executor comes back. The new socket connects and subscribes.
     fake.start_again();
     wait_for(&mut client, true);
+    client.status().unwrap();
     fake.notify(5);
     let notification = client
         .poll_notification(Duration::from_secs(10))
