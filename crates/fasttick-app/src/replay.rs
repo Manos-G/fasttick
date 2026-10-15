@@ -444,6 +444,11 @@ impl ReplayModel {
         &self.rows
     }
 
+    /// The rows of the last call of [`ReplayModel::rows`] (no update).
+    pub fn current_rows(&self) -> &[u32] {
+        &self.rows
+    }
+
     /// The error of the time fields, if any.
     pub fn filter_error(&self) -> Option<&str> {
         self.filter_error.as_deref()

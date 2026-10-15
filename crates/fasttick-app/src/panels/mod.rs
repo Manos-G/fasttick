@@ -96,6 +96,38 @@ fn placeholder(ui: &mut Ui, tab: Tab) {
     });
 }
 
+/// A status with its badge (the same colour and shape as on the canvas)
+/// and its name. IDLE has a hollow circle.
+pub(crate) fn status_cell(
+    ui: &mut Ui,
+    status: fasttick_core::status::NodeStatus,
+    palette: &CanvasPalette,
+) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(11.0, 11.0), egui::Sense::hover());
+        if status == fasttick_core::status::NodeStatus::Idle {
+            ui.painter().circle_stroke(
+                rect.center(),
+                4.0,
+                egui::Stroke::new(1.2, ui.visuals().weak_text_color()),
+            );
+        } else {
+            let mut shapes = Vec::new();
+            crate::canvas::paint::status_badge(
+                &mut shapes,
+                rect.center(),
+                11.0,
+                status,
+                false,
+                palette,
+            );
+            ui.painter().extend(shapes);
+        }
+        ui.label(RichText::new(status.as_str()).small());
+    });
+}
+
 /// A short weak text at the top of an empty panel.
 pub(crate) fn empty(ui: &mut Ui, text: &str) {
     ui.add_space(8.0);
