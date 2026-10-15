@@ -1,11 +1,12 @@
 //! The category of a node type, for the colour band and the glyph.
 //!
-//! TODO(after the merge of `fasttick_core::models`): implement
-//! [`CategoryLookup`] for the model registry (`ModelRegistry::kind_of`), so
-//! that custom nodes of the `<TreeNodesModel>` sections and of the project
-//! model files get their declared category. Until then, the canvas knows
-//! only the built-in nodes of BT.CPP 4.9.0 and infers the category of other
-//! nodes from the number of children.
+//! - Edit views use the model registry of the project
+//!   ([`crate::canvas::ProjectCategories`]).
+//! - Live and replay views use the `<TreeNodesModel>` that comes with the
+//!   tree ([`TableCategories`], see `documents::runtime_categories`).
+//! - [`BuiltinCategories`] knows the built-in nodes of BT.CPP 4.9.0. For a
+//!   type without a model, the builder infers the category from the number
+//!   of children.
 
 use super::model::NodeCategory;
 

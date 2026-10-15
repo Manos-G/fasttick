@@ -455,6 +455,19 @@ fn conditions_show_on_cards_and_in_the_inspector() {
         assert_eq!(names, ["_onSuccess", "_post"]);
         assert!(node.card.conditions.len() == 2, "the card shows both");
     }
+    // Custom node types get the category of the <TreeNodesModel> in the
+    // log: CheckFlag is a condition.
+    {
+        let app = harness.state();
+        let tree = app.workspace().active().unwrap().canvas.tree();
+        let node = tree
+            .nodes()
+            .iter()
+            .find(|n| n.label == "check_blocked")
+            .unwrap();
+        assert_eq!(node.category, fasttick_app::canvas::NodeCategory::Condition);
+        assert!(!node.category_inferred);
+    }
     // The inspector lists the conditions of the selected node.
     let id = {
         let app = harness.state();

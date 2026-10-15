@@ -15,8 +15,8 @@ use fasttick_log::replay::ReplayState;
 
 use crate::app::Mode;
 use crate::canvas::{
-    BuiltinCategories, CanvasState, CanvasTree, EdgeStyle, Expansion, LayoutDirection, NodeSource,
-    RuntimeBuildOptions, SubtreeLinking,
+    CanvasState, CanvasTree, EdgeStyle, Expansion, LayoutDirection, NodeSource,
+    RuntimeBuildOptions, SubtreeLinking, TableCategories,
 };
 use crate::editor::EditorDoc;
 use crate::live::LiveController;
@@ -98,6 +98,10 @@ pub struct Document {
     /// The main tree: `main_tree_to_execute` of a tree file, else the
     /// first tree (the root instance of a runtime tree).
     pub main_instance: InstanceIndex,
+    /// The categories of the node types of a runtime tree, from the
+    /// `<TreeNodesModel>` that the executor or the log sends with the tree
+    /// (see [`runtime_categories`]).
+    pub categories: TableCategories,
 }
 
 impl Document {
@@ -227,10 +231,12 @@ impl Workspace {
     ) -> DocId {
         let id = DocId(self.next());
         let linking = SubtreeLinking::detect(&runtime);
+        let categories = runtime_categories(&runtime);
         self.docs.push(Document {
             id,
             kind,
             title: title.into(),
+            categories,
             runtime,
             linking,
             replay,
@@ -258,6 +264,7 @@ impl Workspace {
             replay: None,
             editor: Some(Box::new(editor)),
             main_instance: main,
+            categories: TableCategories::default(),
         });
         id
     }
@@ -340,6 +347,7 @@ impl Workspace {
             return;
         };
         document.linking = SubtreeLinking::detect(&runtime);
+        document.categories = runtime_categories(&runtime);
         document.runtime = runtime;
         let ids: Vec<ViewId> = self.views_of(doc).map(|v| v.id).collect();
         for id in ids {
@@ -700,7 +708,27 @@ pub fn build_tree(
         &document.runtime,
         build_options(document, root_instance),
         expansion,
-        &BuiltinCategories,
+        &document.categories,
+    )
+}
+
+/// The categories of the node types in the `<TreeNodesModel>` of a runtime
+/// tree. The publisher and the loggers of BT.CPP write the models of all
+/// registered nodes with the tree, so custom conditions, controls and
+/// decorators get their real category. Types without a model fall back to
+/// the built-in table (see [`TableCategories`]).
+pub fn runtime_categories(runtime: &RuntimeTree) -> TableCategories {
+    let Ok(parsed) = fasttick_core::models::parse_models_text(
+        &runtime.xml,
+        fasttick_core::models::ModelSource::Unattached,
+    ) else {
+        return TableCategories::default();
+    };
+    TableCategories::new(
+        parsed
+            .into_models()
+            .into_iter()
+            .map(|model| (model.id, crate::canvas::category_of_kind(model.kind))),
     )
 }
 
