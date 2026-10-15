@@ -36,6 +36,7 @@ use egui::{
 use fasttick_core::status::NodeStatus;
 
 use super::card::{self, CardGeometry, TextKind, TextMeasure};
+use super::connect::{self, ConnectEnd};
 use super::drop::{self, DropPlacement, DropSpot, NewNodePayload};
 use super::hit;
 use super::layout::{self, LayoutDirection, TreeLayout};
@@ -117,6 +118,15 @@ pub enum CanvasEvent {
         /// Where the node goes.
         spot: DropSpot,
     },
+    /// The user released a connection from the dot of a node, or clicked
+    /// the dot (editable canvas only). The owner asks for the type of the
+    /// new node. The spot is a [`DropSpot::Node`].
+    AddChild {
+        /// Where the node goes.
+        spot: DropSpot,
+        /// The screen position of the pointer, for the question.
+        at: Pos2,
+    },
 }
 
 /// The result of [`TreeCanvas::show`].
@@ -172,6 +182,10 @@ enum DragMode {
     /// position of the press.
     Move {
         start: Pos2,
+    },
+    /// A connection from the dot of a node (see [`connect`]).
+    Connect {
+        from: CanvasNodeId,
     },
 }
 
@@ -250,6 +264,11 @@ pub struct CanvasState {
     drop: Option<DropSpot>,
     drop_new: bool,
     edge_since: Option<f64>,
+    hovered_dot: Option<CanvasNodeId>,
+    connect_end: Option<ConnectEnd>,
+    text_bucket: Option<i32>,
+    last_zoom: f32,
+    zoom_changed_at: f64,
     galleys: GalleyCache,
     visible: Vec<u32>,
     shapes: Vec<Shape>,
@@ -266,6 +285,9 @@ const ANIMATION_SECONDS: f32 = 0.35;
 const SHORT_ANIMATION_SECONDS: f32 = 0.15;
 /// The delay before the hover tooltip, in seconds.
 const TOOLTIP_DELAY: f64 = 0.45;
+/// The time without a zoom change after which the text gets a new layout
+/// at the new size, in seconds.
+const TEXT_SETTLE_SECONDS: f64 = 0.12;
 
 impl CanvasState {
     /// A state for a tree. The first frame fits the tree to the view.
@@ -297,6 +319,11 @@ impl CanvasState {
             drop: None,
             drop_new: false,
             edge_since: None,
+            hovered_dot: None,
+            connect_end: None,
+            text_bucket: None,
+            last_zoom: 0.0,
+            zoom_changed_at: 0.0,
             galleys: GalleyCache::default(),
             visible: Vec::new(),
             shapes: Vec::new(),
@@ -445,11 +472,29 @@ impl CanvasState {
     }
 
     /// Multiplies the zoom by a factor, around the centre of the view.
+    /// The zoom does not go below [`CanvasState::min_zoom`].
     pub fn zoom_by(&mut self, factor: f32) {
         let center = (self.size * 0.5).to_pos2();
         let mut target = self.animation.map_or(self.viewport, |a| a.to);
+        let min = self.min_zoom();
+        let factor = factor.max(min / target.zoom);
         target.zoom_around(Pos2::ZERO, center, factor);
         self.animate_to(target, SHORT_ANIMATION_SECONDS);
+    }
+
+    /// The smallest zoom: the zoom at which the whole tree fits in the
+    /// view (at most 100 %). The user cannot zoom out further.
+    pub fn min_zoom(&self) -> f32 {
+        if self.size.x <= 0.0 || self.size.y <= 0.0 || self.layout.rects.is_empty() {
+            return viewport::MIN_ZOOM;
+        }
+        let fit = Viewport::fit(
+            self.layout.bounds,
+            self.size,
+            viewport::FIT_MARGIN,
+            viewport::FIT_MAX_ZOOM,
+        );
+        fit.zoom.clamp(viewport::MIN_ZOOM, viewport::FIT_MAX_ZOOM)
     }
 
     /// Zooms in one step.
@@ -854,7 +899,7 @@ impl<'a> TreeCanvas<'a> {
             minimap(state, ui, rect, palette, id);
         }
         describe_for_accesskit(state, ui, rect, id);
-        show_tooltip(state, ui, &response, id, now);
+        show_tooltip(state, ui, &response, id, now, palette);
 
         // Context menu, for the node under the pointer at the right-click.
         let target = state.context_target;
@@ -907,7 +952,14 @@ fn handle_input(
         if (zoom_delta - 1.0).abs() > 1e-4 {
             let anchor = pointer.unwrap_or(rect.center());
             state.animation = None;
-            state.viewport.zoom_around(origin, anchor, zoom_delta);
+            // Not smaller than the zoom at which the whole tree fits.
+            let min = state.min_zoom();
+            let factor = if zoom_delta < 1.0 {
+                zoom_delta.max(min / state.viewport.zoom).min(1.0)
+            } else {
+                zoom_delta
+            };
+            state.viewport.zoom_around(origin, anchor, factor);
         }
         if scroll != Vec2::ZERO {
             state.animation = None;
@@ -926,19 +978,44 @@ fn handle_input(
         state.hovered = hovered;
         state.hover_start = ui.input(|i| i.time);
     }
+    let dot_under = |state: &CanvasState, p: Option<Pos2>| {
+        let zoom = state.viewport.zoom;
+        if !state.editable || Detail::for_zoom(zoom) == Detail::Boxes {
+            return None;
+        }
+        connect::dot_at(
+            &state.tree,
+            &state.layout.rects,
+            state.direction,
+            p?,
+            connect::grab_px(zoom) / zoom,
+        )
+    };
+    state.hovered_dot = if response.hovered() && state.drag == DragMode::None {
+        dot_under(state, world_pointer)
+    } else {
+        None
+    };
+    if state.hovered_dot.is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    }
 
     // Drags.
     if response.drag_started() {
         let press = ui.input(|i| i.pointer.press_origin()).or(pointer);
         let press_world = press.map(|p| state.viewport.to_world(origin, p));
         let on_node = press_world.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
+        let on_dot = dot_under(state, press_world)
+            .filter(|_| !space && response.dragged_by(PointerButton::Primary));
         let moving = match on_node {
             Some(id) if state.editable && !space && response.dragged_by(PointerButton::Primary) => {
                 drop::moving_nodes(&state.tree, id)
             }
             _ => Vec::new(),
         };
-        state.drag = if let (Some(id), false) = (on_node, moving.is_empty()) {
+        state.drag = if let Some(from) = on_dot {
+            DragMode::Connect { from }
+        } else if let (Some(id), false) = (on_node, moving.is_empty()) {
             // Grabbing a node that is not selected selects it.
             if !state.tree.is_selected(id) && click_select(state, Some(id), SelectMode::Replace) {
                 events.push(CanvasEvent::SelectionChanged);
@@ -961,11 +1038,14 @@ fn handle_input(
         };
         state.animation = None;
     }
-    if matches!(state.drag, DragMode::Move { .. }) && ui.input(|i| i.key_pressed(Key::Escape)) {
-        // Escape cancels a move.
+    if matches!(state.drag, DragMode::Move { .. } | DragMode::Connect { .. })
+        && ui.input(|i| i.key_pressed(Key::Escape))
+    {
+        // Escape cancels a move or a connection.
         state.drag = DragMode::None;
         state.moving.clear();
         state.drop = None;
+        state.connect_end = None;
         state.edge_since = None;
         state.band_end = None;
     }
@@ -992,6 +1072,15 @@ fn handle_input(
                 edge_pan(state, ui, rect, p);
             }
         }
+        DragMode::Connect { from } if response.dragged() => {
+            state.band_end = world_pointer;
+            state.connect_end = world_pointer.map(|p| {
+                connect::connect_end(&state.tree, &state.layout.rects, state.direction, from, p)
+            });
+            if let Some(p) = pointer {
+                edge_pan(state, ui, rect, p);
+            }
+        }
         _ => {}
     }
     if response.drag_stopped() {
@@ -1005,8 +1094,25 @@ fn handle_input(
                 spot,
             });
         }
+        if let DragMode::Connect { from } = state.drag {
+            match state.connect_end.take() {
+                Some(ConnectEnd::Connect(child)) => events.push(CanvasEvent::MoveNodes {
+                    nodes: vec![child],
+                    spot: DropSpot::Node {
+                        target: from,
+                        placement: DropPlacement::Inside,
+                    },
+                }),
+                Some(ConnectEnd::Add(spot)) => events.push(CanvasEvent::AddChild {
+                    spot,
+                    at: pointer.unwrap_or(rect.center()),
+                }),
+                None => {}
+            }
+        }
         state.moving.clear();
         state.drop = None;
+        state.connect_end = None;
         state.edge_since = None;
         if let DragMode::Band { start, additive } = state.drag
             && let Some(end) = state.band_end.or(world_pointer)
@@ -1037,7 +1143,16 @@ fn handle_input(
     if clicked || response.secondary_clicked() {
         response.request_focus();
     }
-    if clicked {
+    if clicked && let Some(from) = dot_under(state, world_pointer) {
+        // A click on a dot asks for a new last child.
+        events.push(CanvasEvent::AddChild {
+            spot: DropSpot::Node {
+                target: from,
+                placement: DropPlacement::Inside,
+            },
+            at: pointer.unwrap_or(rect.center()),
+        });
+    } else if clicked {
         let target = world_pointer.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
         if click_select(state, target, select_mode(modifiers)) {
             events.push(CanvasEvent::SelectionChanged);
@@ -1336,6 +1451,62 @@ fn context_menu(
 }
 
 /// Rounds a point to the pixel grid (crisp text).
+/// The size of the card text of a frame.
+struct TextScale {
+    /// The zoom of the text layouts.
+    zoom: f32,
+    /// The zoom of the view divided by `zoom`: 1 at rest, other values
+    /// during a zoom.
+    scale: f32,
+    /// The size of the font texture, for the texture coordinates of a
+    /// scaled text.
+    font_texture: [usize; 2],
+}
+
+/// Draws a text layout at `pos`. At rest the text is on the pixel grid.
+/// During a zoom it is a mesh, scaled around `pos` by [`TextScale::scale`],
+/// so that it grows and shrinks smoothly with its card.
+fn push_text(
+    shapes: &mut Vec<Shape>,
+    galley: Arc<Galley>,
+    pos: Pos2,
+    text: &TextScale,
+    color: Color32,
+    ppp: f32,
+) {
+    // The text buckets are 1.5 % apart: at rest the scale is that close
+    // to 1.
+    if (text.scale - 1.0).abs() < 0.02 {
+        shapes.push(Shape::galley(snap(pos, ppp), galley, color));
+        return;
+    }
+    let uv = vec2(
+        1.0 / text.font_texture[0].max(1) as f32,
+        1.0 / text.font_texture[1].max(1) as f32,
+    );
+    let mut mesh = Mesh::default();
+    for row in &galley.rows {
+        let row_mesh = &row.visuals.mesh;
+        if row_mesh.is_empty() {
+            continue;
+        }
+        let offset = mesh.vertices.len() as u32;
+        mesh.indices
+            .extend(row_mesh.indices.iter().map(|index| index + offset));
+        mesh.vertices
+            .extend(row_mesh.vertices.iter().map(|vertex| egui::epaint::Vertex {
+                pos: pos + (row.pos.to_vec2() + vertex.pos.to_vec2()) * text.scale,
+                uv: (vertex.uv.to_vec2() * uv).to_pos2(),
+                color: if vertex.color == Color32::PLACEHOLDER {
+                    color
+                } else {
+                    vertex.color
+                },
+            }));
+    }
+    shapes.push(Shape::mesh(mesh));
+}
+
 fn snap(p: Pos2, ppp: f32) -> Pos2 {
     pos2((p.x * ppp).round() / ppp, (p.y * ppp).round() / ppp)
 }
@@ -1347,6 +1518,50 @@ fn radius(value: f32) -> CornerRadius {
 /// True if a port value is a blackboard reference (`{key}`).
 fn is_reference(value: &str) -> bool {
     value.starts_with('{') && value.ends_with('}')
+}
+
+/// The box around the conditions of a card: a solid outline and a
+/// background in the condition colour.
+fn condition_box(
+    shapes: &mut Vec<Shape>,
+    rect: Rect,
+    palette: &CanvasPalette,
+    alpha: f32,
+    zoom: f32,
+) {
+    let fill = mix(
+        palette.card,
+        palette.condition,
+        if palette.dark { 0.17 } else { 0.10 },
+    );
+    shapes.push(Shape::rect_filled(
+        rect,
+        radius(4.0 * zoom),
+        fill.gamma_multiply(alpha),
+    ));
+    shapes.push(Shape::rect_stroke(
+        rect,
+        radius(4.0 * zoom),
+        Stroke::new(
+            (1.4 * zoom).clamp(1.0, 2.5),
+            palette.condition.gamma_multiply(alpha),
+        ),
+        StrokeKind::Inside,
+    ));
+}
+
+/// A frame in the style of the condition box of the cards, for the
+/// conditions in tooltips and panels.
+pub fn condition_frame(palette: &CanvasPalette) -> egui::Frame {
+    egui::Frame::new()
+        .fill(mix(
+            palette.card,
+            palette.condition,
+            if palette.dark { 0.17 } else { 0.10 },
+        ))
+        .stroke(Stroke::new(1.4, palette.condition))
+        .corner_radius(CornerRadius::same(5))
+        .inner_margin(egui::Margin::symmetric(8, 6))
 }
 
 /// The colours of a port or condition line.
@@ -1470,9 +1685,36 @@ fn paint_canvas(
 
     paint_edges(state, &mut shapes, origin, view, palette, detail);
 
-    // Bucketed text size.
-    let bucket = viewport::zoom_bucket(zoom);
-    let text_zoom = viewport::bucket_zoom(bucket);
+    // The text size. During a zoom the text keeps its layout and scales
+    // with the cards (see [`push_text`]), so that it does not jump from one
+    // size to the next; when the zoom stops, it gets a new layout at the
+    // new size.
+    let now = ui.input(|i| i.time);
+    if zoom != state.last_zoom {
+        state.last_zoom = zoom;
+        state.zoom_changed_at = now;
+    }
+    let settled = now - state.zoom_changed_at >= TEXT_SETTLE_SECONDS;
+    if !settled {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(TEXT_SETTLE_SECONDS));
+    }
+    let wanted = viewport::zoom_bucket(zoom);
+    let bucket = match state.text_bucket {
+        // Far from the zoom of the layout, the scaled text would be blurred.
+        Some(bucket)
+            if !settled && (0.7..=1.4).contains(&(zoom / viewport::bucket_zoom(bucket))) =>
+        {
+            bucket
+        }
+        _ => wanted,
+    };
+    state.text_bucket = Some(bucket);
+    let text = TextScale {
+        zoom: viewport::bucket_zoom(bucket),
+        scale: zoom / viewport::bucket_zoom(bucket),
+        font_texture: ui.ctx().fonts(|f| f.font_image_size()),
+    };
     state.galleys.prepare(bucket, palette_key(palette));
 
     let visible = std::mem::take(&mut state.visible);
@@ -1485,14 +1727,18 @@ fn paint_canvas(
             index,
             palette,
             detail,
-            text_zoom,
+            &text,
             ppp,
             has_focus,
         );
     }
+    if state.editable && detail != Detail::Boxes {
+        paint_dots(state, &mut shapes, origin, &visible, palette);
+    }
     state.visible = visible;
 
     paint_drop(state, ui, &mut shapes, origin, palette);
+    paint_connection(state, ui, &mut shapes, origin, palette);
 
     // Rubber band.
     if let (DragMode::Band { start, .. }, Some(end)) = (state.drag, state.band_end) {
@@ -1576,30 +1822,7 @@ fn paint_drop(
         DropSpot::Node { target, placement } => {
             if let Some(r) = state.layout.rect(target) {
                 let screen = state.viewport.rect_to_screen(origin, r);
-                let gap = 6.0 * zoom.max(0.5);
-                let width = 4.0;
-                let bar = match (placement, state.direction) {
-                    (DropPlacement::Inside, _) => None,
-                    (DropPlacement::Before, LayoutDirection::TopDown) => Some(Rect::from_min_max(
-                        pos2(screen.min.x - gap - width, screen.min.y),
-                        pos2(screen.min.x - gap, screen.max.y),
-                    )),
-                    (DropPlacement::After, LayoutDirection::TopDown) => Some(Rect::from_min_max(
-                        pos2(screen.max.x + gap, screen.min.y),
-                        pos2(screen.max.x + gap + width, screen.max.y),
-                    )),
-                    (DropPlacement::Before, LayoutDirection::LeftRight) => {
-                        Some(Rect::from_min_max(
-                            pos2(screen.min.x, screen.min.y - gap - width),
-                            pos2(screen.max.x, screen.min.y - gap),
-                        ))
-                    }
-                    (DropPlacement::After, LayoutDirection::LeftRight) => Some(Rect::from_min_max(
-                        pos2(screen.min.x, screen.max.y + gap),
-                        pos2(screen.max.x, screen.max.y + gap + width),
-                    )),
-                };
-                match bar {
+                match drop_bar(screen, placement, state.direction, zoom) {
                     Some(bar) => {
                         shapes.push(Shape::rect_filled(
                             bar,
@@ -1629,13 +1852,192 @@ fn paint_drop(
     };
     if let Some(end) = state.band_end {
         let at = state.viewport.to_screen(origin, end) + vec2(14.0, 14.0);
-        let galley =
-            ui.painter()
-                .layout_no_wrap(hint, FontId::proportional(12.0), palette.on_color);
-        let frame = Rect::from_min_size(at, galley.size()).expand2(vec2(6.0, 3.0));
-        shapes.push(Shape::rect_filled(frame, CornerRadius::same(4), color));
-        shapes.push(Shape::galley(at, galley, palette.on_color));
+        hint_bubble(shapes, ui, at, hint, color, palette);
     }
+}
+
+/// The bar that marks a place before or after a card (screen rectangle),
+/// or `None` for a place inside the card.
+fn drop_bar(
+    screen: Rect,
+    placement: DropPlacement,
+    direction: LayoutDirection,
+    zoom: f32,
+) -> Option<Rect> {
+    let gap = 6.0 * zoom.max(0.5);
+    let width = 4.0;
+    match (placement, direction) {
+        (DropPlacement::Inside, _) => None,
+        (DropPlacement::Before, LayoutDirection::TopDown) => Some(Rect::from_min_max(
+            pos2(screen.min.x - gap - width, screen.min.y),
+            pos2(screen.min.x - gap, screen.max.y),
+        )),
+        (DropPlacement::After, LayoutDirection::TopDown) => Some(Rect::from_min_max(
+            pos2(screen.max.x + gap, screen.min.y),
+            pos2(screen.max.x + gap + width, screen.max.y),
+        )),
+        (DropPlacement::Before, LayoutDirection::LeftRight) => Some(Rect::from_min_max(
+            pos2(screen.min.x, screen.min.y - gap - width),
+            pos2(screen.max.x, screen.min.y - gap),
+        )),
+        (DropPlacement::After, LayoutDirection::LeftRight) => Some(Rect::from_min_max(
+            pos2(screen.min.x, screen.max.y + gap),
+            pos2(screen.max.x, screen.max.y + gap + width),
+        )),
+    }
+}
+
+/// A short text in a coloured bubble next to the pointer.
+fn hint_bubble(
+    shapes: &mut Vec<Shape>,
+    ui: &Ui,
+    at: Pos2,
+    text: String,
+    color: Color32,
+    palette: &CanvasPalette,
+) {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text, FontId::proportional(12.0), palette.on_color);
+    let frame = Rect::from_min_size(at, galley.size()).expand2(vec2(6.0, 3.0));
+    shapes.push(Shape::rect_filled(frame, CornerRadius::same(4), color));
+    shapes.push(Shape::galley(at, galley, palette.on_color));
+}
+
+/// The dots of the visible nodes that can take a child (see [`connect`]).
+fn paint_dots(
+    state: &CanvasState,
+    shapes: &mut Vec<Shape>,
+    origin: Pos2,
+    visible: &[u32],
+    palette: &CanvasPalette,
+) {
+    let zoom = state.viewport.zoom;
+    let active = match state.drag {
+        DragMode::Connect { from } => Some(from),
+        _ => state.hovered_dot,
+    };
+    for &index in visible {
+        let id = CanvasNodeId(index);
+        let (Some(node), Some(rect)) = (state.tree.get(id), state.layout.rect(id)) else {
+            continue;
+        };
+        if !connect::has_dot(node) {
+            continue;
+        }
+        let center = state
+            .viewport
+            .to_screen(origin, connect::dot_center(rect, state.direction));
+        let hot = active == Some(id);
+        let r = connect::dot_radius_px(zoom) * if hot { 1.3 } else { 1.0 };
+        let (fill, stroke, mark) = if hot {
+            (palette.accent, palette.accent, palette.on_color)
+        } else {
+            (palette.card, palette.edge, palette.edge)
+        };
+        shapes.push(Shape::circle_filled(center, r, fill));
+        shapes.push(Shape::circle_stroke(center, r, Stroke::new(1.5, stroke)));
+        // A plus sign: "add a child here".
+        let arm = r * 0.5;
+        let plus = Stroke::new((r * 0.22).max(1.2), mark);
+        shapes.push(Shape::line_segment(
+            [center - vec2(arm, 0.0), center + vec2(arm, 0.0)],
+            plus,
+        ));
+        shapes.push(Shape::line_segment(
+            [center - vec2(0.0, arm), center + vec2(0.0, arm)],
+            plus,
+        ));
+    }
+}
+
+/// The connection from a dot to the pointer during a drag, the place of
+/// the new node and a hint.
+fn paint_connection(
+    state: &CanvasState,
+    ui: &Ui,
+    shapes: &mut Vec<Shape>,
+    origin: Pos2,
+    palette: &CanvasPalette,
+) {
+    let (DragMode::Connect { from }, Some(end)) = (state.drag, state.band_end) else {
+        return;
+    };
+    let Some(rect) = state.layout.rect(from) else {
+        return;
+    };
+    let zoom = state.viewport.zoom;
+    let start = state
+        .viewport
+        .to_screen(origin, connect::dot_center(rect, state.direction));
+    let end_screen = state.viewport.to_screen(origin, end);
+    // A curve that leaves the dot along the child axis.
+    let bend = match state.direction {
+        LayoutDirection::TopDown => vec2(0.0, ((end_screen.y - start.y).abs() * 0.5).max(30.0)),
+        LayoutDirection::LeftRight => vec2(((end_screen.x - start.x).abs() * 0.5).max(30.0), 0.0),
+    };
+    shapes.push(Shape::CubicBezier(
+        egui::epaint::CubicBezierShape::from_points_stroke(
+            [start, start + bend, end_screen - bend, end_screen],
+            false,
+            Color32::TRANSPARENT,
+            Stroke::new(2.0, palette.accent),
+        ),
+    ));
+    shapes.push(Shape::circle_filled(end_screen, 4.0, palette.accent));
+    let label = |id: CanvasNodeId| {
+        state
+            .tree
+            .get(id)
+            .map(|n| n.label.clone())
+            .unwrap_or_default()
+    };
+    let parent = label(from);
+    let hint = match state.connect_end {
+        Some(ConnectEnd::Connect(child)) => {
+            if let Some(r) = state.layout.rect(child) {
+                let screen = state.viewport.rect_to_screen(origin, r);
+                shapes.push(Shape::rect_stroke(
+                    screen.expand(2.0),
+                    radius(6.0 * zoom),
+                    Stroke::new(2.5, palette.accent),
+                    StrokeKind::Outside,
+                ));
+            }
+            format!("Connect {} to {parent}", label(child))
+        }
+        Some(ConnectEnd::Add(DropSpot::Node { target, placement })) => {
+            if let Some(r) = state.layout.rect(target)
+                && let Some(bar) = drop_bar(
+                    state.viewport.rect_to_screen(origin, r),
+                    placement,
+                    state.direction,
+                    zoom,
+                )
+            {
+                shapes.push(Shape::rect_filled(
+                    bar,
+                    CornerRadius::same(2),
+                    palette.accent,
+                ));
+            }
+            match placement {
+                DropPlacement::Before => {
+                    format!("Add a child of {parent} before {}", label(target))
+                }
+                _ => format!("Add a child of {parent}"),
+            }
+        }
+        _ => format!("Add a child of {parent}"),
+    };
+    hint_bubble(
+        shapes,
+        ui,
+        end_screen + vec2(14.0, 14.0),
+        hint,
+        palette.accent,
+        palette,
+    );
 }
 
 /// Dots on a world grid. The spacing grows when the zoom is small, so that
@@ -1757,10 +2159,11 @@ fn paint_card(
     index: u32,
     palette: &CanvasPalette,
     detail: Detail,
-    text_zoom: f32,
+    text: &TextScale,
     ppp: f32,
     has_focus: bool,
 ) {
+    let text_zoom = text.zoom;
     let id = CanvasNodeId(index);
     let zoom = state.viewport.zoom;
     let Some(world) = state.layout.rect(id) else {
@@ -1975,8 +2378,8 @@ fn paint_card(
             local(geometry.label_pos(false))
         };
         // Centre the text on its line.
-        let pos = pos + vec2(0.0, (label_line - label.size().y) * 0.5);
-        shapes.push(Shape::galley(snap(pos, ppp), label, text_color));
+        let pos = pos + vec2(0.0, (label_line - label.size().y * text.scale) * 0.5);
+        push_text(shapes, label, pos, text, text_color, ppp);
     }
     if detail == Detail::Full {
         if let Some(type_line) = &node.card.type_line {
@@ -1990,8 +2393,8 @@ fn paint_card(
                 ))
             });
             let mut pos = local(geometry.type_pos());
-            pos.y += (card::TYPE_LINE * zoom - galley.size().y) * 0.5;
-            shapes.push(Shape::galley(snap(pos, ppp), galley, weak));
+            pos.y += (card::TYPE_LINE * zoom - galley.size().y * text.scale) * 0.5;
+            push_text(shapes, galley, pos, text, weak, ppp);
         }
         let value_color = palette.text_value.gamma_multiply(alpha);
         if geometry.port_lines > 0 {
@@ -2014,19 +2417,21 @@ fn paint_card(
                         entry_line_job(painter, &state.fonts, entry, part, colors, text_zoom)
                     });
                     let mut pos = local(geometry.port_pos(line));
-                    pos.y += (card::PORT_LINE * zoom - galley.size().y) * 0.5;
-                    shapes.push(Shape::galley(snap(pos, ppp), galley, value_color));
+                    pos.y += (card::PORT_LINE * zoom - galley.size().y * text.scale) * 0.5;
+                    push_text(shapes, galley, pos, text, value_color, ppp);
                     line += 1;
                 }
             }
         }
         if geometry.condition_lines > 0 {
-            let y = local(pos2(0.0, geometry.condition_separator_y())).y;
-            shapes.push(Shape::hline(
-                (screen.min.x + card::BAND * zoom)..=(screen.max.x - 1.0),
-                y,
-                Stroke::new(1.0, palette.separator.gamma_multiply(alpha)),
-            ));
+            let boxed = geometry.condition_box(node.card.size.x);
+            condition_box(
+                shapes,
+                Rect::from_min_max(local(boxed.min), local(boxed.max)),
+                palette,
+                alpha,
+                zoom,
+            );
             let colors = EntryColors {
                 name: palette.condition.gamma_multiply(alpha),
                 value: value_color,
@@ -2040,8 +2445,8 @@ fn paint_card(
                         entry_line_job(painter, &state.fonts, entry, part, colors, text_zoom)
                     });
                     let mut pos = local(geometry.condition_pos(line));
-                    pos.y += (card::PORT_LINE * zoom - galley.size().y) * 0.5;
-                    shapes.push(Shape::galley(snap(pos, ppp), galley, value_color));
+                    pos.y += (card::PORT_LINE * zoom - galley.size().y * text.scale) * 0.5;
+                    push_text(shapes, galley, pos, text, value_color, ppp);
                     line += 1;
                 }
             }
@@ -2070,13 +2475,15 @@ fn paint_card(
     }
     // Small cards: coloured bars stand for the condition lines.
     if detail == Detail::Labels && geometry.condition_lines > 0 {
-        let y = local(pos2(0.0, geometry.condition_separator_y())).y;
-        shapes.push(Shape::hline(
-            (screen.min.x + card::BAND * zoom)..=(screen.max.x - 1.0),
-            y,
-            Stroke::new(1.0, palette.separator.gamma_multiply(alpha)),
-        ));
-        let bar_color = palette.condition.gamma_multiply(alpha * 0.45);
+        let boxed = geometry.condition_box(node.card.size.x);
+        condition_box(
+            shapes,
+            Rect::from_min_max(local(boxed.min), local(boxed.max)),
+            palette,
+            alpha,
+            zoom,
+        );
+        let bar_color = palette.condition.gamma_multiply(alpha * 0.55);
         let max_bar = (node.card.size.x - card::BAND - 2.0 * card::PAD_X) * zoom;
         for (line, (indent, chars)) in entry_bars(&node.card.conditions).enumerate() {
             let width = (chars as f32 * 6.0 * zoom).min(max_bar - indent * zoom);
@@ -2373,7 +2780,14 @@ fn describe_for_accesskit(state: &CanvasState, ui: &Ui, rect: Rect, canvas: Id) 
     }
 }
 
-fn show_tooltip(state: &CanvasState, ui: &Ui, response: &Response, canvas: Id, now: f64) {
+fn show_tooltip(
+    state: &CanvasState,
+    ui: &Ui,
+    response: &Response,
+    canvas: Id,
+    now: f64,
+    palette: &CanvasPalette,
+) {
     let Some(id) = state.hovered else {
         return;
     };
@@ -2462,19 +2876,22 @@ fn show_tooltip(state: &CanvasState, ui: &Ui, response: &Response, canvas: Id, n
                 });
         }
         if !node.conditions.is_empty() {
-            ui.separator();
-            egui::Grid::new(canvas.with("tooltip_conditions"))
-                .num_columns(2)
-                .spacing([12.0, 2.0])
-                .show(ui, |ui| {
-                    for line in &node.conditions {
-                        ui.label(egui::RichText::new(&line.name).weak());
-                        ui.add(
-                            egui::Label::new(egui::RichText::new(&line.value).monospace()).wrap(),
-                        );
-                        ui.end_row();
-                    }
-                });
+            ui.add_space(4.0);
+            condition_frame(palette).show(ui, |ui| {
+                egui::Grid::new(canvas.with("tooltip_conditions"))
+                    .num_columns(2)
+                    .spacing([12.0, 2.0])
+                    .show(ui, |ui| {
+                        for line in &node.conditions {
+                            ui.label(egui::RichText::new(&line.name).color(palette.condition));
+                            ui.add(
+                                egui::Label::new(egui::RichText::new(&line.value).monospace())
+                                    .wrap(),
+                            );
+                            ui.end_row();
+                        }
+                    });
+            });
         }
         if node.subtree.as_ref().is_some_and(|s| s.can_expand) {
             ui.label(
@@ -2545,6 +2962,36 @@ mod tests {
     }
 
     #[test]
+    fn zoom_out_stops_at_the_tree_size() {
+        let mut state = CanvasState::new(chain_tree(200));
+        state.prepare_with(&mut FixedMeasure(7.0));
+        let size = vec2(800.0, 600.0);
+        state.size = size;
+        let min = state.min_zoom();
+        let fit = Viewport::fit(
+            state.layout().bounds,
+            size,
+            viewport::FIT_MARGIN,
+            viewport::FIT_MAX_ZOOM,
+        );
+        assert!((min - fit.zoom).abs() < 1e-6 && min < 1.0);
+        let mut now = 0.0;
+        for _ in 0..40 {
+            state.zoom_by(0.5);
+            for _ in 0..2 {
+                now += 10.0;
+                state.step_animation(now);
+            }
+        }
+        assert!((state.viewport().zoom - min).abs() < 1e-4);
+        // A small tree: down to 100 %.
+        let mut small = CanvasState::new(chain_tree(2));
+        small.prepare_with(&mut FixedMeasure(7.0));
+        small.size = size;
+        assert_eq!(small.min_zoom(), viewport::FIT_MAX_ZOOM);
+    }
+
+    #[test]
     fn initial_view_keeps_cards_readable() {
         let size = vec2(800.0, 600.0);
         // A small tree fits.
@@ -2580,7 +3027,8 @@ mod tests {
 
     #[test]
     fn zoom_steps_animate_to_target() {
-        let mut state = CanvasState::new(chain_tree(3));
+        // A wide tree, so that it can zoom out below 100 %.
+        let mut state = CanvasState::new(chain_tree(60));
         state.prepare_with(&mut FixedMeasure(7.0));
         state.size = vec2(400.0, 300.0);
         state.set_viewport(Viewport::new(Vec2::ZERO, 1.0));

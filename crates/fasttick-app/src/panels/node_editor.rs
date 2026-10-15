@@ -16,18 +16,21 @@ use fasttick_core::validate::{Problem, Severity};
 use fasttick_core::xml::NodeId;
 
 use crate::actions::AppAction;
+use crate::canvas::condition_frame;
 use crate::documents::ViewId;
 use crate::edit_ops::EditOp;
 use crate::editor::EditorDoc;
+use crate::theme::CanvasPalette;
 
-/// Draws the editor of node `node` of the main file of `editor`.
+/// Draws the editor of an element (file and node) of `editor`. `selected`
+/// is the number of selected nodes.
 pub fn show(
     ui: &mut Ui,
     view: ViewId,
     editor: &EditorDoc,
-    file_id: FileId,
-    node: NodeId,
+    (file_id, node): (FileId, NodeId),
     selected: usize,
+    palette: &CanvasPalette,
     actions: &mut Vec<AppAction>,
 ) {
     let Some(file) = editor.project().file(file_id) else {
@@ -173,58 +176,65 @@ pub fn show(
 
     // Conditions.
     ui.add_space(8.0);
-    let any_condition =
-        element.pre_conditions().next().is_some() || element.post_conditions().next().is_some();
-    egui::CollapsingHeader::new(RichText::new("Pre- and post-conditions").strong())
+    let condition_count = element.pre_conditions().count() + element.post_conditions().count();
+    let heading = match condition_count {
+        0 => "Pre- and post-conditions".to_owned(),
+        1 => "Pre- and post-conditions (1 set)".to_owned(),
+        n => format!("Pre- and post-conditions ({n} set)"),
+    };
+    egui::CollapsingHeader::new(RichText::new(heading).strong().color(palette.condition))
         .id_salt(("conditions", node))
-        .default_open(any_condition)
+        .default_open(condition_count > 0)
         .show(ui, |ui| {
-            let pre = PreCondition::ALL
-                .into_iter()
-                .map(|c| (Condition::Pre(c), element.pre_condition(c), pre_help(c)));
-            let post = PostCondition::ALL
-                .into_iter()
-                .map(|c| (Condition::Post(c), element.post_condition(c), post_help(c)));
-            let label_width = CONDITION_LABEL_WIDTH;
-            for (heading, rows) in [
-                (
-                    "Pre-conditions: checked before each tick",
-                    pre.collect::<Vec<_>>(),
-                ),
-                (
-                    "Post-conditions: run after the node has a result",
-                    post.collect::<Vec<_>>(),
-                ),
-            ] {
-                ui.label(RichText::new(heading).small().weak());
-                for (condition, script, help) in rows {
-                    let name = condition.attribute_name();
-                    ui.horizontal_top(|ui| {
-                        let label = ui
-                            .add_sized(
-                                [label_width, FIELD_ROW_HEIGHT],
-                                egui::Label::new(RichText::new(name).monospace()),
-                            )
-                            .on_hover_text(help)
-                            .id;
-                        if let Some(text) = value_field(
-                            ui,
-                            label,
-                            ("cond", node, name),
-                            script.unwrap_or(""),
-                            "script",
-                        ) {
-                            edit(EditOp::SetCondition {
-                                node,
-                                condition,
-                                script: (!text.is_empty()).then_some(text),
-                            });
-                        }
-                    });
-                    inline_problems(ui, &node_problems, name);
+            condition_frame(palette).show(ui, |ui| {
+                let pre = PreCondition::ALL
+                    .into_iter()
+                    .map(|c| (Condition::Pre(c), element.pre_condition(c), pre_help(c)));
+                let post = PostCondition::ALL
+                    .into_iter()
+                    .map(|c| (Condition::Post(c), element.post_condition(c), post_help(c)));
+                let label_width = CONDITION_LABEL_WIDTH;
+                for (heading, rows) in [
+                    (
+                        "Pre-conditions: checked before each tick",
+                        pre.collect::<Vec<_>>(),
+                    ),
+                    (
+                        "Post-conditions: run after the node has a result",
+                        post.collect::<Vec<_>>(),
+                    ),
+                ] {
+                    ui.label(RichText::new(heading).small().weak());
+                    for (condition, script, help) in rows {
+                        let name = condition.attribute_name();
+                        ui.horizontal_top(|ui| {
+                            let mut text = RichText::new(name).monospace().color(palette.condition);
+                            if script.is_some() {
+                                text = text.strong();
+                            }
+                            let label = ui
+                                .add_sized([label_width, FIELD_ROW_HEIGHT], egui::Label::new(text))
+                                .on_hover_text(help)
+                                .id;
+                            if let Some(text) = value_field(
+                                ui,
+                                label,
+                                ("cond", node, name),
+                                script.unwrap_or(""),
+                                "script",
+                            ) {
+                                edit(EditOp::SetCondition {
+                                    node,
+                                    condition,
+                                    script: (!text.is_empty()).then_some(text),
+                                });
+                            }
+                        });
+                        inline_problems(ui, &node_problems, name);
+                    }
+                    ui.add_space(4.0);
                 }
-                ui.add_space(4.0);
-            }
+            })
         });
 
     // The other problems of the node (the problems of a field show below

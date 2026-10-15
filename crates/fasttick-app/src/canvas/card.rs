@@ -8,8 +8,9 @@
 //!  │d│ port: value                      │   all ports
 //!  │ │ code: a := 1; b := 2; c := 3;    │
 //!  │ │       d := 4                     │   a long value wraps
-//!  │ ├──────────────────────────────────┤
-//!  │ │ _skipIf: script                  │   pre- and post-conditions
+//!  │ │╭────────────────────────────────╮│
+//!  │ ││ _skipIf: script                ││   pre- and post-conditions,
+//!  │ │╰────────────────────────────────╯│   in a box with an outline
 //!  └─┴──────────────────────────────────┘
 //! ```
 //!
@@ -22,7 +23,7 @@ use egui::{Pos2, Rect, Vec2, pos2, vec2};
 use super::model::{CanvasNode, CanvasTree, CardEntry, CardText, PortLine};
 
 /// Width of the category band.
-pub const BAND: f32 = 5.0;
+pub const BAND: f32 = 7.5;
 /// Horizontal padding.
 pub const PAD_X: f32 = 10.0;
 /// Padding above the label.
@@ -52,6 +53,15 @@ pub const PORT_LINE: f32 = 15.0;
 /// Space between the header and the first port line (the separator is in
 /// the middle).
 pub const PORT_GAP: f32 = 9.0;
+/// The space between the ports (or the header) and the condition box, and
+/// below the box.
+pub const CONDITION_GAP: f32 = 6.0;
+/// The space between the edge of the condition box and its first and last
+/// line.
+pub const CONDITION_PAD_Y: f32 = 3.0;
+/// How far the condition box extends to the left and the right of the
+/// text column.
+pub const CONDITION_INSET: f32 = 5.0;
 /// The smallest card width.
 pub const MIN_WIDTH: f32 = 128.0;
 /// The largest card width. A longer label is shortened with an ellipsis;
@@ -347,28 +357,44 @@ impl CardGeometry {
     /// The height of the card.
     pub fn height(&self) -> f32 {
         if self.condition_lines > 0 {
-            self.condition_top() + self.condition_lines as f32 * PORT_LINE + PAD_BOTTOM - 2.0
+            self.condition_box_bottom() + CONDITION_GAP
         } else if self.port_lines == 0 {
             self.header_height
         } else {
-            self.header_height + PORT_GAP + self.port_lines as f32 * PORT_LINE + PAD_BOTTOM - 2.0
+            self.ports_bottom() + PAD_BOTTOM - 2.0
         }
+    }
+
+    /// The y position below the last port line.
+    fn ports_bottom(&self) -> f32 {
+        self.header_height + PORT_GAP + self.port_lines as f32 * PORT_LINE - 1.0
+    }
+
+    /// The top of the condition box.
+    fn condition_box_top(&self) -> f32 {
+        if self.port_lines == 0 {
+            self.header_height - 2.0
+        } else {
+            self.ports_bottom() + CONDITION_GAP
+        }
+    }
+
+    /// The bottom of the condition box.
+    fn condition_box_bottom(&self) -> f32 {
+        self.condition_top() + self.condition_lines as f32 * PORT_LINE + CONDITION_PAD_Y
     }
 
     /// The y position of the first condition line.
     fn condition_top(&self) -> f32 {
-        let ports = if self.port_lines == 0 {
-            0.0
-        } else {
-            // The same space as between the header and the first port.
-            self.port_lines as f32 * PORT_LINE + PORT_GAP - 1.0
-        };
-        self.header_height + ports + PORT_GAP - 1.0
+        self.condition_box_top() + CONDITION_PAD_Y
     }
 
-    /// The y position of the separator above the conditions.
-    pub fn condition_separator_y(&self) -> f32 {
-        self.condition_top() - PORT_GAP * 0.65 + 1.0
+    /// The box around the conditions, for a card of `width`.
+    pub fn condition_box(&self, width: f32) -> Rect {
+        Rect::from_min_max(
+            pos2(BAND + PAD_X - CONDITION_INSET, self.condition_box_top()),
+            pos2(width - PAD_X + CONDITION_INSET, self.condition_box_bottom()),
+        )
     }
 
     /// The top-left corner of condition line `index`.
@@ -441,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn conditions_make_the_card_taller() {
+    fn conditions_are_in_a_box_below_the_ports() {
         let mut m = FixedMeasure(7.0);
         let plain = measure_node(&node("n", "T", 1), &mut m);
         let mut with = node("n", "T", 1);
@@ -457,19 +483,28 @@ mod tests {
         ];
         let card = measure_node(&with, &mut m);
         assert_eq!(card.conditions.len(), 2);
-        assert_eq!(card.size.y - plain.size.y, 2.0 * PORT_LINE + PORT_GAP - 2.0);
+        assert!(card.size.y >= plain.size.y + 2.0 * PORT_LINE);
         let geometry = CardGeometry::of(&card);
-        // The conditions are below the ports and inside the card.
-        assert!(geometry.condition_pos(0).y > geometry.port_pos(0).y + PORT_LINE - 0.5);
-        assert!(geometry.condition_separator_y() > geometry.port_pos(0).y + PORT_LINE - 0.5);
-        assert!(geometry.condition_pos(1).y + PORT_LINE <= card.size.y);
-        // Without ports, the conditions take the place of the ports.
+        let boxed = geometry.condition_box(card.size.x);
+        // The box is below the ports and inside the card.
+        assert!(boxed.min.y > geometry.port_pos(0).y + PORT_LINE - 0.5);
+        assert!(boxed.min.x > BAND && boxed.max.x < card.size.x);
+        assert!(boxed.max.y < card.size.y);
+        // The lines are inside the box, and the text column is inside it.
+        for line in 0..2 {
+            let top = geometry.condition_pos(line);
+            assert!(boxed.contains(top) && boxed.contains(top + vec2(0.0, PORT_LINE)));
+        }
+        assert!(geometry.condition_pos(0).x - boxed.min.x >= CONDITION_INSET);
+        assert!(boxed.max.x - (card.size.x - PAD_X) >= CONDITION_INSET);
+        // Without ports, the box comes after the header.
         let mut only = node("n", "T", 0);
         only.conditions = with.conditions.clone();
         let card = measure_node(&only, &mut m);
         let geometry = CardGeometry::of(&card);
-        assert_eq!(geometry.condition_pos(0), geometry.port_pos(0));
-        assert_eq!(geometry.condition_separator_y(), geometry.separator_y());
+        let boxed = geometry.condition_box(card.size.x);
+        assert!(boxed.min.y >= geometry.header_height - 2.0);
+        assert!(boxed.max.y < card.size.y);
     }
 
     #[test]

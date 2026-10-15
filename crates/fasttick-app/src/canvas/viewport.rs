@@ -212,16 +212,20 @@ fn is_usable(rect: Rect) -> bool {
         && rect.min.y <= rect.max.y
 }
 
+/// The number of text buckets in one doubling of the zoom.
+pub const BUCKETS_PER_DOUBLING: f32 = 48.0;
+
 /// The zoom "bucket" for cached text: zoom values in one bucket use the
-/// same font size. A bucket is 1/8 of a doubling (about 9 %).
+/// same font size. A bucket is 1/48 of a doubling (about 1.5 %), so the
+/// change of size between two buckets is too small to see.
 pub fn zoom_bucket(zoom: f32) -> i32 {
-    (clamp_zoom(zoom).log2() * 8.0).floor() as i32
+    (clamp_zoom(zoom).log2() * BUCKETS_PER_DOUBLING).floor() as i32
 }
 
 /// The zoom of a bucket (the lower bound, so that text never grows larger
 /// than its box).
 pub fn bucket_zoom(bucket: i32) -> f32 {
-    (bucket as f32 / 8.0).exp2()
+    (bucket as f32 / BUCKETS_PER_DOUBLING).exp2()
 }
 
 /// A point in the middle of two points.
@@ -382,10 +386,10 @@ mod tests {
     fn buckets() {
         assert_eq!(zoom_bucket(1.0), 0);
         assert!(bucket_zoom(zoom_bucket(1.3)) <= 1.3);
-        assert!(bucket_zoom(zoom_bucket(1.3)) > 1.3 / 1.1);
+        assert!(bucket_zoom(zoom_bucket(1.3)) > 1.3 / 1.02);
         assert!(bucket_zoom(zoom_bucket(0.07)) <= 0.07);
-        assert_eq!(zoom_bucket(0.5), -8);
-        assert!(close(bucket_zoom(-8), 0.5));
+        assert_eq!(zoom_bucket(0.5), -48);
+        assert!(close(bucket_zoom(-48), 0.5));
         assert_eq!(midpoint(pos2(0.0, 0.0), pos2(2.0, 4.0)), pos2(1.0, 2.0));
     }
 }

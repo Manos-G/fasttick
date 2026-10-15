@@ -70,6 +70,18 @@ pub enum AppAction {
     /// Adds the XML files of the folder that have the missing trees and
     /// node models of a document.
     AddMissingFiles(DocId),
+    /// Opens the search popup that adds a node (see [`crate::add_popup`]).
+    OpenAddPopup {
+        /// The edit view.
+        view: ViewId,
+        /// Where the node goes: a node and a placement, or `None` for an
+        /// unconnected node.
+        target: Option<(fasttick_core::xml::NodeId, crate::edit_ops::Placement)>,
+        /// What the popup adds, for example "Add a child of Sequence".
+        title: String,
+        /// The top-left corner of the popup on the screen.
+        pos: egui::Pos2,
+    },
     /// Select an element of the edit document of a view and show it.
     RevealXml {
         /// The view.

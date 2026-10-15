@@ -58,7 +58,7 @@ The canvas shows one tree. These actions are the same in all modes:
 | Shift+click, Ctrl+click | Add a node to the selection, or remove it. |
 | Drag on the background | Select the nodes in a rectangle. |
 | Mouse wheel, touchpad | Pan. |
-| Ctrl+wheel, pinch | Zoom at the pointer. |
+| Ctrl+wheel, pinch | Zoom at the pointer. You cannot zoom out more than the size that shows the whole tree. |
 | Middle drag, Space+drag | Pan. |
 | Double-click a SubTree | Expand it (show its tree) or collapse it. |
 | Arrow keys | Go to the parent, a child or a sibling. |
@@ -151,6 +151,22 @@ To add, rename or delete a tree, use **Add tree…** or right-click the tree.
 
 ### 3.3 Add, move and delete nodes
 
+Each node that can have one more child (a control node, or a decorator
+without a child) has a dot with a plus sign at the middle of its bottom
+edge (right edge in the left-to-right layout).
+
+- Drag from the dot. A line follows the pointer. Release it where the new
+  node must go: left of a child to add the node before that child, or
+  below the last child to add it as the last child. A search window opens.
+  Type some letters of the type (for example `rsq` for
+  `ReactiveSequence`), use the arrow keys to select, and push Enter. Push
+  Escape, or click outside the window, to cancel.
+- Release the line on an unconnected node to connect that node as the last
+  child.
+- Click the dot to add a last child with the same search window.
+
+Other ways to add nodes:
+
 - Drag a node type from the **Palette** onto the canvas. Drop it:
   - on the middle of a node to add it as the last child,
   - on the left or right end of a node to add it before or after the node
@@ -163,8 +179,9 @@ To add, rename or delete a tree, use **Add tree…** or right-click the tree.
   Only a drop far from all cards disconnects the node. The label next to
   the pointer tells where the node goes. Push Escape during the drag to
   cancel the move.
-- Right-click a node to see the edit actions: **Add child**, **Add sibling
-  before**, **Add sibling after**, **Cut**, **Copy**, **Duplicate**,
+- Right-click a node to see the edit actions: **Add child…**, **Add sibling
+  before…**, **Add sibling after…** (these open the search window),
+  **Cut**, **Copy**, **Duplicate**,
   **Delete**, **Paste as child**, **Move up**, **Move down**, **Disconnect**
   and **Create SubTree from selection…**.
 - Right-click an empty place to add or paste an unconnected node.
@@ -203,8 +220,9 @@ Select a node. The **Inspector** shows its properties:
 Each change is one undo step. The keystrokes in one field become one step.
 Use **Edit** > **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z).
 
-The node cards show the pre- and post-conditions below the ports, with
-the name of the condition in purple, in all three modes. In live and replay
+The node cards show the pre- and post-conditions below the ports, in a
+box with a solid purple outline and a light purple background, in all
+three modes. The Inspector and the tooltip use the same box. In live and replay
 mode, the Inspector shows them read-only.
 
 FastTick also checks the scripts in the `code` port of `Script` and

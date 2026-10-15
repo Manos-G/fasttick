@@ -44,7 +44,15 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
             .auto_shrink([false, false])
             .show(ui, |ui| match source {
                 NodeSource::Xml(file, xml) if !inline && editor.is_tree_file(file) => {
-                    node_editor::show(ui, view_id, editor, file, xml, count, cx.actions);
+                    node_editor::show(
+                        ui,
+                        view_id,
+                        editor,
+                        (file, xml),
+                        count,
+                        cx.palette,
+                        cx.actions,
+                    );
                 }
                 _ => {
                     ui.label(RichText::new(&node.label).strong().size(15.0));
@@ -119,19 +127,28 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
             }
             if !node.conditions.is_empty() {
                 ui.add_space(8.0);
-                ui.label(RichText::new("Pre- and post-conditions").strong());
-                egui::Grid::new("inspector_conditions")
-                    .num_columns(2)
-                    .spacing([12.0, 4.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        for line in &node.conditions {
-                            ui.label(RichText::new(&line.name).color(cx.palette.condition))
+                ui.label(
+                    RichText::new("Pre- and post-conditions")
+                        .strong()
+                        .color(cx.palette.condition),
+                );
+                crate::canvas::condition_frame(cx.palette).show(ui, |ui| {
+                    egui::Grid::new("inspector_conditions")
+                        .num_columns(2)
+                        .spacing([12.0, 4.0])
+                        .show(ui, |ui| {
+                            for line in &node.conditions {
+                                ui.label(
+                                    RichText::new(&line.name)
+                                        .strong()
+                                        .color(cx.palette.condition),
+                                )
                                 .on_hover_text(super::node_editor::condition_help(&line.name));
-                            ui.label(RichText::new(&line.value).monospace());
-                            ui.end_row();
-                        }
-                    });
+                                ui.label(RichText::new(&line.value).monospace());
+                                ui.end_row();
+                            }
+                        });
+                });
             }
             ui.add_space(10.0);
             ui.label(

@@ -20,6 +20,7 @@
 //! `fasttick-core`, `fasttick-log` and `fasttick-protocol`.
 
 pub mod actions;
+pub mod add_popup;
 pub mod app;
 pub mod canvas;
 pub mod dialogs;
@@ -29,6 +30,7 @@ pub mod edit_menu;
 pub mod edit_ops;
 pub mod editor;
 pub mod fonts;
+pub mod fuzzy;
 pub mod jobs;
 pub mod live;
 pub mod model_dialog;

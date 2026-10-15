@@ -233,14 +233,19 @@ fn context_menu_deletes_and_pastes() {
 fn context_menu_adds_a_child_node() {
     let mut harness = harness();
     right_click(&mut harness, "fallback");
-    harness.get_by_label_contains("Add child").hover();
+    harness.get_by_label("Add child…").click();
     harness.run();
-    harness.get_by_label_contains("Actions").hover();
+    // The search popup opens; a fuzzy search finds the type and Enter adds it.
+    assert!(harness.state().add_popup().is_some());
+    type_into(
+        &mut harness,
+        Field::Hint("Search node types"),
+        "alwsu",
+        false,
+    );
+    harness.key_press(egui::Key::Enter);
     harness.run();
-    harness
-        .get_by_role_and_label(Role::Button, "AlwaysSuccess")
-        .click();
-    harness.run();
+    assert!(harness.state().add_popup().is_none());
     assert_eq!(
         children(&harness, "fallback"),
         ["check_blocked", "check_flag", "AlwaysSuccess"]
@@ -949,4 +954,155 @@ fn opening_a_file_offers_the_files_with_the_missing_subtrees() {
     // The tree list has a header for each new file.
     harness.get_by_label("library.xml");
     harness.get_by_label("automation.xml");
+}
+
+/// Shows a node at 100 % in the middle of the view.
+fn focus(harness: &mut Harness<'static, FastTickApp>, label: &str) {
+    let view = harness.state_mut().workspace_mut().active_mut().unwrap();
+    let id = view
+        .canvas
+        .tree()
+        .ids()
+        .find(|id| view.canvas.tree().get(*id).unwrap().label == label)
+        .expect("the node");
+    view.canvas.focus_on(id, false);
+    harness.run();
+}
+
+/// The dot of a node: the middle of the bottom edge of its card.
+fn dot_of(harness: &Harness<'static, FastTickApp>, label: &str) -> Pos2 {
+    let rect = item_rect(harness, label);
+    pos2(rect.center().x, rect.max.y)
+}
+
+/// A primary click at a screen position.
+fn click_at(harness: &mut Harness<'static, FastTickApp>, pos: Pos2) {
+    harness.event(Event::PointerMoved(pos));
+    harness.step();
+    for pressed in [true, false] {
+        harness.event(Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    harness.run();
+}
+
+#[test]
+fn a_drag_from_the_dot_asks_for_a_type_and_adds_the_node_there() {
+    let mut harness = harness();
+    focus(&mut harness, "fallback");
+    let first = item_rect(&harness, "check_blocked");
+    let from = dot_of(&harness, "fallback");
+    // A release left of the first child puts the new node before it.
+    drag(
+        &mut harness,
+        from,
+        pos2(first.min.x - 20.0, first.max.y + 40.0),
+    );
+    let popup = harness.state().add_popup().expect("the popup opens");
+    assert_eq!(popup.title, "Add a node before check_blocked");
+    type_into(
+        &mut harness,
+        Field::Hint("Search node types"),
+        "alwfail",
+        false,
+    );
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert!(harness.state().add_popup().is_none());
+    assert_eq!(
+        children(&harness, "fallback"),
+        ["AlwaysFailure", "check_blocked", "check_flag"]
+    );
+    // Undo removes the node.
+    command(&mut harness, Command::Undo);
+    assert_eq!(
+        children(&harness, "fallback"),
+        ["check_blocked", "check_flag"]
+    );
+}
+
+#[test]
+fn a_click_on_the_dot_asks_for_a_last_child_and_escape_closes() {
+    let mut harness = harness();
+    focus(&mut harness, "fallback");
+    let from = dot_of(&harness, "fallback");
+    click_at(&mut harness, from);
+    let popup = harness.state().add_popup().expect("the popup opens");
+    assert_eq!(popup.title, "Add a child of fallback");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(harness.state().add_popup().is_none());
+    assert_eq!(
+        children(&harness, "fallback"),
+        ["check_blocked", "check_flag"]
+    );
+    // A click on a type in the list adds it as the last child.
+    click_at(&mut harness, from);
+    type_into(
+        &mut harness,
+        Field::Hint("Search node types"),
+        "sleep",
+        false,
+    );
+    harness.get_by_role_and_label(Role::Button, "Sleep").click();
+    harness.run();
+    assert_eq!(
+        children(&harness, "fallback"),
+        ["check_blocked", "check_flag", "Sleep"]
+    );
+    // A leaf has no dot: a click there selects the leaf and opens nothing.
+    let leaf = dot_of(&harness, "check_flag");
+    click_at(&mut harness, leaf);
+    assert!(harness.state().add_popup().is_none());
+}
+
+#[test]
+fn a_drag_from_the_dot_to_an_unconnected_node_connects_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("small.xml");
+    std::fs::write(
+        &path,
+        r#"<root BTCPP_format="4" main_tree_to_execute="Main">
+  <BehaviorTree ID="Main">
+    <Sequence name="seq">
+      <AlwaysSuccess name="first"/>
+    </Sequence>
+  </BehaviorTree>
+</root>
+"#,
+    )
+    .unwrap();
+    let options = StartOptions {
+        open: vec![path],
+        theme: Some(ThemeChoice::Light),
+        mode: Some(Mode::Edit),
+        connect: None,
+    };
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1400.0, 900.0))
+        .with_max_steps(64)
+        .with_step_dt(1.0 / 30.0)
+        .build_eframe(move |cc| FastTickApp::new(cc, options));
+    harness.run();
+    // Make an unconnected node.
+    let view = harness.state().workspace().active_view.unwrap();
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_edit(
+        &ctx,
+        view,
+        fasttick_app::edit_ops::EditOp::AddUnconnected {
+            type_id: "Sleep".into(),
+        },
+    );
+    harness.run();
+    command(&mut harness, Command::FitToView);
+    let target = item_rect(&harness, "Sleep").center();
+    let from = dot_of(&harness, "seq");
+    drag(&mut harness, from, target);
+    assert!(harness.state().add_popup().is_none());
+    assert_eq!(children(&harness, "seq"), ["first", "Sleep"]);
 }

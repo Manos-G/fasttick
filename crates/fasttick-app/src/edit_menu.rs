@@ -6,7 +6,6 @@
 
 use egui::{RichText, Ui};
 use fasttick_core::models::NodeKind;
-use fasttick_core::project::FileId;
 use fasttick_core::runtime::InstanceIndex;
 
 use crate::actions::{AppAction, NamePurpose};
@@ -15,15 +14,12 @@ use crate::canvas::{CanvasNode, NodeSource};
 use crate::documents::ViewId;
 use crate::edit_ops::{EditOp, Placement};
 use crate::editor::EditorDoc;
-use crate::widgets::submenu;
 
 /// The data of the edit menu of one view.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EditMenuContext {
     /// The view.
     pub view: Option<ViewId>,
-    /// The node types that the file can use, grouped by kind and sorted.
-    pub groups: Vec<(NodeKind, Vec<String>)>,
     /// The trees of the file: index and ID.
     pub trees: Vec<(usize, String)>,
     /// True if the clipboard has nodes.
@@ -32,17 +28,9 @@ pub struct EditMenuContext {
 
 impl EditMenuContext {
     /// The menu data of a view of an editor document.
-    pub fn new(view: ViewId, editor: &EditorDoc, file: FileId, has_clipboard: bool) -> Self {
-        let project = editor.project();
-        let groups = project
-            .registry()
-            .all_models(file)
-            .into_iter()
-            .map(|(kind, models)| (kind, models.iter().map(|m| m.id.clone()).collect()))
-            .collect();
+    pub fn new(view: ViewId, editor: &EditorDoc, has_clipboard: bool) -> Self {
         EditMenuContext {
             view: Some(view),
-            groups,
             trees: editor.trees(),
             has_clipboard,
         }
@@ -64,25 +52,26 @@ pub fn kind_group_name(kind: NodeKind) -> &'static str {
     }
 }
 
-/// A submenu that lists the node types by kind. Returns the clicked type.
-fn type_menu(ui: &mut Ui, title: &str, context: &EditMenuContext) -> Option<String> {
-    let mut picked = None;
-    submenu(ui, title, |ui| {
-        for (kind, ids) in &context.groups {
-            submenu(ui, kind_group_name(*kind), |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(360.0)
-                    .show(ui, |ui| {
-                        for id in ids {
-                            if ui.button(id).clicked() {
-                                picked = Some(id.clone());
-                            }
-                        }
-                    });
-            });
-        }
-    });
-    picked
+/// A menu button that opens the search popup that adds a node (see
+/// [`crate::add_popup`]) at the place of the menu.
+fn add_button(
+    ui: &mut Ui,
+    label: &str,
+    view: ViewId,
+    target: Option<(fasttick_core::xml::NodeId, Placement)>,
+    title: String,
+    actions: &mut Vec<AppAction>,
+) {
+    let response = ui.button(label);
+    if response.clicked() {
+        actions.push(AppAction::OpenAddPopup {
+            view,
+            target,
+            title,
+            pos: response.rect.left_top(),
+        });
+        ui.close();
+    }
 }
 
 /// Draws the edit entries for the node under the pointer (or for an empty
@@ -96,19 +85,22 @@ pub fn edit_menu(
     let Some(view) = context.view else {
         return false;
     };
-    let mut edit = |op: EditOp| actions.push(AppAction::Edit(view, op));
     let Some(node) = node else {
         // An empty place: new unconnected nodes.
-        if let Some(type_id) = type_menu(ui, "Add node", context) {
-            edit(EditOp::AddUnconnected { type_id });
-            ui.close();
-        }
+        add_button(
+            ui,
+            "Add node…",
+            view,
+            None,
+            "Add an unconnected node".to_owned(),
+            actions,
+        );
         if ui
             .add_enabled(context.has_clipboard, egui::Button::new("Paste"))
             .on_hover_text("Paste the copied nodes as unconnected nodes.")
             .clicked()
         {
-            edit(EditOp::PasteUnconnected);
+            actions.push(AppAction::Edit(view, EditOp::PasteUnconnected));
             ui.close();
         }
         return true;
@@ -123,28 +115,33 @@ pub fn edit_menu(
     let NodeSource::Xml(_, xml_node) = node.source else {
         return false;
     };
-    if container && let Some(type_id) = type_menu(ui, "Add child", context) {
-        edit(EditOp::AddNode {
-            type_id,
-            target: Some((xml_node, Placement::Inside)),
-        });
-        ui.close();
+    if container {
+        add_button(
+            ui,
+            "Add child…",
+            view,
+            Some((xml_node, Placement::Inside)),
+            format!("Add a child of {}", node.label),
+            actions,
+        );
     }
     if node.parent.is_some() {
-        if let Some(type_id) = type_menu(ui, "Add sibling before", context) {
-            edit(EditOp::AddNode {
-                type_id,
-                target: Some((xml_node, Placement::Before)),
-            });
-            ui.close();
-        }
-        if let Some(type_id) = type_menu(ui, "Add sibling after", context) {
-            edit(EditOp::AddNode {
-                type_id,
-                target: Some((xml_node, Placement::After)),
-            });
-            ui.close();
-        }
+        add_button(
+            ui,
+            "Add sibling before…",
+            view,
+            Some((xml_node, Placement::Before)),
+            format!("Add a node before {}", node.label),
+            actions,
+        );
+        add_button(
+            ui,
+            "Add sibling after…",
+            view,
+            Some((xml_node, Placement::After)),
+            format!("Add a node after {}", node.label),
+            actions,
+        );
     }
     if let Some(info) = &node.subtree {
         let index = context.tree_index(&info.tree_id);

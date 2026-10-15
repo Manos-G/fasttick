@@ -204,6 +204,7 @@ pub struct FastTickApp {
     connect_form: Option<ConnectForm>,
     name_prompt: Option<NamePrompt>,
     model_form: Option<crate::model_dialog::ModelForm>,
+    add_popup: Option<crate::add_popup::AddPopup>,
     notices: Vec<Notice>,
     actions: Vec<AppAction>,
     save_as_view: Option<ViewId>,
@@ -256,6 +257,7 @@ impl FastTickApp {
             connect_form: None,
             name_prompt: None,
             model_form: None,
+            add_popup: None,
             notices: Vec::new(),
             actions: Vec::new(),
             save_as_view: None,
@@ -1350,6 +1352,16 @@ impl FastTickApp {
                 AppAction::ClearRecent => self.settings.recent.clear(),
                 AppAction::Edit(view, op) => self.run_edit(ctx, view, op),
                 AppAction::AddMissingFiles(doc) => self.add_missing_files(ctx, doc),
+                AppAction::OpenAddPopup {
+                    view,
+                    target,
+                    title,
+                    pos,
+                } => {
+                    self.workspace.active_view = Some(view);
+                    self.add_popup =
+                        Some(crate::add_popup::AddPopup::new(view, target, title, pos));
+                }
                 AppAction::RevealXml { view, file, node } => {
                     self.workspace.reveal_xml(view, file, node, true);
                     self.workspace.active_view = Some(view);
@@ -2101,6 +2113,7 @@ impl FastTickApp {
                 }
             }
         }
+        self.add_popup_dialog(ctx, palette);
         if let Some(prompt) = &mut self.name_prompt {
             match dialogs::name_prompt(ctx, prompt) {
                 (PromptChoice::Open, _) => {}
@@ -2133,6 +2146,52 @@ impl FastTickApp {
 }
 
 impl FastTickApp {
+    /// The search popup that adds a node.
+    fn add_popup_dialog(&mut self, ctx: &egui::Context, palette: &CanvasPalette) {
+        let Some(popup) = &mut self.add_popup else {
+            return;
+        };
+        let view = popup.view;
+        let candidates = crate::edit_ops::view_file(&self.workspace, view)
+            .zip(
+                self.workspace
+                    .doc_of_view(view)
+                    .and_then(|d| d.editor.as_deref()),
+            )
+            .map(|(file, editor)| {
+                let project = editor.project();
+                let models = project.registry().all_models(file);
+                crate::add_popup::AddCandidate::from_models(models.values().flat_map(|models| {
+                    models.iter().map(|model| {
+                        let source = project
+                            .lookup_model(file, &model.id)
+                            .map_or(fasttick_core::models::ModelSource::Unattached, |(_, s)| s);
+                        (*model, source)
+                    })
+                }))
+            });
+        let Some(candidates) = candidates else {
+            // The view is gone.
+            self.add_popup = None;
+            return;
+        };
+        match crate::add_popup::show(ctx, popup, &candidates, palette) {
+            crate::add_popup::AddChoice::Open => {}
+            crate::add_popup::AddChoice::Cancel => self.add_popup = None,
+            crate::add_popup::AddChoice::Add(type_id) => {
+                if let Some(popup) = self.add_popup.take() {
+                    let op = popup.op(type_id);
+                    self.run_edit(ctx, view, op);
+                }
+            }
+        }
+    }
+
+    /// The search popup, if it is open.
+    pub fn add_popup(&self) -> Option<&crate::add_popup::AddPopup> {
+        self.add_popup.as_ref()
+    }
+
     /// The dialog that shows a loaded breakpoint file before the hooks go
     /// to the executor.
     fn breakpoint_dialog(&mut self, ctx: &egui::Context) {
@@ -2424,18 +2483,11 @@ impl Viewer<'_> {
         };
         let doc_id = doc.id;
         let is_live = self.live_doc == Some(doc_id);
-        let view_root = self
-            .workspace
-            .view(view_id)
-            .map_or(0, |v| v.root_instance.0);
         let edit_context = doc
             .editor
             .as_deref()
             .filter(|_| doc.mode() == self.mode)
-            .map(|editor| {
-                let file = editor.tree_file(view_root).unwrap_or(editor.file_id());
-                EditMenuContext::new(view_id, editor, file, self.has_clipboard)
-            });
+            .map(|editor| EditMenuContext::new(view_id, editor, self.has_clipboard));
         let editable = edit_context.is_some();
         // Statuses and markers of this frame, before the canvas draws.
         self.workspace.refresh_decorations(self.live, self.live_doc);
@@ -2480,6 +2532,31 @@ impl Viewer<'_> {
                     self.workspace.active_view = Some(view_id);
                     if let Some(op) = self.move_op(view_id, &nodes, spot) {
                         self.actions.push(AppAction::Edit(view_id, op));
+                    }
+                }
+                CanvasEvent::AddChild { spot, at } => {
+                    self.workspace.active_view = Some(view_id);
+                    if let DropSpot::Node { target, placement } = spot
+                        && let Some(node) = self.xml_node(view_id, target)
+                    {
+                        let label = |id| {
+                            self.workspace
+                                .view(view_id)
+                                .and_then(|v| v.canvas.tree().get(id))
+                                .map(|n| n.label.clone())
+                                .unwrap_or_default()
+                        };
+                        let title = match placement {
+                            DropPlacement::Inside => format!("Add a child of {}", label(target)),
+                            DropPlacement::Before => format!("Add a node before {}", label(target)),
+                            DropPlacement::After => format!("Add a node after {}", label(target)),
+                        };
+                        self.actions.push(AppAction::OpenAddPopup {
+                            view: view_id,
+                            target: Some((node, placement_of(placement))),
+                            title,
+                            pos: at,
+                        });
                     }
                 }
                 CanvasEvent::DropNew { type_id, spot } => {

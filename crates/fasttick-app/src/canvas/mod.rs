@@ -39,6 +39,7 @@
 
 pub mod card;
 pub mod categories;
+pub mod connect;
 pub mod drop;
 pub mod hit;
 pub mod layout;
@@ -61,5 +62,6 @@ pub use paint::EdgeStyle;
 pub use viewport::Viewport;
 pub use widget::{
     CanvasEvent, CanvasOutput, CanvasState, CanvasStats, Detail, NodeMenu, TreeCanvas,
+    condition_frame,
 };
 pub use xml_build::{ProjectCategories, category_of_kind};
