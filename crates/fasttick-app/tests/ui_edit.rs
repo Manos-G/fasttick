@@ -1404,3 +1404,37 @@ fn the_tree_exports_as_an_svg_image() {
     }
     fasttick_core::xml::Document::parse(&svg).expect("valid XML");
 }
+
+#[test]
+fn the_copy_and_paste_events_of_the_platform_work_on_the_canvas() {
+    // On desktop, Ctrl+C and Ctrl+V come as copy and paste events, not as
+    // key events.
+    let mut harness = harness();
+    focus(&mut harness, "check_flag");
+    let center = item_rect(&harness, "check_flag").center();
+    click_at(&mut harness, center);
+    harness.event(Event::Copy);
+    harness.run();
+    let copied = harness.state().clipboard().unwrap_or_default().to_owned();
+    assert!(copied.contains(r#"name="check_flag""#), "{copied}");
+
+    let center = item_rect(&harness, "fallback").center();
+    click_at(&mut harness, center);
+    harness.event(Event::Paste(copied));
+    harness.run();
+    assert_eq!(
+        children(&harness, "fallback"),
+        ["check_blocked", "check_flag", "check_flag"]
+    );
+    // XML from another program pastes as nodes.
+    harness.event(Event::Paste(r#"<Sleep name="nap" msec="100"/>"#.into()));
+    harness.run();
+    assert_eq!(
+        children(&harness, "fallback"),
+        ["check_blocked", "check_flag", "check_flag", "nap"]
+    );
+    // Text that is not XML changes nothing.
+    harness.event(Event::Paste("hello".into()));
+    harness.run();
+    assert_eq!(children(&harness, "fallback").len(), 4);
+}

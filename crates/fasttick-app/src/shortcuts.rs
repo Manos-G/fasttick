@@ -458,6 +458,45 @@ impl KeyMap {
     }
 }
 
+/// A clipboard command of the platform. On desktop, egui-winit sends
+/// Ctrl+C, Ctrl+X and Ctrl+V as copy, cut and paste events, not as key
+/// events, so the key map does not see them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClipboardEvent {
+    /// Ctrl+C.
+    Copy,
+    /// Ctrl+X.
+    Cut,
+    /// Ctrl+V, with the text of the system clipboard.
+    Paste(String),
+}
+
+/// Takes the copy, cut and paste events out of the input, unless a text
+/// field has the keyboard focus or a label has selected text: those use
+/// the events.
+pub fn take_clipboard_events(ctx: &egui::Context) -> Vec<ClipboardEvent> {
+    let label_selection = ctx
+        .with_plugin(|s: &mut egui::text_selection::LabelSelectionState| s.has_selection())
+        .unwrap_or(false);
+    if ctx.text_edit_focused() || label_selection {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    ctx.input_mut(|input| {
+        input.events.retain(|event| {
+            let taken = match event {
+                egui::Event::Copy => ClipboardEvent::Copy,
+                egui::Event::Cut => ClipboardEvent::Cut,
+                egui::Event::Paste(text) => ClipboardEvent::Paste(text.clone()),
+                _ => return true,
+            };
+            out.push(taken);
+            false
+        });
+    });
+    out
+}
+
 /// The text of a shortcut. Like `Context::format_shortcut`, but with
 /// symbols for the punctuation keys (`Ctrl+=` instead of `Ctrl+Equals`).
 pub fn format_shortcut(ctx: &egui::Context, shortcut: &KeyboardShortcut) -> String {

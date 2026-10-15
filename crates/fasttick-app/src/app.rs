@@ -44,7 +44,7 @@ use crate::live::{AFTER_BREAKPOINT_UNAVAILABLE, LiveController, LiveUpdate, Resu
 use crate::panels::{self, PanelContext, live_bar};
 use crate::replay::ReplayModel;
 use crate::settings::{RecentKind, Settings};
-use crate::shortcuts::{Command, KeyMap};
+use crate::shortcuts::{ClipboardEvent, Command, KeyMap};
 use crate::theme::{self, CanvasPalette, ThemeChoice};
 use crate::widgets::{self, Icon};
 
@@ -1667,6 +1667,34 @@ impl FastTickApp {
         self.workspace.doc_of_view(view)?.editor.as_deref()
     }
 
+    /// Runs a copy, cut or paste of the platform (Ctrl+C, Ctrl+X,
+    /// Ctrl+V). A paste takes the text of the system clipboard if it is
+    /// XML, so nodes copied as text in another program paste as nodes.
+    pub fn clipboard_event(&mut self, ctx: &egui::Context, event: ClipboardEvent) {
+        match event {
+            ClipboardEvent::Copy => self.run_command(ctx, Command::Copy),
+            ClipboardEvent::Cut => self.run_command(ctx, Command::Cut),
+            ClipboardEvent::Paste(text) => {
+                if self.active_edit_view().is_none() {
+                    return;
+                }
+                let text = text.trim();
+                if text.starts_with('<') {
+                    self.clipboard = Some(text.to_owned());
+                } else if self.clipboard.as_deref().map(str::trim) != Some(text) {
+                    self.notify(
+                        ctx,
+                        NoticeLevel::Warning,
+                        "The clipboard has no nodes. Copy nodes in FastTick, or copy the XML \
+                         of nodes, for example <Sleep msec=\"100\"/>.",
+                    );
+                    return;
+                }
+                self.run_command(ctx, Command::Paste);
+            }
+        }
+    }
+
     /// The clipboard text of the tree editor.
     pub fn clipboard(&self) -> Option<&str> {
         self.clipboard.as_deref()
@@ -1830,6 +1858,9 @@ impl FastTickApp {
         let commands = self.keymap.consume(&ctx, |c| self.is_enabled(c));
         for command in commands {
             self.run_command(&ctx, command);
+        }
+        for event in crate::shortcuts::take_clipboard_events(&ctx) {
+            self.clipboard_event(&ctx, event);
         }
 
         let palette = theme::canvas_palette(self.theme(), ctx.theme());

@@ -230,6 +230,13 @@ Other ways to add nodes:
   **Delete**, **Paste as child**, **Move up**, **Move down**, **Disconnect**
   and **Create SubTree from selection…**.
 - Right-click an empty place to add or paste an unconnected node.
+- Ctrl+C copies the selected nodes, Ctrl+X cuts them and Ctrl+V pastes
+  them. The paste goes into the selected node as its last children. If
+  the selected node cannot take more children (for example an action),
+  the paste goes after it. Without a selection, the paste makes
+  unconnected nodes. FastTick puts the XML of the copied nodes on the
+  system clipboard. You can also paste the XML of nodes that you copied
+  in another program, for example `<Sleep msec="100"/>`.
 
 Unconnected nodes stay in the project file. BT.CPP does not see them.
 

@@ -52,8 +52,9 @@ pub enum EditOp {
     Copy,
     /// Copies the selected nodes, then deletes them.
     Cut,
-    /// Pastes the clipboard as the last children of the selected node, or
-    /// as unconnected nodes.
+    /// Pastes the clipboard as the last children of the selected node. If
+    /// the selected node takes no more children, the copies go after it.
+    /// Without a selection, they are unconnected nodes.
     Paste,
     /// Pastes the clipboard as unconnected nodes.
     PasteUnconnected,
@@ -229,6 +230,22 @@ pub fn primary_node(workspace: &Workspace, view: ViewId) -> Option<NodeId> {
     }
 }
 
+/// True if the primary selected node can take one more child (see
+/// [`crate::canvas::connect::has_dot`]), or if no node is selected.
+fn primary_takes_children(workspace: &Workspace, view: ViewId) -> bool {
+    let Some(view_ref) = workspace.view(view) else {
+        return true;
+    };
+    let tree = view_ref.canvas.tree();
+    view_ref
+        .canvas
+        .primary()
+        .filter(|id| tree.is_selected(*id))
+        .or_else(|| tree.selected().next())
+        .and_then(|id| tree.get(id))
+        .is_none_or(crate::canvas::connect::has_dot)
+}
+
 /// The parent element and the element index of `node`.
 fn position_of(editor: &EditorDoc, file: FileId, node: NodeId) -> Option<(NodeId, usize)> {
     let doc = editor.project().file(file)?.doc();
@@ -359,6 +376,7 @@ pub fn run(
 ) -> Result<EditOutcome, String> {
     let selected = selected_nodes(workspace, view);
     let primary = primary_node(workspace, view);
+    let takes_children = primary_takes_children(workspace, view);
     let tree_id = view_tree_id(workspace, view);
     let file = view_file(workspace, view).ok_or("the view is closed")?;
     let doc_id = workspace
@@ -404,7 +422,22 @@ pub fn run(
         }
         EditOp::Paste => {
             let text = clipboard.clone().ok_or("The clipboard is empty.")?;
-            outcome.select = paste(editor, file, tree_id, &text, primary)?;
+            outcome.select = match primary {
+                // A leaf (or a full decorator): the copies go after it. A
+                // root or an unconnected node has no parent node: the
+                // copies are unconnected.
+                Some(node) if !takes_children => {
+                    match position_of(editor, file, node)
+                        .filter(|_| !is_tree_root(editor, file, node))
+                    {
+                        Some((parent, index)) => {
+                            editor.edit(|ed| ed.paste(file, &text, parent, index + 1))?
+                        }
+                        None => paste(editor, file, tree_id, &text, None)?,
+                    }
+                }
+                _ => paste(editor, file, tree_id, &text, primary)?,
+            };
         }
         EditOp::PasteUnconnected => {
             let text = clipboard.clone().ok_or("The clipboard is empty.")?;
