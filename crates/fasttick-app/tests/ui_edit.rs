@@ -1253,3 +1253,66 @@ fn the_search_field_of_the_popup_has_the_focus_at_once() {
         ["check_blocked", "check_flag", "AlwaysFailure"]
     );
 }
+
+#[test]
+fn closing_a_changed_document_asks_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.xml");
+    let text = r#"<root BTCPP_format="4" main_tree_to_execute="Main">
+  <BehaviorTree ID="Main">
+    <Sequence name="seq">
+      <AlwaysSuccess name="first"/>
+    </Sequence>
+  </BehaviorTree>
+</root>
+"#;
+    std::fs::write(&path, text).unwrap();
+    let options = StartOptions {
+        open: vec![path.clone()],
+        theme: Some(ThemeChoice::Light),
+        mode: Some(Mode::Edit),
+        connect: None,
+    };
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1400.0, 900.0))
+        .with_max_steps(64)
+        .with_step_dt(1.0 / 30.0)
+        .build_eframe(move |cc| FastTickApp::new(cc, options));
+    harness.run();
+    let views = |h: &Harness<'static, FastTickApp>| h.state().workspace().views().len();
+    // Without changes the tab closes at once.
+    command(&mut harness, Command::CloseTab);
+    assert_eq!(views(&harness), 0);
+    assert!(harness.state().pending_close().is_none());
+
+    // With a change: the question; Cancel keeps the tab.
+    let ctx = harness.ctx.clone();
+    harness.state_mut().open_path_now(&ctx, &path).unwrap();
+    harness.run();
+    select(&mut harness, "first");
+    command(&mut harness, Command::Duplicate);
+    command(&mut harness, Command::CloseTab);
+    assert!(harness.state().pending_close().is_some());
+    assert_eq!(views(&harness), 1);
+    harness.get_by_label("Cancel").click();
+    harness.run();
+    assert_eq!(views(&harness), 1);
+    // Save: the file has the change and the tab closes.
+    command(&mut harness, Command::CloseTab);
+    harness.get_by_label("Save").click();
+    harness.run();
+    assert_eq!(views(&harness), 0);
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(saved.matches("name=\"first\"").count(), 2, "{saved}");
+
+    // Do not save: the change is lost.
+    harness.state_mut().open_path_now(&ctx, &path).unwrap();
+    harness.run();
+    select(&mut harness, "seq");
+    command(&mut harness, Command::Delete);
+    command(&mut harness, Command::CloseTab);
+    harness.get_by_label("Do not save").click();
+    harness.run();
+    assert_eq!(views(&harness), 0);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+}

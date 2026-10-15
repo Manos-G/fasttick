@@ -89,6 +89,23 @@ impl Mode {
     }
 }
 
+/// A close that waits for the answer of the user about unsaved changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingClose {
+    /// The last view of a document.
+    View(ViewId),
+    /// The window (the application).
+    Window,
+}
+
+/// The answer about unsaved changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnsavedChoice {
+    Save,
+    Discard,
+    Cancel,
+}
+
 /// Options from the command line.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StartOptions {
@@ -214,6 +231,8 @@ pub struct FastTickApp {
     window_title: String,
     pending_breakpoints: Option<PendingBreakpoints>,
     sqlite_picker: Option<SqlitePicker>,
+    pending_close: Option<PendingClose>,
+    close_confirmed: bool,
 }
 
 impl std::fmt::Debug for FastTickApp {
@@ -266,6 +285,8 @@ impl FastTickApp {
             window_title: String::new(),
             pending_breakpoints: None,
             sqlite_picker: None,
+            pending_close: None,
+            close_confirmed: false,
         };
         crate::fonts::install(&cc.egui_ctx);
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
@@ -823,7 +844,7 @@ impl FastTickApp {
             }
             Command::CloseTab => {
                 if let Some(view) = active {
-                    self.close_view(view);
+                    self.request_close_view(view);
                 }
             }
             Command::ResetLayout => {
@@ -1003,6 +1024,139 @@ impl FastTickApp {
         self.settings.theme = choice;
         self.theme_override = None;
         theme::set_visuals(ctx, choice);
+    }
+
+    /// Closes a view. The last view of a document with changes that are
+    /// not saved asks first.
+    fn request_close_view(&mut self, view: ViewId) {
+        let doc = self.workspace.doc_of_view(view);
+        let dirty = doc.is_some_and(|d| d.editor.as_ref().is_some_and(|e| e.is_dirty()));
+        let last = doc.is_some_and(|d| self.workspace.views_of(d.id).count() <= 1);
+        if dirty && last {
+            self.pending_close = Some(PendingClose::View(view));
+        } else {
+            self.close_view(view);
+        }
+    }
+
+    /// The documents with changes that are not saved: (title, a view).
+    pub fn unsaved_documents(&self) -> Vec<(String, ViewId)> {
+        self.workspace
+            .docs()
+            .iter()
+            .filter(|d| d.editor.as_ref().is_some_and(|e| e.is_dirty()))
+            .filter_map(|d| Some((d.title.clone(), self.workspace.views_of(d.id).next()?.id)))
+            .collect()
+    }
+
+    /// The close that waits for an answer about unsaved changes.
+    pub fn pending_close(&self) -> Option<PendingClose> {
+        self.pending_close
+    }
+
+    /// Saves the document of a view without a dialog. Returns false (with
+    /// a notice) if the document needs a path or the save failed.
+    fn save_now(&mut self, ctx: &egui::Context, view: ViewId) -> bool {
+        let Some(doc) = self.workspace.doc_of_view(view).map(|d| d.id) else {
+            return true;
+        };
+        let Some(editor) = self.workspace.editor_mut(doc) else {
+            return true;
+        };
+        match editor.save() {
+            Ok(crate::editor::SaveOutcome::Saved) => true,
+            Ok(crate::editor::SaveOutcome::NeedsPath) => {
+                self.focus_view(view);
+                self.save_as_view = Some(view);
+                self.jobs.pick_file(ctx, DialogPurpose::SaveAs, None);
+                false
+            }
+            Err(message) => {
+                self.notify(ctx, NoticeLevel::Error, format!("Cannot save: {message}"));
+                false
+            }
+        }
+    }
+
+    /// The question about unsaved changes before a close.
+    fn unsaved_dialog(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.pending_close else {
+            return;
+        };
+        let unsaved = self.unsaved_documents();
+        let (text, save_label) = match pending {
+            PendingClose::View(view) => {
+                let title = self
+                    .workspace
+                    .doc_of_view(view)
+                    .map(|d| d.title.clone())
+                    .unwrap_or_default();
+                (
+                    format!(
+                        "{title} has changes that are not saved. Save them before you close it?"
+                    ),
+                    "Save",
+                )
+            }
+            PendingClose::Window => (
+                format!(
+                    "These files have changes that are not saved: {}. Save them before you close FastTick?",
+                    unsaved
+                        .iter()
+                        .map(|(t, _)| t.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                "Save all",
+            ),
+        };
+        let mut choice = None;
+        egui::Window::new("Changes are not saved")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, -60.0])
+            .show(ctx, |ui| {
+                ui.set_max_width(420.0);
+                ui.label(text);
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.button(RichText::new(save_label).strong()).clicked() {
+                        choice = Some(UnsavedChoice::Save);
+                    }
+                    if ui.button("Do not save").clicked() {
+                        choice = Some(UnsavedChoice::Discard);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        choice = Some(UnsavedChoice::Cancel);
+                    }
+                });
+            });
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            choice = Some(UnsavedChoice::Cancel);
+        }
+        let Some(choice) = choice else {
+            return;
+        };
+        self.pending_close = None;
+        match (pending, choice) {
+            (_, UnsavedChoice::Cancel) => {}
+            (PendingClose::View(view), UnsavedChoice::Save) => {
+                if self.save_now(ctx, view) {
+                    self.close_view(view);
+                }
+            }
+            (PendingClose::View(view), UnsavedChoice::Discard) => self.close_view(view),
+            (PendingClose::Window, UnsavedChoice::Save) => {
+                if unsaved.iter().all(|(_, view)| self.save_now(ctx, *view)) {
+                    self.close_confirmed = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+            (PendingClose::Window, UnsavedChoice::Discard) => {
+                self.close_confirmed = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
     }
 
     fn close_view(&mut self, view: ViewId) {
@@ -1327,7 +1481,7 @@ impl FastTickApp {
             match action {
                 AppAction::Command(command) => self.run_command(ctx, command),
                 AppAction::OpenPath(path) => self.start_open(ctx, path),
-                AppAction::CloseView(view) => self.close_view(view),
+                AppAction::CloseView(view) => self.request_close_view(view),
                 AppAction::SetViewRoot(view, instance) => {
                     self.workspace.set_view_root(view, instance);
                 }
@@ -1586,6 +1740,15 @@ impl FastTickApp {
         self.handle_jobs(&ctx);
         self.handle_live(&ctx);
         self.handle_replay(&ctx);
+
+        // Closing the window with unsaved changes asks first.
+        if ctx.input(|i| i.viewport().close_requested())
+            && !self.close_confirmed
+            && !self.unsaved_documents().is_empty()
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.pending_close = Some(PendingClose::Window);
+        }
 
         let commands = self.keymap.consume(&ctx, |c| self.is_enabled(c));
         for command in commands {
@@ -2103,6 +2266,7 @@ impl FastTickApp {
             self.show_shortcuts = dialogs::shortcuts(ctx, &self.keymap);
         }
         self.breakpoint_dialog(ctx);
+        self.unsaved_dialog(ctx);
         self.sqlite_dialog(ctx);
         if let Some(form) = &mut self.model_form {
             match crate::model_dialog::show(ctx, form) {

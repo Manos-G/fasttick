@@ -110,6 +110,10 @@ FastTick keeps the theme in its settings.
   a name.
 - **File** > **Save as…** (Ctrl+Shift+S) saves the main file with a new name.
 
+A tab with changes that are not saved has a dot (•) after its name. When
+you close such a tab, or close FastTick, FastTick asks if it must save the
+changes: **Save** (or **Save all**), **Do not save** or **Cancel**.
+
 FastTick keeps the text of a file. It changes only the elements and the
 attributes that you change. Comments, the order of attributes and the
 white space stay.
