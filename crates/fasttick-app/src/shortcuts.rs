@@ -407,9 +407,10 @@ mod tests {
             modifiers,
         });
         let mut out = Vec::new();
-        let _ = ctx.run_ui(input, |ui| {
+        let mut output = ctx.run_ui(input, |ui| {
             out = map.consume(ui.ctx(), |_| true);
         });
+        output.textures_delta.clear();
         out
     }
 
@@ -443,11 +444,12 @@ mod tests {
             repeat: false,
             modifiers: Modifiers::COMMAND,
         });
-        let _ = ctx.run_ui(input, |ui| {
+        let mut output = ctx.run_ui(input, |ui| {
             let commands = map.consume(ui.ctx(), |c| c != Command::Copy);
             assert!(commands.is_empty());
             // The key event is still there for other widgets.
             assert!(ui.input(|i| i.key_pressed(Key::C)));
         });
+        output.textures_delta.clear();
     }
 }

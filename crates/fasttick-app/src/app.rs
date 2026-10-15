@@ -799,6 +799,7 @@ impl FastTickApp {
                         ui,
                         &mut mode,
                         &[(Mode::Edit, "Edit"), (Mode::Live, "Live"), (Mode::Replay, "Replay")],
+                        " mode",
                         palette.accent,
                     ) {
                         self.set_mode(mode);

@@ -206,6 +206,7 @@ pub struct CanvasState {
     points: Vec<Pos2>,
     size: Vec2,
     stats: CanvasStats,
+    fonts: CardFonts,
 }
 
 /// The duration of view animations, in seconds.
@@ -243,6 +244,7 @@ impl CanvasState {
             shapes: Vec::new(),
             points: Vec::new(),
             size: Vec2::ZERO,
+            fonts: CardFonts::default(),
         }
     }
 
@@ -584,13 +586,52 @@ fn kind_index(kind: TextKind) -> usize {
     }
 }
 
-fn font_for(kind: TextKind, size: f32) -> FontId {
-    let family = match kind {
-        TextKind::Label => FontFamily::Name(fonts::MEDIUM.into()),
-        TextKind::PortValue => FontFamily::Monospace,
-        TextKind::Type | TextKind::PortName | TextKind::Note => FontFamily::Proportional,
-    };
-    FontId::new(size, family)
+/// The font families of the cards. The canvas uses the bundled Roboto
+/// families when the app installed them (see [`crate::fonts`]), else the
+/// default proportional family, so that the widget also works without the
+/// app fonts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CardFonts {
+    label: FontFamily,
+    italic: FontFamily,
+}
+
+impl Default for CardFonts {
+    fn default() -> Self {
+        CardFonts {
+            label: FontFamily::Proportional,
+            italic: FontFamily::Proportional,
+        }
+    }
+}
+
+impl CardFonts {
+    fn detect(ctx: &egui::Context) -> Self {
+        ctx.fonts(|f| {
+            let families = &f.definitions().families;
+            let pick = |name: &str| {
+                let family = FontFamily::Name(name.into());
+                if families.contains_key(&family) {
+                    family
+                } else {
+                    FontFamily::Proportional
+                }
+            };
+            CardFonts {
+                label: pick(fonts::MEDIUM),
+                italic: pick(fonts::ITALIC),
+            }
+        })
+    }
+
+    fn font(&self, kind: TextKind, size: f32) -> FontId {
+        let family = match kind {
+            TextKind::Label => self.label.clone(),
+            TextKind::PortValue => FontFamily::Monospace,
+            TextKind::Type | TextKind::PortName | TextKind::Note => FontFamily::Proportional,
+        };
+        FontId::new(size, family)
+    }
 }
 
 impl TextMeasure for EguiMeasure<'_, '_> {
@@ -643,6 +684,12 @@ impl<'a> TreeCanvas<'a> {
         let response = ui.interact(rect, id, Sense::click_and_drag());
         state.size = rect.size();
 
+        let card_fonts = CardFonts::detect(ui.ctx());
+        if card_fonts != state.fonts {
+            state.fonts = card_fonts;
+            state.needs_layout = true;
+            state.galleys.clear();
+        }
         if state.needs_layout {
             let ids = [
                 TextKind::Label,
@@ -651,7 +698,7 @@ impl<'a> TreeCanvas<'a> {
                 TextKind::PortValue,
                 TextKind::Note,
             ]
-            .map(|kind| font_for(kind, kind.size()));
+            .map(|kind| state.fonts.font(kind, kind.size()));
             ui.ctx().fonts_mut(|fonts| {
                 let mut measure = EguiMeasure { fonts, ids };
                 card::measure_tree(&mut state.tree, &mut measure);
@@ -1376,7 +1423,7 @@ fn paint_card(
             state.galleys.get(index, SLOT_LABEL, || {
                 painter.layout_job(LayoutJob::simple_singleline(
                     node.card.label.clone(),
-                    font_for(TextKind::Label, card::LABEL_SIZE * text_zoom),
+                    state.fonts.font(TextKind::Label, card::LABEL_SIZE * text_zoom),
                     text_color,
                 ))
             })
@@ -1387,7 +1434,7 @@ fn paint_card(
             state.galleys.get(index, SLOT_LABEL_SMALL, || {
                 let mut job = LayoutJob::simple_singleline(
                     node.label.clone(),
-                    font_for(TextKind::Label, size),
+                    state.fonts.font(TextKind::Label, size),
                     text_color,
                 );
                 job.wrap = egui::text::TextWrapping::truncate_at_width(free.max(1.0));
@@ -1408,7 +1455,7 @@ fn paint_card(
             let galley = state.galleys.get(index, SLOT_TYPE, || {
                 painter.layout_job(LayoutJob::simple_singleline(
                     type_line.clone(),
-                    font_for(TextKind::Type, card::TYPE_SIZE * text_zoom),
+                    state.fonts.font(TextKind::Type, card::TYPE_SIZE * text_zoom),
                     weak,
                 ))
             });
@@ -1429,7 +1476,7 @@ fn paint_card(
                 let galley = state.galleys.get(index, SLOT_PORT + line as u64, || {
                     let mut job = LayoutJob::default();
                     let name_format = TextFormat {
-                        font_id: font_for(TextKind::PortName, card::PORT_SIZE * text_zoom),
+                        font_id: state.fonts.font(TextKind::PortName, card::PORT_SIZE * text_zoom),
                         color: weak,
                         ..TextFormat::default()
                     };
@@ -1439,7 +1486,7 @@ fn paint_card(
                         value,
                         0.0,
                         TextFormat {
-                            font_id: font_for(TextKind::PortValue, card::PORT_SIZE * text_zoom),
+                            font_id: state.fonts.font(TextKind::PortValue, card::PORT_SIZE * text_zoom),
                             color: if is_reference(value) {
                                 reference_color
                             } else {
@@ -1458,10 +1505,7 @@ fn paint_card(
                 let galley = state.galleys.get(index, SLOT_MORE, || {
                     painter.layout_job(LayoutJob::simple_singleline(
                         more.clone(),
-                        FontId::new(
-                            TextKind::Note.size() * text_zoom,
-                            FontFamily::Name(fonts::ITALIC.into()),
-                        ),
+                        FontId::new(TextKind::Note.size() * text_zoom, state.fonts.italic.clone()),
                         weak,
                     ))
                 });
@@ -1515,7 +1559,7 @@ fn paint_card(
         let galley = state.galleys.get(index, SLOT_CHIP, || {
             painter.layout_job(LayoutJob::simple_singleline(
                 text,
-                font_for(TextKind::Note, TextKind::Note.size() * text_zoom),
+                state.fonts.font(TextKind::Note, TextKind::Note.size() * text_zoom),
                 palette.on_color,
             ))
         });
@@ -1542,7 +1586,7 @@ fn paint_card(
         let galley = state.galleys.get(index, SLOT_TAG, || {
             painter.layout_job(LayoutJob::simple_singleline(
                 text.to_owned(),
-                font_for(TextKind::Note, 9.5 * text_zoom),
+                state.fonts.font(TextKind::Note, 9.5 * text_zoom),
                 palette.on_color,
             ))
         });

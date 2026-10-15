@@ -25,6 +25,7 @@ pub mod hit;
 pub mod layout;
 pub mod model;
 pub mod paint;
+pub mod synthetic;
 pub mod viewport;
 pub mod widget;
 

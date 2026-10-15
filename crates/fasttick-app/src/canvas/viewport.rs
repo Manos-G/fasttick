@@ -7,7 +7,7 @@
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
 /// The smallest zoom factor.
-pub const MIN_ZOOM: f32 = 0.04;
+pub const MIN_ZOOM: f32 = 0.01;
 /// The largest zoom factor.
 pub const MAX_ZOOM: f32 = 4.0;
 /// The factor of one zoom step (menu, keyboard).

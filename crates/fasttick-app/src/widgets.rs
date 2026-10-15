@@ -144,11 +144,14 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool) -> Respo
 }
 
 /// A segmented control: one button for each option, the selected one
-/// highlighted. Returns true if the value changed.
+/// highlighted. Returns true if the value changed. The accessibility label
+/// of each button is its text and `a11y_suffix` (for example "Live" and
+/// " mode" give "Live mode").
 pub fn segmented<T: PartialEq + Copy>(
     ui: &mut Ui,
     value: &mut T,
     options: &[(T, &str)],
+    a11y_suffix: &str,
     accent: Color32,
 ) -> bool {
     let mut changed = false;
@@ -178,7 +181,12 @@ pub fn segmented<T: PartialEq + Copy>(
         let response = ui.interact(rect, id, Sense::click());
         let selected = *value == *option;
         response.widget_info(|| {
-            WidgetInfo::selected(WidgetType::SelectableLabel, true, selected, *text)
+            WidgetInfo::selected(
+                WidgetType::SelectableLabel,
+                true,
+                selected,
+                format!("{text}{a11y_suffix}"),
+            )
         });
         if response.clicked() && !selected {
             *value = *option;
@@ -248,11 +256,17 @@ mod tests {
     fn segmented_control_changes_value() {
         let mut harness = Harness::new_ui_state(
             |ui, value: &mut Choice| {
-                segmented(ui, value, &[(Choice::A, "Alpha"), (Choice::B, "Beta")], Color32::BLUE);
+                segmented(
+                    ui,
+                    value,
+                    &[(Choice::A, "Alpha"), (Choice::B, "Beta")],
+                    " choice",
+                    Color32::BLUE,
+                );
             },
             Choice::A,
         );
-        harness.get_by_label("Beta").click();
+        harness.get_by_label("Beta choice").click();
         harness.run();
         assert_eq!(*harness.state(), Choice::B);
     }
