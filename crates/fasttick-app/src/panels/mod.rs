@@ -101,18 +101,26 @@ pub(crate) fn status_cell(
     });
 }
 
-/// The active view and its editor document, if the active view is an edit
-/// view of `mode`.
+/// The active view, its editor document and the file of the tree that it
+/// shows, if the active view is an edit view of `mode`.
 pub(crate) fn active_edit(
     workspace: &Workspace,
     mode: Mode,
-) -> Option<(crate::documents::ViewId, &crate::editor::EditorDoc)> {
+) -> Option<(
+    crate::documents::ViewId,
+    &crate::editor::EditorDoc,
+    fasttick_core::project::FileId,
+)> {
     let view = workspace.active()?;
     let doc = workspace.doc(view.doc)?;
     if doc.mode() != mode {
         return None;
     }
-    Some((view.id, doc.editor.as_deref()?))
+    let editor = doc.editor.as_deref()?;
+    let file = editor
+        .tree_file(view.root_instance.0)
+        .unwrap_or(editor.file_id());
+    Some((view.id, editor, file))
 }
 
 /// A short weak text at the top of an empty panel.

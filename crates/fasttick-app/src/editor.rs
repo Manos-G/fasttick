@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use fasttick_core::bt::BtFile;
 use fasttick_core::edit::{Coalesce, CoalesceKey, CommandError, Editor, History};
-use fasttick_core::project::{FileId, FileRole, Project};
+use fasttick_core::project::{FileId, FileRole, Project, TreeRef};
 use fasttick_core::validate::{Problem, ProblemCounts, validate_project};
 use fasttick_core::xml::NodeId;
 
@@ -82,10 +82,34 @@ impl EditorDoc {
         Ok(EditorDoc::new(project, file))
     }
 
-    /// A new, unsaved file with one empty tree.
+    /// A new, unsaved file with one empty tree, `MainTree`, that is the
+    /// main tree.
     pub fn untitled() -> EditorDoc {
-        let (project, file) = Project::with_file("Untitled", BtFile::new_empty());
+        let (mut project, file) = Project::with_file("Untitled", BtFile::new_empty());
+        // The first tree is part of the new file, not an undo step.
+        let _ = History::new().run(&mut project, |ed| {
+            ed.add_tree(file, "MainTree")?;
+            ed.set_main_tree(file, Some("MainTree"))
+        });
         EditorDoc::new(project, file)
+    }
+
+    /// A tree ID that no tree of the project has: `base` (or `MainTree` if
+    /// `base` is not a valid ID), with a number after it if needed.
+    pub fn unique_tree_id(&self, base: &str) -> String {
+        let base = if fasttick_core::bt::names::validate_model_name(base).is_ok() {
+            base
+        } else {
+            "MainTree"
+        };
+        let taken = |id: &str| self.project.find_tree(id).is_some();
+        if !taken(base) {
+            return base.to_owned();
+        }
+        (2..)
+            .map(|n| format!("{base}{n}"))
+            .find(|id| !taken(id))
+            .unwrap_or_else(|| base.to_owned())
     }
 
     /// The project.
@@ -108,63 +132,180 @@ impl EditorDoc {
         self.file().and_then(|f| f.path().map(Path::to_path_buf))
     }
 
-    /// The trees of the main file: index and ID.
-    pub fn trees(&self) -> Vec<(usize, String)> {
-        self.file()
-            .map(|file| {
-                file.index()
-                    .trees
-                    .iter()
-                    .enumerate()
-                    .map(|(index, tree)| (index, tree.id.clone()))
-                    .collect()
-            })
-            .unwrap_or_default()
+    /// All trees of all files of the project, in project order. The
+    /// position of a tree in this list is its *tree index*: views and the
+    /// tree list use it.
+    pub fn tree_refs(&self) -> Vec<TreeRef> {
+        self.project.trees()
     }
 
-    /// The index of the main tree: the tree that `main_tree_to_execute`
-    /// names, else the first tree.
+    /// The trees of the project: tree index and ID.
+    pub fn trees(&self) -> Vec<(usize, String)> {
+        self.tree_refs()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, r)| Some((index, self.project.tree(r)?.id.clone())))
+            .collect()
+    }
+
+    /// The file and the position in the file of a tree index.
+    pub fn tree_ref(&self, index: usize) -> Option<TreeRef> {
+        self.tree_refs().get(index).copied()
+    }
+
+    /// The file of a tree index.
+    pub fn tree_file(&self, index: usize) -> Option<FileId> {
+        self.tree_ref(index).map(|r| r.file)
+    }
+
+    /// The tree index of a reference.
+    fn index_of(&self, tree: TreeRef) -> Option<usize> {
+        self.tree_refs().iter().position(|r| *r == tree)
+    }
+
+    /// The index of the main tree: the tree that the main file runs
+    /// (`main_tree_to_execute`, see [`Project::main_tree`]), else the first
+    /// tree of the main file, else the first tree.
     pub fn main_tree_index(&self) -> usize {
-        let Some(file) = self.file() else {
-            return 0;
-        };
-        let index = file.index();
-        index
-            .main_tree_to_execute
-            .as_deref()
-            .and_then(|id| index.tree_index(id))
+        self.project
+            .main_tree(self.file)
+            .and_then(|r| self.index_of(r))
+            .or_else(|| {
+                self.index_of(TreeRef {
+                    file: self.file,
+                    index: 0,
+                })
+            })
             .unwrap_or(0)
     }
 
-    /// The tree index of a tree ID in the main file.
+    /// True if the tree is the `main_tree_to_execute` of its file.
+    pub fn is_main_tree(&self, index: usize) -> bool {
+        let Some(r) = self.tree_ref(index) else {
+            return false;
+        };
+        let Some(file) = self.project.file(r.file) else {
+            return false;
+        };
+        let main = file.index().main_tree_to_execute.as_deref();
+        main.is_some() && file.trees().get(r.index).map(|t| t.id.as_str()) == main
+    }
+
+    /// The tree index of a tree ID (the first tree with this ID in project
+    /// order).
     pub fn tree_index(&self, id: &str) -> Option<usize> {
-        self.file().and_then(|f| f.index().tree_index(id))
+        self.project.find_tree(id).and_then(|r| self.index_of(r))
     }
 
-    /// The tree ID of a tree index in the main file.
+    /// The tree ID of a tree index.
     pub fn tree_id(&self, index: usize) -> Option<String> {
-        self.file()
-            .and_then(|f| f.index().trees.get(index).map(|t| t.id.clone()))
+        self.tree_ref(index)
+            .and_then(|r| self.project.tree(r))
+            .map(|t| t.id.clone())
     }
 
-    /// The index of the tree that holds `node` (an element of the main
-    /// file): the tree of its `<BehaviorTree>` ancestor, or the tree of an
+    /// The files of the project that have trees or can get trees (not the
+    /// model files), in project order.
+    pub fn tree_files(&self) -> Vec<FileId> {
+        self.project
+            .files()
+            .filter(|(_, role, _)| *role != FileRole::Models)
+            .map(|(id, _, _)| id)
+            .collect()
+    }
+
+    /// True if the elements of a file can be edited in this document.
+    pub fn is_tree_file(&self, file: FileId) -> bool {
+        self.project
+            .role(file)
+            .is_some_and(|role| role != FileRole::Models)
+    }
+
+    /// A short name of a file: its file name, or "Untitled".
+    pub fn file_name(&self, file: FileId) -> String {
+        self.project
+            .file(file)
+            .and_then(|f| f.path())
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Untitled".to_owned())
+    }
+
+    /// The tree index of the tree that holds `node` (an element of
+    /// `file`): the tree of its `<BehaviorTree>` ancestor, or the tree of an
     /// unconnected node.
-    pub fn tree_of_node(&self, node: NodeId) -> Option<usize> {
-        let file = self.file()?;
-        let doc = file.doc();
+    pub fn tree_of_node(&self, file: FileId, node: NodeId) -> Option<usize> {
+        let bt = self.project.file(file)?;
+        let doc = bt.doc();
         let mut top = node;
         while let Some(parent) = doc.parent(top) {
-            if let Some(index) = file.index().trees.iter().position(|t| t.element == parent) {
-                return Some(index);
+            if let Some(index) = bt.index().trees.iter().position(|t| t.element == parent) {
+                return self.index_of(TreeRef { file, index });
             }
             top = parent;
         }
         let (_, tree, _) = self
             .project
             .all_unconnected()
-            .find(|(f, _, u)| *f == self.file && u.node == top)?;
-        self.tree_index(tree)
+            .find(|(f, _, u)| *f == file && u.node == top)?;
+        let index = bt.index().tree_index(tree)?;
+        self.index_of(TreeRef { file, index })
+    }
+
+    /// Adds an XML file to the project (with its includes). This change
+    /// has no undo; remove the file from the project file to undo it.
+    pub fn add_tree_file(&mut self, path: &Path) -> Result<FileId, String> {
+        let id = self.project.add_file(path).map_err(|err| err.to_string())?;
+        self.changed();
+        Ok(id)
+    }
+
+    /// Makes a new XML file with one empty tree (its ID comes from the file
+    /// name), writes it to `path` and adds it to the project.
+    pub fn new_tree_file(&mut self, path: &Path) -> Result<FileId, String> {
+        if path.exists() {
+            return Err(format!("{} exists already.", path.display()));
+        }
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let tree_id = self.unique_tree_id(&stem);
+        let id = self
+            .project
+            .add_bt_file(BtFile::new_empty(), FileRole::Tree);
+        // The first tree is part of the new file, not an undo step.
+        History::new()
+            .run(&mut self.project, |ed| {
+                ed.add_tree(id, &tree_id)?;
+                ed.set_main_tree(id, Some(&tree_id))
+            })
+            .map_err(|err| err.to_string())?;
+        self.project
+            .save_file_as(id, path)
+            .map_err(|err| err.to_string())?;
+        self.project.refresh();
+        self.changed();
+        Ok(id)
+    }
+
+    /// Writes the project file (`.ftproj`) to a new path. The document
+    /// becomes a project document. Changed XML files are saved too.
+    pub fn save_project_as(&mut self, path: &Path) -> Result<(), String> {
+        if self.file().is_some_and(|f| f.path().is_none()) {
+            return Err("Save the tree file first: a project lists files by path.".into());
+        }
+        self.project
+            .save_dirty_files()
+            .map_err(|err| err.to_string())?;
+        self.project.save_as(path).map_err(|err| err.to_string())?;
+        self.changed();
+        Ok(())
+    }
+
+    /// The path of the project file, if the document is a project.
+    pub fn project_path(&self) -> Option<&Path> {
+        self.project.path()
     }
 
     /// The revision. It increments after each change.
@@ -312,10 +453,14 @@ impl EditorDoc {
         Ok(())
     }
 
-    /// Builds the canvas tree of a tree of the main file, with the problem
-    /// markers.
+    /// Builds the canvas tree of a tree (a tree index, see
+    /// [`EditorDoc::tree_refs`]), with the problem markers.
     pub fn build_canvas(&self, tree_index: usize, expansion: &Expansion) -> CanvasTree {
-        let mut tree = CanvasTree::from_project(&self.project, self.file, tree_index, expansion);
+        let r = self.tree_ref(tree_index).unwrap_or(TreeRef {
+            file: self.file,
+            index: 0,
+        });
+        let mut tree = CanvasTree::from_project(&self.project, r.file, r.index, expansion);
         tree.apply_problems(&self.problems);
         tree
     }

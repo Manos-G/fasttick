@@ -6,6 +6,7 @@
 
 use egui::{RichText, Ui};
 use fasttick_core::models::NodeKind;
+use fasttick_core::project::FileId;
 use fasttick_core::runtime::InstanceIndex;
 
 use crate::actions::{AppAction, NamePurpose};
@@ -30,11 +31,11 @@ pub struct EditMenuContext {
 
 impl EditMenuContext {
     /// The menu data of a view of an editor document.
-    pub fn new(view: ViewId, editor: &EditorDoc, has_clipboard: bool) -> Self {
+    pub fn new(view: ViewId, editor: &EditorDoc, file: FileId, has_clipboard: bool) -> Self {
         let project = editor.project();
         let groups = project
             .registry()
-            .all_models(editor.file_id())
+            .all_models(file)
             .into_iter()
             .map(|(kind, models)| (kind, models.iter().map(|m| m.id.clone()).collect()))
             .collect();

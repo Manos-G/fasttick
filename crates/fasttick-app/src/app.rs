@@ -206,6 +206,7 @@ pub struct FastTickApp {
     notices: Vec<Notice>,
     actions: Vec<AppAction>,
     save_as_view: Option<ViewId>,
+    project_view: Option<ViewId>,
     /// The clipboard of the tree editor (XML text of copied nodes).
     clipboard: Option<String>,
     window_title: String,
@@ -257,6 +258,7 @@ impl FastTickApp {
             notices: Vec::new(),
             actions: Vec::new(),
             save_as_view: None,
+            project_view: None,
             clipboard: None,
             window_title: String::new(),
             pending_breakpoints: None,
@@ -989,6 +991,13 @@ impl FastTickApp {
                         DialogPurpose::SaveRecording => {
                             self.save_recording_to(ctx, path);
                         }
+                        DialogPurpose::AddTreeFile
+                        | DialogPurpose::NewTreeFile
+                        | DialogPurpose::SaveProject => {
+                            if let Some(view) = self.project_view.take() {
+                                self.project_file_picked(ctx, view, purpose, path);
+                            }
+                        }
                         DialogPurpose::SaveBreakpoints => self.save_breakpoints_to(ctx, path),
                         DialogPurpose::LoadBreakpoints => self.jobs.load_breakpoints(ctx, path),
                         DialogPurpose::ExportTransitions(format) => {
@@ -1243,13 +1252,20 @@ impl FastTickApp {
                     self.workspace.reveal_xml(view, file, node, true);
                     self.workspace.active_view = Some(view);
                 }
+                AppAction::ProjectFile { view, purpose } => {
+                    if !self.jobs.dialog_open() {
+                        self.project_view = Some(view);
+                        self.pick_file(ctx, purpose);
+                    }
+                }
                 AppAction::EditModel { view, model } => {
                     self.model_form = self
                         .workspace
                         .doc_of_view(view)
                         .and_then(|d| d.editor.as_deref())
                         .map(|editor| {
-                            let file = editor.file_id();
+                            let file = crate::edit_ops::view_file(&self.workspace, view)
+                                .unwrap_or(editor.file_id());
                             let registry = editor.project().registry();
                             let taken: Vec<String> = registry
                                 .all_models(file)
@@ -1324,11 +1340,7 @@ impl FastTickApp {
                     self.workspace.set_view_root(view, tree);
                 }
                 self.workspace.refresh_editor_views();
-                let file = self
-                    .workspace
-                    .doc_of_view(view)
-                    .and_then(|d| d.editor.as_ref())
-                    .map(|e| e.file_id());
+                let file = crate::edit_ops::view_file(&self.workspace, view);
                 if let (Some(file), false) = (file, outcome.select.is_empty())
                     && let Some(view_ref) = self.workspace.view_mut(view)
                 {
@@ -1351,6 +1363,58 @@ impl FastTickApp {
                 }
             }
             Err(message) => self.notify(ctx, NoticeLevel::Warning, message),
+        }
+    }
+
+    /// Runs a project change after its file dialog (tests call it with a
+    /// path instead of the dialog).
+    pub fn project_file_picked(
+        &mut self,
+        ctx: &egui::Context,
+        view: ViewId,
+        purpose: DialogPurpose,
+        path: PathBuf,
+    ) {
+        let Some(doc) = self.workspace.doc_of_view(view).map(|d| d.id) else {
+            return;
+        };
+        let Some(editor) = self.workspace.editor_mut(doc) else {
+            return;
+        };
+        let result = match purpose {
+            DialogPurpose::AddTreeFile => editor.add_tree_file(&path).map(|file| {
+                (
+                    format!("Added {} to the project.", file_name(&path)),
+                    editor.tree_refs().iter().position(|r| r.file == file),
+                )
+            }),
+            DialogPurpose::NewTreeFile => editor.new_tree_file(&path).map(|file| {
+                (
+                    format!("Made the new file {}.", file_name(&path)),
+                    editor.tree_refs().iter().position(|r| r.file == file),
+                )
+            }),
+            DialogPurpose::SaveProject => editor
+                .save_project_as(&path)
+                .map(|()| (format!("Saved the project {}.", file_name(&path)), None)),
+            _ => return,
+        };
+        match result {
+            Ok((message, show)) => {
+                if purpose == DialogPurpose::SaveProject
+                    && let Some(document) = self.workspace.doc_mut(doc)
+                {
+                    document.kind = DocKind::TreeFile { path: path.clone() };
+                    document.title = file_name(&path);
+                    self.settings.add_recent(&path);
+                }
+                self.workspace.refresh_editor_views();
+                if let Some(index) = show {
+                    self.workspace.set_view_root(view, InstanceIndex(index));
+                }
+                self.notify(ctx, NoticeLevel::Info, message);
+            }
+            Err(message) => self.notify(ctx, NoticeLevel::Error, message),
         }
     }
 
@@ -2196,11 +2260,18 @@ impl Viewer<'_> {
         };
         let doc_id = doc.id;
         let is_live = self.live_doc == Some(doc_id);
+        let view_root = self
+            .workspace
+            .view(view_id)
+            .map_or(0, |v| v.root_instance.0);
         let edit_context = doc
             .editor
             .as_deref()
             .filter(|_| doc.mode() == self.mode)
-            .map(|editor| EditMenuContext::new(view_id, editor, self.has_clipboard));
+            .map(|editor| {
+                let file = editor.tree_file(view_root).unwrap_or(editor.file_id());
+                EditMenuContext::new(view_id, editor, file, self.has_clipboard)
+            });
         let editable = edit_context.is_some();
         // Statuses and markers of this frame, before the canvas draws.
         self.workspace.refresh_decorations(self.live, self.live_doc);

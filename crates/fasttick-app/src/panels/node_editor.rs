@@ -10,6 +10,7 @@ use fasttick_core::bt::{
 };
 use fasttick_core::edit::Condition;
 use fasttick_core::models::{ModelSource, NodeKind, NodeModel, PortDirection};
+use fasttick_core::project::FileId;
 use fasttick_core::runtime::InstanceIndex;
 use fasttick_core::validate::Severity;
 use fasttick_core::xml::NodeId;
@@ -24,18 +25,18 @@ pub fn show(
     ui: &mut Ui,
     view: ViewId,
     editor: &EditorDoc,
+    file_id: FileId,
     node: NodeId,
     selected: usize,
     actions: &mut Vec<AppAction>,
 ) {
-    let Some(file) = editor.file() else {
+    let Some(file) = editor.project().file(file_id) else {
         return;
     };
     let Some(element) = NodeView::new(file.doc(), node) else {
         ui.label(RichText::new("The node is not in the file any more.").weak());
         return;
     };
-    let file_id = editor.file_id();
     let type_id = element.type_id().unwrap_or("").to_owned();
     let model = editor.project().lookup_model(file_id, &type_id);
     let mut edit = |op: EditOp| actions.push(AppAction::Edit(view, op));
@@ -86,7 +87,9 @@ pub fn show(
             ui.end_row();
 
             ui.label("Type");
-            if let Some(new_type) = type_combo(ui, editor, node, &type_id, model.map(|(m, _)| m)) {
+            if let Some(new_type) =
+                type_combo(ui, editor, file_id, node, &type_id, model.map(|(m, _)| m))
+            {
                 edit(EditOp::ChangeType {
                     node,
                     type_id: new_type,
@@ -223,6 +226,7 @@ fn text_field(
 fn type_combo(
     ui: &mut Ui,
     editor: &EditorDoc,
+    file: FileId,
     node: NodeId,
     type_id: &str,
     model: Option<&NodeModel>,
@@ -232,7 +236,7 @@ fn type_combo(
         .selected_text(type_id)
         .height(320.0)
         .show_ui(ui, |ui| {
-            let all = editor.project().registry().all_models(editor.file_id());
+            let all = editor.project().registry().all_models(file);
             let kinds: Vec<NodeKind> = match model {
                 Some(model) => vec![model.kind],
                 None => NodeKind::ALL.to_vec(),

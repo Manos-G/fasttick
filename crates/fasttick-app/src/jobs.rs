@@ -56,6 +56,13 @@ pub enum DialogPurpose {
     LoadBreakpoints,
     /// Choose a file for the filtered transitions.
     ExportTransitions(ExportFormat),
+    /// Choose a tree XML file to add to the project of the active edit
+    /// document.
+    AddTreeFile,
+    /// Choose the path of a new tree XML file for the project.
+    NewTreeFile,
+    /// Choose the path of the project file (`.ftproj`).
+    SaveProject,
 }
 
 /// The file extension of breakpoint files.
@@ -364,6 +371,23 @@ impl Jobs {
                     .add_filter("FastTick breakpoints", &["json"])
                     .add_filter("All files", &["*"])
                     .pick_file(),
+                DialogPurpose::AddTreeFile => dialog
+                    .set_title("Add a tree file to the project")
+                    .add_filter("Behavior trees", &["xml"])
+                    .add_filter("All files", &["*"])
+                    .pick_file(),
+                DialogPurpose::NewTreeFile => dialog
+                    .set_title("New tree file")
+                    .set_file_name("tree.xml")
+                    .add_filter("Behavior trees", &["xml"])
+                    .save_file()
+                    .map(|p| with_extension(p, "xml")),
+                DialogPurpose::SaveProject => dialog
+                    .set_title("Save the project")
+                    .set_file_name("project.ftproj")
+                    .add_filter("FastTick projects", &["ftproj"])
+                    .save_file()
+                    .map(|p| with_extension(p, "ftproj")),
                 DialogPurpose::ExportTransitions(format) => {
                     let extension = format.extension();
                     dialog

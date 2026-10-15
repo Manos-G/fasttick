@@ -58,7 +58,7 @@ impl ProblemFilter {
 
 /// Draws the problems list.
 pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
-    let Some((view, editor)) = super::active_edit(cx.workspace, cx.mode) else {
+    let Some((view, editor, _)) = super::active_edit(cx.workspace, cx.mode) else {
         super::empty(ui, "The problems of a tree file show here in edit mode.");
         return;
     };
@@ -97,7 +97,6 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         );
     });
     ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
-    let main = editor.file_id();
     let project = editor.project();
     let rows: Vec<&Problem> = editor
         .problems()
@@ -164,7 +163,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                     ui.label(RichText::new(text).weak());
                 });
                 if row.response().clicked()
-                    && problem.file == main
+                    && editor.is_tree_file(problem.file)
                     && let Some(node) = problem.node
                 {
                     cx.actions.push(AppAction::RevealXml {

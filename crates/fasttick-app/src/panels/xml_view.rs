@@ -207,18 +207,17 @@ fn layout_job(
 
 /// Draws the XML panel.
 pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
-    let Some((view_id, editor)) = super::active_edit(cx.workspace, cx.mode) else {
+    let Some((view_id, editor, main)) = super::active_edit(cx.workspace, cx.mode) else {
         super::empty(ui, "The XML of a tree file shows here in edit mode.");
         return;
     };
     let Some(view) = cx.workspace.view(view_id) else {
         return;
     };
-    let Some(file) = editor.file() else {
+    let Some(file) = editor.project().file(main) else {
         return;
     };
-    let main = editor.file_id();
-    let key = (view.doc, editor.revision());
+    let key = (view.doc, editor.revision() ^ ((main.0 as u64) << 48));
 
     // The text, cached for each revision.
     let cache_id = ui.id().with("xml_text");

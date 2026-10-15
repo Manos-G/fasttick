@@ -8,6 +8,7 @@ use super::PanelContext;
 use crate::actions::{AppAction, NamePurpose};
 use crate::canvas::SubtreeLinking;
 use crate::edit_ops::EditOp;
+use crate::jobs::DialogPurpose;
 
 /// One row of the tree list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,9 +110,14 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     let doc_id = doc.id;
     let editable = doc.editor.is_some();
     let linking = doc.linking;
+    // Edit documents: the file of each row (for the file headers of a
+    // project with several files) and the main trees of the files.
+    let mut files: Vec<String> = Vec::new();
+    let mut mains: Vec<InstanceIndex> = Vec::new();
     let (list, main) = match &doc.editor {
-        Some(editor) => (
-            editor
+        Some(editor) => {
+            let refs = editor.tree_refs();
+            let list: Vec<TreeRow> = editor
                 .trees()
                 .into_iter()
                 .map(|(index, tree_id)| TreeRow {
@@ -120,10 +126,20 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                     path: String::new(),
                     depth: 0,
                 })
-                .collect(),
-            InstanceIndex(editor.main_tree_index()),
-        ),
+                .collect();
+            files = refs.iter().map(|r| editor.file_name(r.file)).collect();
+            mains = (0..list.len())
+                .filter(|i| editor.is_main_tree(*i))
+                .map(InstanceIndex)
+                .collect();
+            (list, InstanceIndex(editor.main_tree_index()))
+        }
         None => (rows(&doc.runtime, linking), doc.main_instance),
+    };
+    let several_files = editable && {
+        let mut names = files.clone();
+        names.dedup();
+        names.len() > 1
     };
     ui.label(RichText::new(&doc.title).strong());
     ui.label(
@@ -136,22 +152,62 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         .small()
         .weak(),
     );
-    if editable
-        && ui
-            .button("Add tree…")
-            .on_hover_text("Add an empty <BehaviorTree> to the file")
-            .clicked()
-    {
-        cx.actions.push(AppAction::PromptName {
-            view: view_id,
-            purpose: NamePurpose::AddTree,
+    if editable {
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .button("Add tree…")
+                .on_hover_text("Add an empty <BehaviorTree> to the file of this view")
+                .clicked()
+            {
+                cx.actions.push(AppAction::PromptName {
+                    view: view_id,
+                    purpose: NamePurpose::AddTree,
+                });
+            }
+            ui.menu_button("Project", |ui| {
+                for (label, purpose, tip) in [
+                    (
+                        "Add tree file…",
+                        DialogPurpose::AddTreeFile,
+                        "Add an XML file to the project",
+                    ),
+                    (
+                        "New tree file…",
+                        DialogPurpose::NewTreeFile,
+                        "Make a new XML file in the project",
+                    ),
+                    (
+                        "Save project as…",
+                        DialogPurpose::SaveProject,
+                        "Write a project file that lists the open files",
+                    ),
+                ] {
+                    if ui.button(label).on_hover_text(tip).clicked() {
+                        cx.actions.push(AppAction::ProjectFile {
+                            view: view_id,
+                            purpose,
+                        });
+                        ui.close();
+                    }
+                }
+            });
         });
     }
     ui.separator();
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            for row in list {
+            for (position, row) in list.into_iter().enumerate() {
+                if several_files
+                    && files.get(position) != position.checked_sub(1).and_then(|p| files.get(p))
+                {
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(files.get(position).map_or("", String::as_str))
+                            .small()
+                            .strong(),
+                    );
+                }
                 ui.horizontal(|ui| {
                     ui.add_space(row.depth as f32 * 14.0);
                     let selected = linking == SubtreeLinking::ByTreeId && row.instance == current;
@@ -168,9 +224,9 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                     if !row.path.is_empty() {
                         ui.label(RichText::new(&row.path).small().weak());
                     }
-                    if editable && row.instance == main {
+                    if editable && mains.contains(&row.instance) {
                         ui.label(RichText::new("main").small().weak())
-                            .on_hover_text("main_tree_to_execute");
+                            .on_hover_text("main_tree_to_execute of the file");
                     }
                     if response.clicked() {
                         match linking {
@@ -197,7 +253,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                         let edit = |op: EditOp| AppAction::Edit(view_id, op);
                         if ui
                             .add_enabled(
-                                row.instance != main,
+                                !mains.contains(&row.instance),
                                 egui::Button::new("Set as main tree"),
                             )
                             .clicked()

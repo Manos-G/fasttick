@@ -8,7 +8,7 @@
 
 use fasttick_core::bt::NodeView;
 use fasttick_core::edit::{CoalesceKey, Condition, copy};
-use fasttick_core::models::NodeModel;
+use fasttick_core::models::{ModelSource, NodeModel};
 use fasttick_core::project::FileId;
 use fasttick_core::runtime::InstanceIndex;
 use fasttick_core::xml::NodeId;
@@ -172,7 +172,7 @@ impl EditOp {
 /// What the app does after an operation.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EditOutcome {
-    /// The nodes to select (in the main file).
+    /// The nodes to select (in the file of the view).
     pub select: Vec<NodeId>,
     /// The tree to show in the view.
     pub show_tree: Option<InstanceIndex>,
@@ -180,17 +180,27 @@ pub struct EditOutcome {
     pub message: Option<String>,
 }
 
-/// The selected, editable nodes of an edit view: XML nodes of the main
-/// file that are not inline nodes of an expanded SubTree. Top-most first in
-/// tree order.
+/// The file of the tree that an edit view shows.
+pub fn view_file(workspace: &Workspace, view: ViewId) -> Option<FileId> {
+    let view = workspace.view(view)?;
+    let editor = workspace.doc(view.doc)?.editor.as_deref()?;
+    Some(
+        editor
+            .tree_file(view.root_instance.0)
+            .unwrap_or(editor.file_id()),
+    )
+}
+
+/// The selected, editable nodes of an edit view: XML nodes of the file of
+/// the view that are not inline nodes of an expanded SubTree. Top-most
+/// first in tree order.
 pub fn selected_nodes(workspace: &Workspace, view: ViewId) -> Vec<NodeId> {
+    let Some(main) = view_file(workspace, view) else {
+        return Vec::new();
+    };
     let Some(view) = workspace.view(view) else {
         return Vec::new();
     };
-    let Some(editor) = workspace.doc(view.doc).and_then(|d| d.editor.as_deref()) else {
-        return Vec::new();
-    };
-    let main = editor.file_id();
     let tree = view.canvas.tree();
     tree.selected()
         .filter_map(|id| tree.get(id))
@@ -204,8 +214,8 @@ pub fn selected_nodes(workspace: &Workspace, view: ViewId) -> Vec<NodeId> {
 
 /// The primary selected, editable node of an edit view.
 pub fn primary_node(workspace: &Workspace, view: ViewId) -> Option<NodeId> {
+    let main = view_file(workspace, view)?;
     let view_ref = workspace.view(view)?;
-    let editor = workspace.doc(view_ref.doc)?.editor.as_deref()?;
     let tree = view_ref.canvas.tree();
     let node = view_ref
         .canvas
@@ -214,14 +224,14 @@ pub fn primary_node(workspace: &Workspace, view: ViewId) -> Option<NodeId> {
         .or_else(|| tree.selected().next())
         .and_then(|id| tree.get(id))?;
     match node.source {
-        NodeSource::Xml(file, id) if file == editor.file_id() && !node.inline => Some(id),
+        NodeSource::Xml(file, id) if file == main && !node.inline => Some(id),
         _ => None,
     }
 }
 
 /// The parent element and the element index of `node`.
-fn position_of(editor: &EditorDoc, node: NodeId) -> Option<(NodeId, usize)> {
-    let doc = editor.file()?.doc();
+fn position_of(editor: &EditorDoc, file: FileId, node: NodeId) -> Option<(NodeId, usize)> {
+    let doc = editor.project().file(file)?.doc();
     let parent = doc.parent(node)?;
     let index = doc.element_children(parent).position(|c| c == node)?;
     Some((parent, index))
@@ -229,8 +239,8 @@ fn position_of(editor: &EditorDoc, node: NodeId) -> Option<(NodeId, usize)> {
 
 /// True if `node` is the root node of a tree (its parent is the
 /// `<BehaviorTree>` element).
-fn is_tree_root(editor: &EditorDoc, node: NodeId) -> bool {
-    let Some(file) = editor.file() else {
+fn is_tree_root(editor: &EditorDoc, file: FileId, node: NodeId) -> bool {
+    let Some(file) = editor.project().file(file) else {
         return false;
     };
     let Some(parent) = file.doc().parent(node) else {
@@ -242,17 +252,22 @@ fn is_tree_root(editor: &EditorDoc, node: NodeId) -> bool {
 /// The parent and the index for a placement relative to `target`.
 fn place(
     editor: &EditorDoc,
+    file: FileId,
     target: NodeId,
     placement: Placement,
 ) -> Result<(NodeId, usize), String> {
-    let doc = editor.file().ok_or("the file is closed")?.doc();
+    let doc = editor
+        .project()
+        .file(file)
+        .ok_or("the file is closed")?
+        .doc();
     match placement {
         Placement::Inside => Ok((target, doc.element_children(target).count())),
         Placement::Before | Placement::After => {
-            if is_tree_root(editor, target) {
+            if is_tree_root(editor, file, target) {
                 return Err("A tree has one root node. Drop on the node to add a child.".into());
             }
-            let (parent, index) = position_of(editor, target)
+            let (parent, index) = position_of(editor, file, target)
                 .ok_or("This node has no parent. Drop on the node to add a child.")?;
             Ok((
                 parent,
@@ -270,24 +285,25 @@ fn place(
 /// empty tree or as an unconnected node of the tree `tree_id`.
 fn add_node(
     editor: &mut EditorDoc,
+    file: FileId,
     tree_id: Option<String>,
     type_id: &str,
     target: Option<(NodeId, Placement)>,
 ) -> Result<NodeId, String> {
-    let file = editor.file_id();
     let model = editor
         .project()
         .lookup_model(file, type_id)
         .map(|(model, _)| model.clone());
     match target {
         Some((target, placement)) => {
-            let (parent, index) = place(editor, target, placement)?;
+            let (parent, index) = place(editor, file, target, placement)?;
             editor.edit(|ed| ed.add_node(file, parent, index, type_id, model.as_ref()))
         }
         None => {
             let tree_id = tree_id.ok_or("the view shows no tree")?;
             let tree_element = editor
-                .file()
+                .project()
+                .file(file)
                 .and_then(|f| f.index().tree(&tree_id).map(|t| (t.element, t.root)));
             match tree_element {
                 Some((element, None)) => {
@@ -305,15 +321,16 @@ fn add_node(
 /// unconnected nodes of the tree `tree_id`.
 fn paste(
     editor: &mut EditorDoc,
+    file: FileId,
     tree_id: Option<String>,
     text: &str,
     parent: Option<NodeId>,
 ) -> Result<Vec<NodeId>, String> {
-    let file = editor.file_id();
     match parent {
         Some(parent) => {
             let index = editor
-                .file()
+                .project()
+                .file(file)
                 .map(|f| f.doc().element_children(parent).count())
                 .unwrap_or(0);
             editor.edit(|ed| ed.paste(file, text, parent, index))
@@ -343,6 +360,7 @@ pub fn run(
     let selected = selected_nodes(workspace, view);
     let primary = primary_node(workspace, view);
     let tree_id = view_tree_id(workspace, view);
+    let file = view_file(workspace, view).ok_or("the view is closed")?;
     let doc_id = workspace
         .view(view)
         .map(|v| v.doc)
@@ -350,15 +368,23 @@ pub fn run(
     let editor = workspace
         .editor_mut(doc_id)
         .ok_or("this document cannot be edited")?;
-    let file = editor.file_id();
+    // Tree and model commands work in the file that holds the tree or the
+    // model.
+    let file_of_tree =
+        |editor: &EditorDoc, id: &str| editor.project().find_tree(id).map_or(file, |r| r.file);
+    let file_of_model = |editor: &EditorDoc, id: &str| match editor.project().lookup_model(file, id)
+    {
+        Some((_, ModelSource::File(f))) => f,
+        _ => file,
+    };
     let mut outcome = EditOutcome::default();
     match op {
         EditOp::AddNode { type_id, target } => {
             let target = target.or(primary.map(|node| (node, Placement::Inside)));
-            outcome.select = vec![add_node(editor, tree_id, &type_id, target)?];
+            outcome.select = vec![add_node(editor, file, tree_id, &type_id, target)?];
         }
         EditOp::AddUnconnected { type_id } => {
-            outcome.select = vec![add_node(editor, tree_id, &type_id, None)?];
+            outcome.select = vec![add_node(editor, file, tree_id, &type_id, None)?];
         }
         EditOp::Delete => {
             if selected.is_empty() {
@@ -378,11 +404,11 @@ pub fn run(
         }
         EditOp::Paste => {
             let text = clipboard.clone().ok_or("The clipboard is empty.")?;
-            outcome.select = paste(editor, tree_id, &text, primary)?;
+            outcome.select = paste(editor, file, tree_id, &text, primary)?;
         }
         EditOp::PasteUnconnected => {
             let text = clipboard.clone().ok_or("The clipboard is empty.")?;
-            outcome.select = paste(editor, tree_id, &text, None)?;
+            outcome.select = paste(editor, file, tree_id, &text, None)?;
         }
         EditOp::Duplicate => {
             if selected.is_empty() {
@@ -447,9 +473,11 @@ pub fn run(
         }
         EditOp::MoveSibling(delta) => {
             let node = primary.ok_or("Select a node to move.")?;
-            let (parent, index) = position_of(editor, node).ok_or("This node has no parent.")?;
+            let (parent, index) =
+                position_of(editor, file, node).ok_or("This node has no parent.")?;
             let count = editor
-                .file()
+                .project()
+                .file(file)
                 .map(|f| f.doc().element_children(parent).count())
                 .unwrap_or(0);
             let new_index = index as i64 + i64::from(delta);
@@ -512,24 +540,29 @@ pub fn run(
             outcome.show_tree = editor.tree_index(&id).map(InstanceIndex);
         }
         EditOp::RenameTree { old, new } => {
+            let file = file_of_tree(editor, &old);
             let count = editor.edit(|ed| ed.rename_tree(file, &old, &new))?;
             outcome.message = Some(format!(
                 "Renamed {old} to {new} ({count} references changed)."
             ));
         }
         EditOp::DeleteTree { id } => {
+            let file = file_of_tree(editor, &id);
             editor.edit(|ed| ed.delete_tree(file, &id))?;
         }
         EditOp::SetMainTree { id } => {
+            let file = file_of_tree(editor, &id);
             editor.edit(|ed| ed.set_main_tree(file, Some(&id)))?;
         }
         EditOp::AddModel(model) => {
             editor.edit(|ed| ed.add_model(file, &model))?;
         }
         EditOp::ReplaceModel { old_id, model } => {
+            let file = file_of_model(editor, &old_id);
             editor.edit(|ed| ed.replace_model(file, &old_id, &model))?;
         }
         EditOp::RemoveModel(id) => {
+            let file = file_of_model(editor, &id);
             editor.edit(|ed| ed.remove_model(file, &id))?;
         }
         EditOp::Undo => {

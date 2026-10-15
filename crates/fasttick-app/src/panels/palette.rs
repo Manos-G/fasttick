@@ -33,7 +33,7 @@ pub fn is_editable(source: ModelSource) -> bool {
 
 /// Draws the palette.
 pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
-    let Some((view, editor)) = super::active_edit(cx.workspace, cx.mode) else {
+    let Some((view, editor, file)) = super::active_edit(cx.workspace, cx.mode) else {
         super::empty(ui, "Open a tree file to see its node types.");
         return;
     };
@@ -64,7 +64,6 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     ui.add_space(4.0);
 
     let project = editor.project();
-    let file = editor.file_id();
     let all = project.registry().all_models(file);
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])

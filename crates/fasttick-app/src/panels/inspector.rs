@@ -43,8 +43,8 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| match source {
-                NodeSource::Xml(file, xml) if !inline && file == editor.file_id() => {
-                    node_editor::show(ui, view_id, editor, xml, count, cx.actions);
+                NodeSource::Xml(file, xml) if !inline && editor.is_tree_file(file) => {
+                    node_editor::show(ui, view_id, editor, file, xml, count, cx.actions);
                 }
                 _ => {
                     ui.label(RichText::new(&node.label).strong().size(15.0));

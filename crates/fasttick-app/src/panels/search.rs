@@ -151,7 +151,6 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     if state.key.as_ref() != Some(&key) {
         state.results = match &doc.editor {
             Some(editor) => {
-                let main = editor.file_id();
                 let project = editor.project();
                 search_project(project, &state.query)
                     .into_iter()
@@ -169,7 +168,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                             label,
                             field: m.field,
                             attribute: m.attribute,
-                            can_reveal: m.file == main,
+                            can_reveal: editor.is_tree_file(m.file),
                             text: m.text,
                             range: m.range,
                             target: Target::Xml(m.file, m.node),

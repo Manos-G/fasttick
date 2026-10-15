@@ -277,7 +277,17 @@ impl Workspace {
             if view.built_revision == editor.revision() {
                 continue;
             }
-            if view.root_instance.0 >= editor.trees().len() {
+            // The view keeps its tree when the tree indices move (a tree
+            // was added or removed before it). After a rename the index
+            // stays.
+            let trees = editor.trees();
+            let shown = &view.canvas.tree().title;
+            if trees.get(view.root_instance.0).map(|(_, id)| id) != Some(shown)
+                && let Some(index) = editor.tree_index(shown)
+            {
+                view.root_instance = InstanceIndex(index);
+            }
+            if view.root_instance.0 >= trees.len() {
                 view.root_instance = InstanceIndex(editor.main_tree_index());
             }
             let tree = editor.build_canvas(view.root_instance.0, &view.expansion);
@@ -306,7 +316,7 @@ impl Workspace {
             && let Some(index) = self
                 .doc_of_view(id)
                 .and_then(|d| d.editor.as_deref())
-                .and_then(|e| e.tree_of_node(node))
+                .and_then(|e| e.tree_of_node(file, node))
         {
             self.set_view_root(id, InstanceIndex(index));
         }

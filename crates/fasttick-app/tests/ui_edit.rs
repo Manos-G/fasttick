@@ -649,3 +649,103 @@ fn tree_list_adds_renames_and_sets_the_main_tree() {
     harness.run();
     assert!(xml(&harness).contains("main_tree_to_execute=\"Spare\""));
 }
+
+#[test]
+fn project_with_several_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a.xml");
+    let b = dir.path().join("b.xml");
+    let a_text = r#"<root BTCPP_format="4" main_tree_to_execute="Main">
+  <BehaviorTree ID="Main">
+    <Sequence name="seq">
+      <SubTree ID="Other" name="other"/>
+    </Sequence>
+  </BehaviorTree>
+</root>
+"#;
+    std::fs::write(&a, a_text).unwrap();
+    std::fs::write(
+        &b,
+        r#"<root BTCPP_format="4">
+  <BehaviorTree ID="Other">
+    <AlwaysSuccess name="leaf"/>
+  </BehaviorTree>
+</root>
+"#,
+    )
+    .unwrap();
+    let project_path = dir.path().join("p.ftproj");
+    let mut project = fasttick_core::project::Project::open_xml(&a).unwrap();
+    project.add_file(&b).unwrap();
+    project.save_as(&project_path).unwrap();
+
+    let options = StartOptions {
+        open: vec![project_path.clone()],
+        theme: Some(ThemeChoice::Light),
+        mode: Some(Mode::Edit),
+        connect: None,
+    };
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1400.0, 900.0))
+        .with_max_steps(64)
+        .with_step_dt(1.0 / 30.0)
+        .build_eframe(move |cc| FastTickApp::new(cc, options));
+    harness.run();
+    // The tree list has a header for each file.
+    harness.get_by_label("a.xml");
+    harness.get_by_label("b.xml");
+    let title = |h: &Harness<'static, FastTickApp>| {
+        h.state()
+            .workspace()
+            .active()
+            .unwrap()
+            .canvas
+            .tree()
+            .title
+            .clone()
+    };
+    assert_eq!(title(&harness), "Main");
+
+    // Edit the tree of the second file.
+    harness.get_by_role_and_label(Role::Button, "Other").click();
+    harness.run();
+    assert_eq!(title(&harness), "Other");
+    select(&mut harness, "leaf");
+    type_into(&mut harness, Field::Label("Name"), "leaf2", true);
+    command(&mut harness, Command::Save);
+    let b_text = std::fs::read_to_string(&b).unwrap();
+    assert!(b_text.contains("name=\"leaf2\""), "{b_text}");
+    assert_eq!(
+        std::fs::read_to_string(&a).unwrap(),
+        a_text,
+        "a.xml did not change"
+    );
+
+    // A new file in the project.
+    let c = dir.path().join("c.xml");
+    let view = harness.state().workspace().active_view.unwrap();
+    let ctx = harness.ctx.clone();
+    harness.state_mut().project_file_picked(
+        &ctx,
+        view,
+        fasttick_app::jobs::DialogPurpose::NewTreeFile,
+        c.clone(),
+    );
+    harness.run();
+    assert!(c.exists());
+    harness.get_by_label("c.xml");
+    // The view shows the tree of the new file; a node goes into that file.
+    let shown = title(&harness);
+    command(&mut harness, Command::Save);
+    harness.state_mut().workspace_mut();
+    let app = harness.state();
+    let view = app.workspace().active().unwrap();
+    let doc = app.workspace().doc(view.doc).unwrap();
+    let editor = doc.editor.as_ref().unwrap();
+    let file = editor.tree_file(view.root_instance.0).unwrap();
+    assert_eq!(editor.file_name(file), "c.xml");
+    assert_eq!(
+        editor.tree_id(view.root_instance.0).as_deref(),
+        Some(shown.as_str())
+    );
+}
