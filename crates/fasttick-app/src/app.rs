@@ -15,10 +15,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use egui::{Color32, Id, RichText, Ui, WidgetText};
+use egui::{Id, RichText, Ui, WidgetText};
 use egui_dock::tab_viewer::OnCloseResponse;
 use egui_dock::{DockArea, DockState, TabViewer};
-use fasttick_core::runtime::{InstanceIndex, RuntimeTree};
+use fasttick_core::runtime::InstanceIndex;
 use fasttick_protocol::session::{ConnectionState, SessionEvent};
 use serde::{Deserialize, Serialize};
 
@@ -254,9 +254,9 @@ impl FastTickApp {
             }
             RecentKind::Project => return Err(project_message(path)),
             RecentKind::Tree => {
-                let tree = crate::jobs::read_tree(path)
+                let loaded = crate::jobs::read_tree(path)
                     .map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
-                self.add_tree_document(path, Arc::new(tree));
+                self.add_tree_document(path, loaded);
             }
         }
         Ok(())
@@ -295,23 +295,29 @@ impl FastTickApp {
         self.workspace.active_view = Some(view);
     }
 
-    fn add_tree_document(&mut self, path: &Path, tree: Arc<RuntimeTree>) -> Option<ViewId> {
+    fn add_tree_document(
+        &mut self,
+        path: &Path,
+        loaded: crate::jobs::LoadedTree,
+    ) -> Option<ViewId> {
         if let Some(view) = self.find_open_view(path) {
             self.focus_view(view);
             return Some(view);
         }
         let title = file_name(path);
+        let main = loaded.main_instance();
         let doc = self.workspace.add_doc(
             DocKind::TreeFile {
                 path: path.to_owned(),
             },
             title,
-            tree,
+            loaded.tree,
             None,
         );
-        let view = self
-            .workspace
-            .open_view(doc, InstanceIndex(0), self.view_options())?;
+        if let Some(document) = self.workspace.doc_mut(doc) {
+            document.main_instance = main;
+        }
+        let view = self.workspace.open_view(doc, main, self.view_options())?;
         dock::add_document(&mut self.docks[Mode::Edit.index()], Tab::Document(view));
         self.settings.add_recent(path);
         self.focus_view(view);
@@ -577,8 +583,8 @@ impl FastTickApp {
                     }
                 }
                 JobResult::Tree { path, result } => match result {
-                    Ok(tree) => {
-                        self.add_tree_document(&path, tree);
+                    Ok(loaded) => {
+                        self.add_tree_document(&path, loaded);
                     }
                     Err(message) => {
                         self.settings.remove_recent(&path);
@@ -1009,7 +1015,10 @@ impl FastTickApp {
                 ui.separator();
                 self.menu_item(ui, Command::ResetLayout);
             });
-            if ui.checkbox(&mut self.settings.show_minimap, "Minimap").changed() {
+            if ui
+                .checkbox(&mut self.settings.show_minimap, "Minimap")
+                .changed()
+            {
                 let show = self.settings.show_minimap;
                 for view in self.workspace.views_in_mode(self.mode) {
                     if let Some(v) = self.workspace.view_mut(view) {
@@ -1471,9 +1480,4 @@ impl eframe::App for FastTickApp {
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
         visuals.panel_fill.to_normalized_gamma_f32()
     }
-}
-
-/// The accent colour of the current theme (for tests and widgets).
-pub fn accent(ctx: &egui::Context) -> Color32 {
-    CanvasPalette::for_theme(ctx.theme()).accent
 }

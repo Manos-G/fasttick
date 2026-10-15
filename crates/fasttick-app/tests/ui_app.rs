@@ -428,3 +428,22 @@ fn bad_file_shows_a_notice() {
     harness.get_by_label_contains("Cannot open");
     assert!(harness.state().workspace().docs().is_empty());
 }
+
+#[test]
+fn main_tree_to_execute_is_shown_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("two.xml");
+    std::fs::write(
+        &path,
+        r#"<root BTCPP_format="4" main_tree_to_execute="Second">
+            <BehaviorTree ID="First"><AlwaysSuccess name="first_leaf"/></BehaviorTree>
+            <BehaviorTree ID="Second"><AlwaysFailure name="second_leaf"/></BehaviorTree>
+        </root>"#,
+    )
+    .unwrap();
+    let harness = harness(light(vec![path]));
+    let view = harness.state().workspace().active().unwrap();
+    assert_eq!(view.canvas.tree().title, "Second");
+    tree_item(&harness, "second_leaf");
+    assert!(harness.query_by_label("first_leaf").is_none());
+}

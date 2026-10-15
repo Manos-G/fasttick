@@ -101,6 +101,9 @@ pub struct Document {
     pub linking: SubtreeLinking,
     /// Replay data (replay documents only).
     pub replay: Option<ReplayData>,
+    /// The main tree: `main_tree_to_execute` of a tree file, else the
+    /// first tree (the root instance of a runtime tree).
+    pub main_instance: InstanceIndex,
 }
 
 impl Document {
@@ -232,6 +235,7 @@ impl Workspace {
             runtime,
             linking,
             replay,
+            main_instance: InstanceIndex(0),
         });
         id
     }

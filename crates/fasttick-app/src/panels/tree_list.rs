@@ -105,6 +105,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         return;
     }
     let current = view.root_instance;
+    let main = doc.main_instance;
     let doc_id = doc.id;
     let linking = doc.linking;
     let list = rows(&doc.runtime, linking);
@@ -128,7 +129,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                     ui.add_space(row.depth as f32 * 14.0);
                     let selected = linking == SubtreeLinking::ByTreeId && row.instance == current;
                     let mut text = RichText::new(&row.tree_id);
-                    if row.instance == InstanceIndex(0) {
+                    if row.instance == main {
                         text = text.strong();
                     }
                     let response = ui.selectable_label(selected, text);

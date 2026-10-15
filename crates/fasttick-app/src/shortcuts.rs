@@ -439,11 +439,26 @@ mod tests {
     fn shortcut_text_uses_symbols() {
         let ctx = egui::Context::default();
         let map = KeyMap::default();
-        assert_eq!(map.shortcut_text(&ctx, Command::ZoomIn).as_deref(), Some("Ctrl+="));
-        assert_eq!(map.shortcut_text(&ctx, Command::ZoomOut).as_deref(), Some("Ctrl+-"));
-        assert_eq!(map.shortcut_text(&ctx, Command::SplitView).as_deref(), Some("Ctrl+\\"));
-        assert_eq!(map.shortcut_text(&ctx, Command::OpenLog).as_deref(), Some("Ctrl+Shift+O"));
-        assert_eq!(map.shortcut_text(&ctx, Command::FitToView).as_deref(), Some("F"));
+        assert_eq!(
+            map.shortcut_text(&ctx, Command::ZoomIn).as_deref(),
+            Some("Ctrl+=")
+        );
+        assert_eq!(
+            map.shortcut_text(&ctx, Command::ZoomOut).as_deref(),
+            Some("Ctrl+-")
+        );
+        assert_eq!(
+            map.shortcut_text(&ctx, Command::SplitView).as_deref(),
+            Some("Ctrl+\\")
+        );
+        assert_eq!(
+            map.shortcut_text(&ctx, Command::OpenLog).as_deref(),
+            Some("Ctrl+Shift+O")
+        );
+        assert_eq!(
+            map.shortcut_text(&ctx, Command::FitToView).as_deref(),
+            Some("F")
+        );
     }
 
     #[test]

@@ -218,6 +218,7 @@ pub struct CanvasState {
     size: Vec2,
     stats: CanvasStats,
     fonts: CardFonts,
+    minimap_cache: Option<(u64, Arc<Mesh>)>,
 }
 
 /// The duration of view animations, in seconds.
@@ -257,6 +258,7 @@ impl CanvasState {
             points: Vec::new(),
             size: Vec2::ZERO,
             fonts: CardFonts::default(),
+            minimap_cache: None,
         }
     }
 
@@ -434,6 +436,7 @@ impl CanvasState {
     }
 
     fn relayout(&mut self) {
+        self.minimap_cache = None;
         self.layout = layout::layout(&self.tree, self.direction);
         let bounds = layout::subtree_bounds(&self.tree, &self.layout);
         self.groups = self
@@ -1805,17 +1808,42 @@ fn minimap(state: &mut CanvasState, ui: &Ui, rect: Rect, palette: &CanvasPalette
         Stroke::new(1.0, palette.card_border),
         StrokeKind::Inside,
     );
-    let mut mesh = Mesh::default();
-    for (node, world) in state.tree.nodes().iter().zip(&state.layout.rects) {
-        let color = palette
-            .status(node.deco.status)
-            .unwrap_or_else(|| palette.category(node.category));
-        let r = Rect::from_min_max(to_mini(world.min), to_mini(world.max));
-        let r = Rect::from_center_size(r.center(), r.size().max(Vec2::splat(1.0)));
-        mesh.add_colored_rect(r, color);
-    }
-    painter.add(Shape::mesh(mesh));
-    let view = Rect::from_min_max(to_mini(visible.min), to_mini(visible.max)).intersect(inner.expand(2.0));
+    // The node mesh changes only with the layout, the statuses, the
+    // palette or the place of the minimap. Pan and zoom move only the view
+    // rectangle, so the mesh stays in a cache.
+    let key = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for value in [inner.min.x, inner.min.y, inner.max.x, inner.max.y, scale] {
+            value.to_bits().hash(&mut hasher);
+        }
+        palette_key(palette).hash(&mut hasher);
+        state.tree.len().hash(&mut hasher);
+        for node in state.tree.nodes() {
+            node.deco.status.hash(&mut hasher);
+        }
+        hasher.finish()
+    };
+    let mesh = match &state.minimap_cache {
+        Some((cached, mesh)) if *cached == key => mesh.clone(),
+        _ => {
+            let mut mesh = Mesh::default();
+            for (node, world) in state.tree.nodes().iter().zip(&state.layout.rects) {
+                let color = palette
+                    .status(node.deco.status)
+                    .unwrap_or_else(|| palette.category(node.category));
+                let r = Rect::from_min_max(to_mini(world.min), to_mini(world.max));
+                let r = Rect::from_center_size(r.center(), r.size().max(Vec2::splat(1.0)));
+                mesh.add_colored_rect(r, color);
+            }
+            let mesh = Arc::new(mesh);
+            state.minimap_cache = Some((key, mesh.clone()));
+            mesh
+        }
+    };
+    painter.add(Shape::Mesh(mesh));
+    let view =
+        Rect::from_min_max(to_mini(visible.min), to_mini(visible.max)).intersect(inner.expand(2.0));
     if view.is_positive() {
         painter.rect(
             view,

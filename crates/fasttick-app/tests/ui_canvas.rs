@@ -355,3 +355,76 @@ fn status_and_focus_on() {
     assert_eq!(selected_labels(&harness), ["wait"]);
     assert_eq!(harness.state().canvas.viewport().zoom, 1.0);
 }
+
+fn plain_harness(state: CanvasState) -> Harness<'static, CanvasState> {
+    let palette = CanvasPalette::dark();
+    let mut harness = Harness::builder()
+        .with_size(vec2(900.0, 600.0))
+        .with_max_steps(64)
+        .with_step_dt(1.0 / 30.0)
+        .build_ui_state(
+            move |ui, state: &mut CanvasState| {
+                TreeCanvas::new(state, &palette).show(ui);
+            },
+            state,
+        );
+    fasttick_app::fonts::install(&harness.ctx);
+    harness.run();
+    harness
+}
+
+#[test]
+fn empty_tree_draws_nothing() {
+    let mut harness = plain_harness(CanvasState::new(CanvasTree::default()));
+    harness.get_by_role(Role::Tree);
+    assert_eq!(harness.query_all_by_role(Role::TreeItem).count(), 0);
+    // Input on an empty canvas is harmless.
+    let center = harness.get_by_role(Role::Tree).rect().center();
+    click_at_plain(&harness, center);
+    harness.key_press(egui::Key::ArrowDown);
+    harness.event(Event::Zoom(2.0));
+    harness.run();
+    assert_eq!(harness.state().stats().visible_nodes, 0);
+}
+
+fn click_at_plain(harness: &Harness<'static, CanvasState>, pos: Pos2) {
+    harness.event(Event::PointerMoved(pos));
+    for pressed in [true, false] {
+        harness.event(Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+    }
+}
+
+#[test]
+fn large_tree_culls_and_the_minimap_moves_the_view() {
+    use fasttick_app::canvas::synthetic::synthetic_tree;
+    let mut harness = plain_harness(CanvasState::new(synthetic_tree(2000, 5)));
+    let stats = harness.state().stats();
+    assert_eq!(stats.total_nodes, 2000);
+    assert!(stats.visible_nodes < 200, "{stats:?}");
+    // Only the visible nodes are in the accessibility tree.
+    assert_eq!(
+        harness.query_all_by_role(Role::TreeItem).count(),
+        stats.visible_nodes
+    );
+    // The minimap is in the bottom-right corner. A click at its left end
+    // moves the view to the left part of the tree.
+    let canvas = harness.get_by_role(Role::Tree).rect();
+    let before = harness.state().viewport();
+    let size = canvas.size();
+    let center_before = before.center(size);
+    let target = canvas.right_bottom() - vec2(12.0 + 200.0, 12.0 + 8.0);
+    click_at_plain(&harness, target);
+    harness.run();
+    let after = harness.state().viewport();
+    assert!(
+        after.center(size).x < center_before.x - 100.0,
+        "{center_before:?} -> {:?}",
+        after.center(size)
+    );
+    assert_eq!(after.zoom, before.zoom);
+}

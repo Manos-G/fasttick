@@ -33,6 +33,28 @@ pub struct LoadedLog {
     pub index: ReplayIndex,
 }
 
+/// A loaded tree file.
+#[derive(Debug, Clone)]
+pub struct LoadedTree {
+    /// The trees of the file.
+    pub tree: Arc<RuntimeTree>,
+    /// The value of `main_tree_to_execute`, if the root has one.
+    pub main_tree: Option<String>,
+}
+
+impl LoadedTree {
+    /// The instance of the main tree: the tree that
+    /// `main_tree_to_execute` names, else the first tree.
+    pub fn main_instance(&self) -> fasttick_core::runtime::InstanceIndex {
+        let index = self
+            .main_tree
+            .as_deref()
+            .and_then(|id| self.tree.instances.iter().position(|i| i.tree_id == id))
+            .unwrap_or(0);
+        fasttick_core::runtime::InstanceIndex(index)
+    }
+}
+
 /// The result of a job.
 #[derive(Debug)]
 pub enum JobResult {
@@ -48,7 +70,7 @@ pub enum JobResult {
         /// The file.
         path: PathBuf,
         /// The parsed tree or an error message.
-        result: Result<Arc<RuntimeTree>, String>,
+        result: Result<LoadedTree, String>,
     },
     /// A log file was read.
     Log {
@@ -161,7 +183,7 @@ impl Jobs {
     /// Reads and parses a tree file on a worker thread.
     pub fn load_tree(&mut self, ctx: &egui::Context, path: PathBuf) {
         self.spawn(ctx, "load-tree", move || {
-            let result = read_tree(&path).map(Arc::new);
+            let result = read_tree(&path);
             JobResult::Tree { path, result }
         });
     }
@@ -197,7 +219,7 @@ impl Jobs {
 }
 
 /// Reads and parses a tree XML file (blocking).
-pub fn read_tree(path: &std::path::Path) -> Result<RuntimeTree, String> {
+pub fn read_tree(path: &std::path::Path) -> Result<LoadedTree, String> {
     let meta = std::fs::metadata(path).map_err(|err| err.to_string())?;
     if meta.len() > MAX_TREE_FILE {
         return Err(format!(
@@ -208,7 +230,24 @@ pub fn read_tree(path: &std::path::Path) -> Result<RuntimeTree, String> {
     }
     let bytes = std::fs::read(path).map_err(|err| err.to_string())?;
     let text = String::from_utf8(bytes).map_err(|_| "the file is not UTF-8 text".to_owned())?;
-    RuntimeTree::parse(&text).map_err(|err| err.to_string())
+    let tree = RuntimeTree::parse(&text).map_err(|err| err.to_string())?;
+    Ok(LoadedTree {
+        tree: Arc::new(tree),
+        main_tree: main_tree_id(&text),
+    })
+}
+
+/// The `main_tree_to_execute` attribute of the root element (BT.CPP
+/// `XMLParser`: the tree that `createTree` runs when no ID is given).
+///
+/// TODO(after the merge of `fasttick_core::bt`): read it from `BtFile`.
+fn main_tree_id(text: &str) -> Option<String> {
+    let doc = fasttick_core::xml::Document::parse(text).ok()?;
+    let root = doc.document_element()?;
+    doc.attribute(root, "main_tree_to_execute")
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
 }
 
 /// Reads a log file and builds its replay index (blocking).
@@ -248,7 +287,10 @@ mod tests {
         match wait(&mut jobs) {
             JobResult::Tree { path, result } => {
                 assert_eq!(path, tree_path);
-                assert_eq!(result.unwrap().len(), 1);
+                let loaded = result.unwrap();
+                assert_eq!(loaded.tree.len(), 1);
+                assert_eq!(loaded.main_tree, None);
+                assert_eq!(loaded.main_instance().0, 0);
             }
             other => panic!("{other:?}"),
         }
@@ -281,6 +323,29 @@ mod tests {
             wait(&mut jobs),
             JobResult::Log { result: Err(_), .. }
         ));
+    }
+
+    #[test]
+    fn main_tree_to_execute_picks_the_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("two.xml");
+        std::fs::write(
+            &path,
+            r#"<root BTCPP_format="4" main_tree_to_execute="Second">
+                <BehaviorTree ID="First"><AlwaysSuccess/></BehaviorTree>
+                <BehaviorTree ID="Second"><AlwaysFailure/></BehaviorTree>
+            </root>"#,
+        )
+        .unwrap();
+        let loaded = read_tree(&path).unwrap();
+        assert_eq!(loaded.main_tree.as_deref(), Some("Second"));
+        assert_eq!(loaded.main_instance().0, 1);
+        // An unknown name gives the first tree.
+        let unknown = LoadedTree {
+            main_tree: Some("Nope".into()),
+            ..loaded
+        };
+        assert_eq!(unknown.main_instance().0, 0);
     }
 
     #[test]

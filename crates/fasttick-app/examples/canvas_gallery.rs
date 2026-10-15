@@ -47,7 +47,10 @@ fn gallery() -> CanvasState {
         b.push(Some(statuses), n);
     }
 
-    let markers = b.push(Some(root), node(2, "markers", "Sequence", NodeCategory::Control));
+    let markers = b.push(
+        Some(root),
+        node(2, "markers", "Sequence", NodeCategory::Control),
+    );
     let mut bp = node(20, "breakpoint", "CheckBattery", NodeCategory::Condition);
     bp.deco.breakpoint = Some(BreakpointMarker::Enabled);
     b.push(Some(markers), bp);
@@ -65,14 +68,20 @@ fn gallery() -> CanvasState {
     failing.deco.substitution = Some(Substitution::ForcedFailure);
     b.push(Some(markers), failing);
 
-    let others = b.push(Some(root), node(3, "others", "Sequence", NodeCategory::Control));
+    let others = b.push(
+        Some(root),
+        node(3, "others", "Sequence", NodeCategory::Control),
+    );
     let mut error = node(30, "error", "UnknownThing", NodeCategory::Unknown);
     error.deco.problem = Some(ProblemMarker::Error);
     b.push(Some(others), error);
     let mut warning = node(31, "warning", "Inverter", NodeCategory::Decorator);
     warning.deco.problem = Some(ProblemMarker::Warning);
     let warning = b.push(Some(others), warning);
-    b.push(Some(warning), node(32, "AlwaysSuccess", "AlwaysSuccess", NodeCategory::Action));
+    b.push(
+        Some(warning),
+        node(32, "AlwaysSuccess", "AlwaysSuccess", NodeCategory::Action),
+    );
     let mut found = node(33, "search_match", "SaySomething", NodeCategory::Action);
     found.deco.search_match = true;
     b.push(Some(others), found);

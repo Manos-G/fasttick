@@ -11,12 +11,30 @@
 //!
 //! Typical use:
 //!
-//! ```ignore
+//! ```no_run
+//! use fasttick_app::canvas::{
+//!     BuiltinCategories, CanvasEvent, CanvasState, CanvasTree, RuntimeBuildOptions, TreeCanvas,
+//! };
+//! use fasttick_app::theme::CanvasPalette;
+//! use fasttick_core::runtime::RuntimeTree;
+//!
+//! fn show(ui: &mut egui::Ui, state: &mut CanvasState, runtime: &RuntimeTree) {
+//!     let palette = CanvasPalette::for_theme(ui.ctx().theme());
+//!     let output = TreeCanvas::new(state, &palette).show(ui);
+//!     for event in output.events {
+//!         if let CanvasEvent::ToggleSubtree(_source) = event {
+//!             // Change the expansion and rebuild: see `Workspace::toggle_subtree`.
+//!         }
+//!     }
+//! }
+//!
+//! let xml = r#"<root><BehaviorTree ID="T"><Sequence><AlwaysSuccess/></Sequence></BehaviorTree></root>"#;
+//! let runtime = RuntimeTree::parse(xml).unwrap();
+//! let options = RuntimeBuildOptions::for_tree(&runtime);
+//! let expansion = CanvasTree::default_expansion(&runtime, options);
 //! let tree = CanvasTree::from_runtime(&runtime, options, &expansion, &BuiltinCategories);
 //! let mut state = CanvasState::new(tree);
-//! // Each frame:
-//! let output = TreeCanvas::new(&mut state, &palette).show(ui);
-//! for event in output.events { /* ... */ }
+//! // Each frame: show(ui, &mut state, &runtime);
 //! ```
 
 pub mod card;
