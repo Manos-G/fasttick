@@ -214,6 +214,16 @@ impl CanvasTree {
                         inline,
                     });
                 }
+            } else if !children.is_empty() && expansion.is_folded(source) {
+                // A folded node: its descendants are hidden.
+                let doc = view.doc();
+                let hidden = doc
+                    .descendants(view.id())
+                    .filter(|n| doc.is_element(*n))
+                    .count()
+                    .saturating_sub(1);
+                canvas_node.folded = Some(hidden);
+                builder.push(parent, canvas_node);
             } else {
                 let id = builder.push(parent, canvas_node);
                 for child in children.iter().rev() {
@@ -233,14 +243,34 @@ impl CanvasTree {
     /// problem. Problems of other files and problems without a node are
     /// ignored.
     pub fn apply_problems(&mut self, problems: &[Problem]) {
+        self.apply_problems_with(problems, |_, _| None);
+    }
+
+    /// Like [`CanvasTree::apply_problems`]; a problem of a node that is not
+    /// on the canvas (in a folded part) marks the nearest ancestor on the
+    /// canvas. `parent` gives the parent element of an element.
+    pub fn apply_problems_with(
+        &mut self,
+        problems: &[Problem],
+        parent: impl Fn(FileId, NodeId) -> Option<NodeId>,
+    ) {
         for node in self.nodes_mut() {
             node.deco.problem = None;
         }
         for problem in problems {
-            let Some(node) = problem.node else {
+            let Some(mut node) = problem.node else {
                 continue;
             };
-            let Some(id) = self.find_source(NodeSource::Xml(problem.file, node)) else {
+            let id = loop {
+                if let Some(id) = self.find_source(NodeSource::Xml(problem.file, node)) {
+                    break Some(id);
+                }
+                match parent(problem.file, node) {
+                    Some(up) => node = up,
+                    None => break None,
+                }
+            };
+            let Some(id) = id else {
                 continue;
             };
             let marker = match problem.severity {
@@ -437,5 +467,16 @@ mod tests {
         let mut tree = CanvasTree::from_project(&project, file, 0, &Expansion::none());
         tree.apply_problems(&problems);
         assert_eq!(tree.nodes()[1].deco.problem, Some(ProblemMarker::Error));
+        // Folded: the Sequence shows the problem of its hidden child.
+        let mut expansion = Expansion::none();
+        expansion.toggle_fold(tree.nodes()[0].source);
+        let mut tree = CanvasTree::from_project(&project, file, 0, &expansion);
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree.nodes()[0].folded, Some(1));
+        tree.apply_problems(&problems);
+        assert_eq!(tree.nodes()[0].deco.problem, None);
+        let doc = project.file(file).unwrap().doc();
+        tree.apply_problems_with(&problems, |_, node| doc.parent(node));
+        assert_eq!(tree.nodes()[0].deco.problem, Some(ProblemMarker::Error));
     }
 }

@@ -55,7 +55,10 @@ const TIPS: &[(&str, &str)] = &[
     ("Shift+A", "Add a node to the selected node."),
     ("F", "Fit the tree to the view."),
     ("Ctrl+L", "Change the layout direction."),
-    ("Double-click", "Expand or collapse a SubTree."),
+    (
+        "Double-click",
+        "Expand a SubTree, or fold the nodes below a node.",
+    ),
     ("Ctrl+F", "Search the nodes of the tree."),
     ("Ctrl+1/2/3", "Change to edit, live or replay mode."),
 ];

@@ -327,6 +327,16 @@ impl Workspace {
         {
             self.set_view_root(id, InstanceIndex(index));
         }
+        // A node in a folded part of the tree: unfold.
+        let hidden = self.view(id).is_some_and(|v| {
+            v.canvas
+                .tree()
+                .find_source(NodeSource::Xml(file, node))
+                .is_none()
+        });
+        if hidden {
+            self.unfold_all(id);
+        }
         let Some(view) = self.view_mut(id) else {
             return false;
         };
@@ -466,6 +476,34 @@ impl Workspace {
         view.decorated = None;
     }
 
+    /// Folds a node of a view (hides its children) or unfolds it.
+    pub fn toggle_fold(&mut self, id: ViewId, source: NodeSource) {
+        let Some((view, document)) = self.view_and_doc_mut(id) else {
+            return;
+        };
+        view.expansion.toggle_fold(source);
+        let tree = build_tree(document, view.root_instance, &view.expansion);
+        view.canvas.replace_tree(tree, Some(source));
+        view.decorated = None;
+    }
+
+    /// Unfolds all nodes of a view.
+    pub fn unfold_all(&mut self, id: ViewId) {
+        let Some((view, document)) = self.view_and_doc_mut(id) else {
+            return;
+        };
+        if view.expansion.unfold_all() {
+            let anchor = view
+                .canvas
+                .primary()
+                .and_then(|p| view.canvas.tree().get(p))
+                .map(|n| n.source);
+            let tree = build_tree(document, view.root_instance, &view.expansion);
+            view.canvas.replace_tree(tree, anchor);
+            view.decorated = None;
+        }
+    }
+
     /// Expands or collapses all SubTree nodes of a view.
     pub fn set_all_subtrees(&mut self, id: ViewId, expanded: bool) {
         let Some((view, document)) = self.view_and_doc_mut(id) else {
@@ -483,7 +521,8 @@ impl Workspace {
                 }
             }
         }
-        view.expansion = expansion;
+        // The folds stay.
+        view.expansion = expansion.with_folds_of(&view.expansion);
         let anchor = view
             .canvas
             .tree()

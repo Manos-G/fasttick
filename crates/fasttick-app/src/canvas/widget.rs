@@ -99,6 +99,11 @@ pub enum CanvasEvent {
     ToggleSubtree(NodeSource),
     /// The user asked to expand (true) or collapse (false) all SubTrees.
     SetAllSubtrees(bool),
+    /// The user asked to fold a node (hide its children) or to unfold it.
+    /// The owner rebuilds the tree (see [`Expansion::toggle_fold`]).
+    ToggleFold(NodeSource),
+    /// The user asked to unfold all nodes.
+    UnfoldAll,
     /// The user double-clicked a node that is not a SubTree.
     Activated(CanvasNodeId),
     /// The user dragged nodes to a new place (editable canvas only). The
@@ -213,6 +218,7 @@ const SLOT_CHIP: u64 = 9;
 const SLOT_TAG: u64 = 10;
 const SLOT_LABEL_SMALL: u64 = 11;
 const SLOT_TAG_FAILURE: u64 = 12;
+const SLOT_FOLD: u64 = 13;
 /// The text lines of the ports, then of the conditions.
 const SLOT_LINES: u64 = 16;
 
@@ -1170,12 +1176,16 @@ fn handle_input(
             events.push(CanvasEvent::SelectionChanged);
         }
     }
-    if response.double_clicked()
+    // egui counts a double click soon after another click as a triple
+    // click; both count here.
+    if (response.double_clicked() || response.triple_clicked())
         && let Some(id) = world_pointer.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0))
         && let Some(node) = state.tree.get(id)
     {
         if node.subtree.as_ref().is_some_and(|s| s.can_expand) {
             events.push(CanvasEvent::ToggleSubtree(node.source));
+        } else if can_fold(node) {
+            events.push(CanvasEvent::ToggleFold(node.source));
         } else {
             events.push(CanvasEvent::Activated(id));
         }
@@ -1422,6 +1432,20 @@ fn context_menu(
                 events.push(CanvasEvent::ToggleSubtree(source));
             }
         }
+        if can_fold(node) {
+            let text = if node.folded.is_some() {
+                "Unfold children"
+            } else {
+                "Fold children"
+            };
+            if ui
+                .button(text)
+                .on_hover_text("Hide or show the nodes below this node (double-click)")
+                .clicked()
+            {
+                events.push(CanvasEvent::ToggleFold(source));
+            }
+        }
         if ui.button("Center on node").clicked()
             && let Some(id) = target
         {
@@ -1440,6 +1464,9 @@ fn context_menu(
     }
     if ui.button("Collapse all SubTrees").clicked() {
         events.push(CanvasEvent::SetAllSubtrees(false));
+    }
+    if state.tree.nodes().iter().any(|n| n.folded.is_some()) && ui.button("Unfold all").clicked() {
+        events.push(CanvasEvent::UnfoldAll);
     }
     ui.separator();
     if ui.button("Fit to view").clicked() {
@@ -1516,6 +1543,12 @@ fn radius(value: f32) -> CornerRadius {
 }
 
 /// True if a port value is a blackboard reference (`{key}`).
+/// True if a node can fold: it has children (or hides them), and it is not
+/// a SubTree node (a SubTree expands and collapses instead).
+fn can_fold(node: &CanvasNode) -> bool {
+    node.subtree.is_none() && (node.folded.is_some() || !node.children.is_empty())
+}
+
 fn is_reference(value: &str) -> bool {
     value.starts_with('{') && value.ends_with('}')
 }
@@ -2551,6 +2584,31 @@ fn paint_card(
         );
     }
 
+    // Folded node: the number of hidden nodes, below the dot.
+    if let Some(hidden) = node.folded {
+        let galley = state.galleys.get(index, SLOT_FOLD, || {
+            painter.layout_job(LayoutJob::simple_singleline(
+                format!("+{hidden}"),
+                state
+                    .fonts
+                    .font(TextKind::Note, TextKind::Note.size() * text_zoom),
+                palette.on_color,
+            ))
+        });
+        let center = match state.direction {
+            LayoutDirection::TopDown => pos2(screen.center().x, screen.max.y + 17.0 * zoom),
+            LayoutDirection::LeftRight => pos2(screen.max.x + 22.0 * zoom, screen.center().y),
+        };
+        paint::pill(
+            shapes,
+            center,
+            galley,
+            category_color.gamma_multiply(alpha),
+            palette.on_color,
+            vec2(5.0, 1.0) * zoom,
+        );
+    }
+
     // Substitution tag.
     if let Some(substitution) = deco.substitution {
         let (text, color, slot) = match substitution {
@@ -2892,6 +2950,15 @@ fn show_tooltip(
                         }
                     });
             });
+        }
+        if let Some(hidden) = node.folded {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{hidden} nodes below are folded. Double-click to unfold."
+                ))
+                .small()
+                .weak(),
+            );
         }
         if node.subtree.as_ref().is_some_and(|s| s.can_expand) {
             ui.label(

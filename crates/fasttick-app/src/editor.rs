@@ -483,7 +483,10 @@ impl EditorDoc {
             index: 0,
         });
         let mut tree = CanvasTree::from_project(&self.project, r.file, r.index, expansion);
-        tree.apply_problems(&self.problems);
+        // A problem in a folded part marks the folded node.
+        tree.apply_problems_with(&self.problems, |file, node| {
+            self.project.file(file)?.doc().parent(node)
+        });
         tree
     }
 }

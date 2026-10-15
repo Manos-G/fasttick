@@ -2578,6 +2578,8 @@ impl Viewer<'_> {
                 CanvasEvent::SetAllSubtrees(expanded) => {
                     self.workspace.set_all_subtrees(view_id, expanded);
                 }
+                CanvasEvent::ToggleFold(source) => self.workspace.toggle_fold(view_id, source),
+                CanvasEvent::UnfoldAll => self.workspace.unfold_all(view_id),
                 CanvasEvent::SelectionChanged | CanvasEvent::Activated(_) => {
                     self.workspace.active_view = Some(view_id);
                 }
@@ -2591,19 +2593,24 @@ impl Viewer<'_> {
                     self.workspace.active_view = Some(view_id);
                     if let DropSpot::Node { target, placement } = spot
                         && let Some(node) = self.xml_node(view_id, target)
+                        && let Some(canvas_node) = self
+                            .workspace
+                            .view(view_id)
+                            .and_then(|v| v.canvas.tree().get(target))
                     {
-                        let label = |id| {
-                            self.workspace
-                                .view(view_id)
-                                .and_then(|v| v.canvas.tree().get(id))
-                                .map(|n| n.label.clone())
-                                .unwrap_or_default()
-                        };
+                        let label = canvas_node.label.clone();
+                        // A new child of a folded node must be visible.
+                        let unfold = (placement == DropPlacement::Inside
+                            && canvas_node.folded.is_some())
+                        .then_some(canvas_node.source);
                         let title = match placement {
-                            DropPlacement::Inside => format!("Add a child of {}", label(target)),
-                            DropPlacement::Before => format!("Add a node before {}", label(target)),
-                            DropPlacement::After => format!("Add a node after {}", label(target)),
+                            DropPlacement::Inside => format!("Add a child of {label}"),
+                            DropPlacement::Before => format!("Add a node before {label}"),
+                            DropPlacement::After => format!("Add a node after {label}"),
                         };
+                        if let Some(source) = unfold {
+                            self.workspace.toggle_fold(view_id, source);
+                        }
                         self.actions.push(AppAction::OpenAddPopup {
                             view: view_id,
                             target: Some((node, placement_of(placement))),

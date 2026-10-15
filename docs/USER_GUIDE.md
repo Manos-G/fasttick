@@ -65,6 +65,7 @@ The canvas shows one tree. These actions are the same in all modes:
 | Ctrl+wheel, pinch | Zoom at the pointer. You cannot zoom out more than the size that shows the whole tree. |
 | Middle drag, Space+drag | Pan. |
 | Double-click a SubTree | Expand it (show its tree) or collapse it. |
+| Double-click another node with children | Fold it (hide the nodes below it) or unfold it. A folded node shows the number of hidden nodes, and the marker of the most serious problem below it. Right-click > **Unfold all** shows all nodes again. |
 | Arrow keys | Go to the parent, a child or a sibling. |
 | F | Fit the tree to the view. |
 | Ctrl+L | Change the layout: top to bottom, or left to right. |

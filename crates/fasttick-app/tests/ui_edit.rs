@@ -1149,3 +1149,62 @@ fn shift_a_opens_the_search_for_the_selected_node() {
     harness.run();
     assert!(harness.state().add_popup().is_none());
 }
+
+/// A double click on the card of a node, some time after the last click
+/// (else egui counts the clicks as a triple click).
+fn double_click(harness: &mut Harness<'static, FastTickApp>, label: &str) {
+    for _ in 0..20 {
+        harness.step();
+    }
+    let center = item_rect(harness, label).center();
+    harness.event(Event::PointerMoved(center));
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            harness.event(Event::PointerButton {
+                pos: center,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+        }
+    }
+    harness.run();
+}
+
+#[test]
+fn double_click_folds_and_unfolds_the_children() {
+    let mut harness = harness();
+    focus(&mut harness, "fallback");
+    let count = |h: &Harness<'static, FastTickApp>| {
+        h.state().workspace().active().unwrap().canvas.tree().len()
+    };
+    let before = count(&harness);
+    double_click(&mut harness, "fallback");
+    assert_eq!(count(&harness), before - 2);
+    {
+        let app = harness.state();
+        let tree = app.workspace().active().unwrap().canvas.tree();
+        let fallback = tree.nodes().iter().find(|n| n.label == "fallback").unwrap();
+        assert_eq!(fallback.folded, Some(2));
+        assert!(fallback.children.is_empty());
+    }
+    // An edit keeps the fold.
+    select(&mut harness, "say_text");
+    command(&mut harness, Command::Duplicate);
+    assert_eq!(count(&harness), before - 1);
+    // A click on the dot of a folded node unfolds it for the new child.
+    let from = dot_of(&harness, "fallback");
+    click_at(&mut harness, from);
+    assert_eq!(count(&harness), before + 1);
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    // Fold again, then unfold with a double click.
+    double_click(&mut harness, "fallback");
+    assert_eq!(count(&harness), before - 1);
+    double_click(&mut harness, "fallback");
+    assert_eq!(count(&harness), before + 1);
+    assert_eq!(
+        children(&harness, "fallback"),
+        ["check_blocked", "check_flag"]
+    );
+}

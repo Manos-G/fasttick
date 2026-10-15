@@ -279,6 +279,9 @@ pub struct CanvasNode {
     pub category_inferred: bool,
     /// A short description of the type (from its model), for the tooltip.
     pub description: Option<String>,
+    /// The number of hidden descendants of a folded node (see
+    /// [`Expansion::toggle_fold`]).
+    pub folded: Option<usize>,
     /// The parent node.
     pub parent: Option<CanvasNodeId>,
     /// The children, in order.
@@ -316,6 +319,7 @@ impl CanvasNode {
             category: NodeCategory::Unknown,
             category_inferred: false,
             description: None,
+            folded: None,
             parent: None,
             children: Vec::new(),
             depth: 0,
@@ -343,10 +347,12 @@ impl CanvasNode {
     }
 }
 
-/// The set of expanded SubTree nodes, by source.
+/// The set of expanded SubTree nodes and of folded nodes (nodes that hide
+/// their children), by source.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Expansion {
     expanded: HashSet<NodeSource>,
+    folded: HashSet<NodeSource>,
 }
 
 impl Expansion {
@@ -374,6 +380,35 @@ impl Expansion {
         let expanded = !self.is_expanded(source);
         self.set(source, expanded);
         expanded
+    }
+
+    /// True if the node hides its children.
+    pub fn is_folded(&self, source: NodeSource) -> bool {
+        self.folded.contains(&source)
+    }
+
+    /// Folds a node (hides its children) or unfolds it. Returns the new
+    /// state.
+    pub fn toggle_fold(&mut self, source: NodeSource) -> bool {
+        if self.folded.remove(&source) {
+            false
+        } else {
+            self.folded.insert(source);
+            true
+        }
+    }
+
+    /// Unfolds all nodes. Returns true if a node was folded.
+    pub fn unfold_all(&mut self) -> bool {
+        let any = !self.folded.is_empty();
+        self.folded.clear();
+        any
+    }
+
+    /// This set with the folded nodes of `other`.
+    pub fn with_folds_of(mut self, other: &Expansion) -> Expansion {
+        self.folded = other.folded.clone();
+        self
     }
 
     /// The number of expanded nodes.
@@ -617,6 +652,18 @@ impl CanvasTree {
                     stack.push(Step::Leave);
                     stack.push(Step::Visit(root, Some(id)));
                 }
+            } else if !runtime_node.children.is_empty() && expansion.is_folded(source) {
+                // A folded node: its descendants are hidden.
+                let mut hidden = 0;
+                let mut pending: Vec<NodeIndex> = runtime_node.children.clone();
+                while let Some(index) = pending.pop() {
+                    hidden += 1;
+                    if let Some(n) = tree.nodes.get(index.0) {
+                        pending.extend(n.children.iter().copied());
+                    }
+                }
+                node.folded = Some(hidden);
+                builder.push(parent, node);
             } else {
                 let id = builder.push(parent, node);
                 for child in runtime_node.children.iter().rev() {
@@ -1067,6 +1114,31 @@ mod tests {
             Expansion::none()
         };
         CanvasTree::from_runtime(&tree, options, &expansion, &BuiltinCategories)
+    }
+
+    #[test]
+    fn a_folded_node_hides_its_descendants() {
+        let tree = RuntimeTree::parse(RUNTIME).unwrap();
+        let options = RuntimeBuildOptions::for_tree(&tree);
+        let inverter = tree
+            .nodes
+            .iter()
+            .position(|n| n.type_id == "Inverter")
+            .unwrap();
+        let mut expansion = Expansion::none();
+        assert!(expansion.toggle_fold(NodeSource::Runtime(NodeIndex(inverter))));
+        let canvas = CanvasTree::from_runtime(&tree, options, &expansion, &BuiltinCategories);
+        let labels: Vec<&str> = canvas.nodes().iter().map(|n| n.label.as_str()).collect();
+        assert_eq!(labels, ["root_sequence", "hello", "sub_a", "Inverter"]);
+        assert_eq!(canvas.nodes()[3].folded, Some(1));
+        // The root hides all.
+        let mut expansion = Expansion::none();
+        expansion.toggle_fold(NodeSource::Runtime(NodeIndex(0)));
+        let canvas = CanvasTree::from_runtime(&tree, options, &expansion, &BuiltinCategories);
+        assert_eq!(canvas.len(), 1);
+        assert_eq!(canvas.nodes()[0].folded, Some(4));
+        assert!(expansion.unfold_all());
+        assert!(!expansion.unfold_all());
     }
 
     #[test]
