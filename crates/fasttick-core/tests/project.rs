@@ -819,3 +819,36 @@ fn values_that_json_cannot_hold_are_not_saved() {
     assert_eq!(loaded.layout(id, "T").unwrap().positions.len(), 1);
     assert_eq!(loaded.unconnected(id, "T")[0].position, [0.0, 0.0]);
 }
+
+#[test]
+fn a_missing_file_can_come_back() {
+    let dir = harness_project_dir();
+    let d = dir.path();
+    let path = write(
+        d,
+        "p.ftproj",
+        r#"{"version": 1, "files": ["trees/main.xml", "trees/later.xml"]}"#,
+    );
+    let mut project = Project::open(&path).unwrap();
+    assert_eq!(project.missing_files().len(), 1);
+    write(d, "trees/later.xml", &tree_xml("Later", &[]));
+    let id = project.add_file(d.join("trees/later.xml")).unwrap();
+    assert!(project.missing_files().is_empty());
+    assert_eq!(project.role(id), Some(FileRole::Tree));
+    project.save().unwrap();
+    let data = ProjectFile::from_json(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(data.files, vec!["trees/main.xml", "trees/later.xml"]);
+
+    // A path change through file_mut is seen by refresh.
+    let main = project.file_id_by_path(d.join("trees/main.xml")).unwrap();
+    project
+        .file_mut(main)
+        .unwrap()
+        .save(d.join("trees/moved.xml"))
+        .unwrap();
+    project.refresh();
+    assert_eq!(
+        project.file_id_by_path(d.join("trees/moved.xml")),
+        Some(main)
+    );
+}

@@ -26,7 +26,7 @@ pub struct NodeAttribute<'a> {
 /// The rules follow `createNodeFromXML` (`src/xml_parsing.cpp`):
 ///
 /// - Compact form, `<Sequence>`: the type ID is the element name. An `ID`
-///   attribute is an error in BT.CPP ("Attribute [ID] is not allowed").
+///   attribute is an error in BT.CPP ("Attribute \[ID\] is not allowed").
 /// - Explicit form, `<Action ID="X">`, `<Condition ID="X">`,
 ///   `<Control ID="X">`, `<Decorator ID="X">`: the type ID is the value of
 ///   `ID`. BT.CPP does not compare the tag with the registered type of `X`;

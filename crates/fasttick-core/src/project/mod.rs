@@ -464,7 +464,11 @@ impl Project {
             return Ok(id);
         }
         let file = BtFile::load(clean_path(path))?;
-        Ok(self.add_bt_file(file, role))
+        let id = self.add_bt_file(file, role);
+        // A file that was missing is now loaded.
+        let wanted = identity(path);
+        self.missing.retain(|(p, _)| identity(p) != wanted);
+        Ok(id)
     }
 
     /// Adds a file that is in memory (for example a new file without a
@@ -573,6 +577,10 @@ impl Project {
     /// Call it after a change that can change the trees, the includes or the
     /// models of a file, and after a change of the file paths.
     pub fn refresh(&mut self) {
+        // A path can change through `file_mut` (for example a save as).
+        for entry in self.entries.iter_mut().flatten() {
+            entry.identity = entry.file.path().map(identity);
+        }
         self.resolve_includes();
         self.prune_included();
         self.rebuild_registry();

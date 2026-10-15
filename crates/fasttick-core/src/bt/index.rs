@@ -13,7 +13,7 @@ pub struct TreeEntry {
     pub id: String,
     /// True if the element has an `ID` attribute. The attribute can be
     /// empty; `VerifyXML` treats an empty ID like a missing one ("must have
-    /// the attribute [ID]" when the root has more than one child element).
+    /// the attribute \[ID\]" when the root has more than one child element).
     pub has_explicit_id: bool,
     /// The `<BehaviorTree>` element.
     pub element: NodeId,

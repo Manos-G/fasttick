@@ -20,7 +20,7 @@ pub const AMENT_PREFIX_PATH: &str = "AMENT_PREFIX_PATH";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IncludeProblem {
     /// The element has no `path` attribute. BT.CPP stops with "Invalid
-    /// <include> tag: missing 'path' attribute".
+    /// `<include>` tag: missing 'path' attribute".
     MissingPath,
     /// The `ros_pkg` package is not found. BT.CPP without ROS support stops
     /// for each `ros_pkg`; with ROS 2 it asks the ament index. FastTick
