@@ -1106,3 +1106,46 @@ fn a_drag_from_the_dot_to_an_unconnected_node_connects_it() {
     assert!(harness.state().add_popup().is_none());
     assert_eq!(children(&harness, "seq"), ["first", "Sleep"]);
 }
+
+#[test]
+fn shift_a_opens_the_search_for_the_selected_node() {
+    let mut harness = harness();
+    select(&mut harness, "fallback");
+    harness.key_press_modifiers(Modifiers::SHIFT, egui::Key::A);
+    harness.run();
+    assert_eq!(
+        harness
+            .state()
+            .add_popup()
+            .map(|p| p.title.clone())
+            .as_deref(),
+        Some("Add a child of fallback")
+    );
+    type_into(
+        &mut harness,
+        Field::Hint("Search node types"),
+        "inverter",
+        false,
+    );
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert_eq!(
+        children(&harness, "fallback"),
+        ["check_blocked", "check_flag", "Inverter"]
+    );
+    // A leaf gets a sibling after it.
+    select(&mut harness, "check_blocked");
+    harness.key_press_modifiers(Modifiers::SHIFT, egui::Key::A);
+    harness.run();
+    assert_eq!(
+        harness
+            .state()
+            .add_popup()
+            .map(|p| p.title.clone())
+            .as_deref(),
+        Some("Add a node after check_blocked")
+    );
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(harness.state().add_popup().is_none());
+}

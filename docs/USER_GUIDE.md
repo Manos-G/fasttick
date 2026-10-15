@@ -168,6 +168,10 @@ edge (right edge in the left-to-right layout).
 - Release the line on an unconnected node to connect that node as the last
   child.
 - Click the dot to add a last child with the same search window.
+- Select a node and push Shift+A (or select **Edit** > **Add node…**).
+  The new node is a child of a control node or an empty decorator, else a
+  sibling after the selected node. Without a selection, the new node is
+  unconnected.
 
 Other ways to add nodes:
 

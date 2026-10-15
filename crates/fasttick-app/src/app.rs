@@ -633,6 +633,7 @@ impl FastTickApp {
                 .active_edit_view()
                 .is_some_and(|v| !crate::edit_ops::selected_nodes(&self.workspace, v).is_empty()),
             Command::Paste => self.active_edit_view().is_some() && self.clipboard.is_some(),
+            Command::AddNode => self.active_edit_view().is_some() && self.add_popup.is_none(),
             Command::SaveAs => active.is_some_and(|v| {
                 self.workspace
                     .doc_of_view(v)
@@ -842,6 +843,7 @@ impl FastTickApp {
                     self.save_view(ctx, view);
                 }
             }
+            Command::AddNode => self.open_add_for_selection(ctx),
             Command::Undo
             | Command::Redo
             | Command::Cut
@@ -1825,6 +1827,7 @@ impl FastTickApp {
             self.menu_item(ui, Command::Delete);
             ui.separator();
             self.menu_item(ui, Command::SelectAll);
+            self.menu_item(ui, Command::AddNode);
             self.menu_item(ui, Command::Find);
         });
         ui.menu_button("View", |ui| {
@@ -2185,6 +2188,56 @@ impl FastTickApp {
                 }
             }
         }
+    }
+
+    /// Opens the search popup for the primary selected node: a new child
+    /// of a node that takes children, else a new sibling after it. Without
+    /// a selection the new node is unconnected.
+    fn open_add_for_selection(&mut self, ctx: &egui::Context) {
+        let Some(view_id) = self.active_edit_view() else {
+            return;
+        };
+        let Some(view) = self.workspace.view(view_id) else {
+            return;
+        };
+        let tree = view.canvas.tree();
+        let primary = view
+            .canvas
+            .primary()
+            .filter(|id| tree.is_selected(*id))
+            .or_else(|| tree.selected().next())
+            .and_then(|id| tree.get(id))
+            .filter(|n| !n.inline);
+        let target = primary.and_then(|node| {
+            let NodeSource::Xml(_, xml) = node.source else {
+                return None;
+            };
+            if crate::canvas::connect::has_dot(node) {
+                Some((
+                    xml,
+                    Placement::Inside,
+                    format!("Add a child of {}", node.label),
+                ))
+            } else if node.parent.is_some() {
+                Some((
+                    xml,
+                    Placement::After,
+                    format!("Add a node after {}", node.label),
+                ))
+            } else {
+                None
+            }
+        });
+        let pos = ctx
+            .input(|i| i.pointer.latest_pos())
+            .unwrap_or_else(|| ctx.content_rect().center() - egui::vec2(170.0, 120.0));
+        let popup = match target {
+            Some((xml, placement, title)) => {
+                crate::add_popup::AddPopup::new(view_id, Some((xml, placement)), title, pos)
+            }
+            None => crate::add_popup::AddPopup::new(view_id, None, "Add an unconnected node", pos),
+        };
+        self.add_popup = Some(popup);
     }
 
     /// The search popup, if it is open.

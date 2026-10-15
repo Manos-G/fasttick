@@ -39,6 +39,8 @@ pub enum Command {
     Delete,
     /// Select all nodes.
     SelectAll,
+    /// Add a node to the selected node (a search window asks for the type).
+    AddNode,
     /// Find nodes.
     Find,
     /// Show the whole tree.
@@ -113,7 +115,7 @@ pub enum Command {
 
 impl Command {
     /// All commands, in help-dialog order.
-    pub const ALL: [Command; 49] = [
+    pub const ALL: [Command; 50] = [
         Command::NewProject,
         Command::OpenFile,
         Command::OpenLog,
@@ -128,6 +130,7 @@ impl Command {
         Command::Duplicate,
         Command::Delete,
         Command::SelectAll,
+        Command::AddNode,
         Command::Find,
         Command::FitToView,
         Command::ZoomIn,
@@ -182,6 +185,7 @@ impl Command {
             Command::Duplicate => "Duplicate",
             Command::Delete => "Delete",
             Command::SelectAll => "Select all",
+            Command::AddNode => "Add node\u{2026}",
             Command::Find => "Find\u{2026}",
             Command::FitToView => "Fit to view",
             Command::ZoomIn => "Zoom in",
@@ -237,6 +241,7 @@ impl Command {
             | Command::Duplicate
             | Command::Delete
             | Command::SelectAll
+            | Command::AddNode
             | Command::Find => "Edit",
             Command::FitToView
             | Command::ZoomIn
@@ -338,6 +343,7 @@ impl Default for KeyMap {
                 bind(Command::Duplicate, cmd, Key::D),
                 bind(Command::Delete, none, Key::Delete),
                 bind(Command::SelectAll, cmd, Key::A),
+                bind(Command::AddNode, Modifiers::SHIFT, Key::A),
                 bind(Command::Find, cmd, Key::F),
                 bind(Command::FitToView, none, Key::F),
                 bind(Command::ZoomIn, cmd, Key::Equals),

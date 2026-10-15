@@ -52,6 +52,7 @@ pub const WHATS_NEW: &[(&str, &str)] = &[
 /// Short tips, as (keys, text).
 const TIPS: &[(&str, &str)] = &[
     ("F1", "Show all keyboard shortcuts."),
+    ("Shift+A", "Add a node to the selected node."),
     ("F", "Fit the tree to the view."),
     ("Ctrl+L", "Change the layout direction."),
     ("Double-click", "Expand or collapse a SubTree."),
