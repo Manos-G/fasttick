@@ -352,7 +352,16 @@ pub fn orthogonal_edge_points(
         points.push(map(eb, ed));
         return;
     }
-    let bus = bus.clamp(sd.min(ed), sd.max(ed));
+    // Keep the bus between the two ends. (Not `f32::clamp`: it panics on
+    // NaN bounds.)
+    let (low, high) = (sd.min(ed), sd.max(ed));
+    let bus = if bus < low {
+        low
+    } else if bus > high {
+        high
+    } else {
+        bus
+    };
     let r = radius
         .min(delta.abs() * 0.5)
         .min((bus - sd).abs())
@@ -508,6 +517,28 @@ mod tests {
                 pos2(-50.0, 80.0)
             ]
         );
+    }
+
+    #[test]
+    fn edge_points_survive_bad_input() {
+        let mut points = Vec::new();
+        orthogonal_edge_points(
+            pos2(f32::NAN, f32::NAN),
+            pos2(f32::NAN, f32::NAN),
+            f32::NAN,
+            true,
+            6.0,
+            &mut points,
+        );
+        orthogonal_edge_points(
+            pos2(0.0, 0.0),
+            pos2(50.0, 10.0),
+            f32::INFINITY,
+            false,
+            6.0,
+            &mut points,
+        );
+        assert!(!points.is_empty());
     }
 
     #[test]
