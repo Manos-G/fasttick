@@ -185,8 +185,9 @@ pub struct CardText {
     pub label: String,
     /// The type line, if the label is not the type ID.
     pub type_line: Option<String>,
-    /// The port lines that the card shows, shortened to fit.
-    pub ports: Vec<String>,
+    /// The port lines that the card shows (name and value), shortened to
+    /// fit.
+    pub ports: Vec<(String, String)>,
     /// Text such as "+3 more", if not all ports fit.
     pub more: Option<String>,
     /// The card size in world units.
