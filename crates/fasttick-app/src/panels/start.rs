@@ -20,6 +20,12 @@ const TWO_COLUMNS: f32 = 820.0;
 /// What is new in this version: a title and a short text.
 pub const WHATS_NEW: &[(&str, &str)] = &[
     (
+        "Projects with many tasks",
+        "Put all task files and libraries in one project. Tabs and problems show the \
+         file of a repeated tree ID, and SubTrees use the library copy of a tree. A \
+         script statement such as x == 1 that changes nothing is now a warning.",
+    ),
+    (
         "Notes and groups",
         "Type a note for a node in the Inspector. Select nodes and push Ctrl+G for a \
          group with a title and a description; drag its sides to change its nodes. \

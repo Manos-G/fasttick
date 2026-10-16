@@ -274,6 +274,34 @@ impl EditorDoc {
         self.project.find_tree(id).and_then(|r| self.index_of(r))
     }
 
+    /// The tree index of the tree `id` of `file`; else of the first tree
+    /// with this ID. Several files can have trees with the same ID (for
+    /// example a `MainTree` in each task file).
+    pub fn tree_index_in(&self, file: FileId, id: &str) -> Option<usize> {
+        self.tree_refs()
+            .iter()
+            .position(|r| r.file == file && self.project.tree(*r).is_some_and(|t| t.id == id))
+            .or_else(|| self.tree_index(id))
+    }
+
+    /// The tree index of the tree that a `<SubTree ID="id">` node of `file`
+    /// shows (see `Project::find_tree_from`).
+    pub fn subtree_target_index(&self, file: FileId, id: &str) -> Option<usize> {
+        self.project
+            .find_tree_from(file, id)
+            .and_then(|r| self.index_of(r))
+    }
+
+    /// True if more than one file of the project has a tree with this ID.
+    pub fn tree_id_repeats(&self, id: &str) -> bool {
+        let mut files = self
+            .tree_refs()
+            .into_iter()
+            .filter(|r| self.project.tree(*r).is_some_and(|t| t.id == id))
+            .map(|r| r.file);
+        files.next().is_some_and(|first| files.any(|f| f != first))
+    }
+
     /// The tree ID of a tree index.
     pub fn tree_id(&self, index: usize) -> Option<String> {
         self.tree_ref(index)

@@ -9,14 +9,14 @@
 //! without trees). The search continues with the trees that the selected
 //! files use, until nothing changes.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::bt::BtFile;
 use crate::models::{ModelSource, parse_models_document};
 use crate::validate::{ProblemCode, validate_project};
 
-use super::{FileRole, Project, ProjectError, identity};
+use super::{FileRole, Project, ProjectError, identity, library_rank};
 
 /// The maximum number of XML files that the search reads in one folder.
 pub const MAX_FOLDER_FILES: usize = 500;
@@ -76,6 +76,8 @@ impl MissingFiles {
 struct Candidate {
     path: PathBuf,
     trees: Vec<String>,
+    /// The library rank of each tree (see [`library_rank`]).
+    ranks: HashMap<String, u8>,
     models: Vec<String>,
 }
 
@@ -128,33 +130,55 @@ impl Project {
         let mut trial = self.clone();
         let mut now = missing;
         while !now.is_empty() {
-            let mut added = false;
-            let mut index = 0;
-            while index < candidates.len() {
-                let candidate = &candidates[index];
-                let role = if candidate.trees.iter().any(|t| now.trees.contains(t)) {
-                    Some(FileRole::Tree)
-                } else if candidate.trees.is_empty()
-                    && candidate.models.iter().any(|m| now.node_types.contains(m))
+            // For each missing tree, one file: the best library copy (see
+            // `library_rank`), the first in name order on a tie. Task files
+            // with their own changed copies of library trees stay out.
+            let mut chosen: Vec<usize> = Vec::new();
+            for tree in &now.trees {
+                let best = candidates
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| c.trees.contains(tree))
+                    .min_by_key(|(_, c)| c.ranks.get(tree).copied().unwrap_or(1))
+                    .map(|(index, _)| index);
+                if let Some(index) = best
+                    && !chosen.contains(&index)
                 {
-                    Some(FileRole::Models)
+                    chosen.push(index);
+                }
+            }
+            // Model files (no trees) for the node types without a model.
+            for (index, candidate) in candidates.iter().enumerate() {
+                if candidate.trees.is_empty()
+                    && candidate.models.iter().any(|m| now.node_types.contains(m))
+                    && !chosen.contains(&index)
+                {
+                    chosen.push(index);
+                }
+            }
+            if chosen.is_empty() {
+                break;
+            }
+            chosen.sort_unstable();
+            let picked: Vec<Candidate> = chosen
+                .iter()
+                .rev()
+                .map(|&index| candidates.remove(index))
+                .collect();
+            let mut added = false;
+            for candidate in picked.into_iter().rev() {
+                let models_only = candidate.trees.is_empty();
+                let result = if models_only {
+                    trial.add_model_file(&candidate.path)
                 } else {
-                    None
-                };
-                let Some(role) = role else {
-                    index += 1;
-                    continue;
-                };
-                let candidate = candidates.remove(index);
-                let result = match role {
-                    FileRole::Models => trial.add_model_file(&candidate.path),
-                    _ => trial.add_file(&candidate.path),
+                    trial.add_file(&candidate.path)
                 };
                 if result.is_ok() {
                     added = true;
-                    match role {
-                        FileRole::Models => out.model_files.push(candidate.path),
-                        _ => out.tree_files.push(candidate.path),
+                    if models_only {
+                        out.model_files.push(candidate.path);
+                    } else {
+                        out.tree_files.push(candidate.path);
                     }
                 }
             }
@@ -261,7 +285,11 @@ fn read_candidate(path: PathBuf) -> Option<Candidate> {
     if doc.document_element().and_then(|r| doc.name(r)) != Some("root") {
         return None;
     }
-    let trees = file.trees().iter().map(|t| t.id.clone()).collect();
+    let trees: Vec<String> = file.trees().iter().map(|t| t.id.clone()).collect();
+    let ranks = trees
+        .iter()
+        .map(|t| (t.clone(), library_rank(&file, t)))
+        .collect();
     let models = parse_models_document(doc, ModelSource::Unattached)
         .models
         .into_iter()
@@ -270,6 +298,7 @@ fn read_candidate(path: PathBuf) -> Option<Candidate> {
     Some(Candidate {
         path,
         trees,
+        ranks,
         models,
     })
 }
@@ -336,6 +365,116 @@ mod tests {
             .iter()
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect()
+    }
+
+    /// A folder like a robot with several task files: a library, two
+    /// tasks with their own changed copy of a library tree (the main tree
+    /// uses it), and a task that uses the library.
+    fn tasks_setup() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let task_with_copy = |name: &str| {
+            write(
+                dir.path(),
+                name,
+                r#"<root BTCPP_format="4" main_tree_to_execute="MainTree">
+                     <BehaviorTree ID="MainTree"><SubTree ID="Get"/></BehaviorTree>
+                     <BehaviorTree ID="Get"><Timeout msec="10"><AlwaysSuccess/></Timeout></BehaviorTree>
+                   </root>"#,
+            )
+        };
+        task_with_copy("a_timeout.xml");
+        task_with_copy("b_center.xml");
+        write(
+            dir.path(),
+            "library.xml",
+            r#"<root BTCPP_format="4">
+                 <BehaviorTree ID="Get"><SubTree ID="Reset"/></BehaviorTree>
+                 <BehaviorTree ID="Leave"><AlwaysSuccess/></BehaviorTree>
+               </root>"#,
+        );
+        write(
+            dir.path(),
+            "automation.xml",
+            r#"<root BTCPP_format="4" main_tree_to_execute="Reset">
+                 <BehaviorTree ID="Reset"><AlwaysSuccess/></BehaviorTree>
+               </root>"#,
+        );
+        write(
+            dir.path(),
+            "localize.xml",
+            r#"<root BTCPP_format="4" main_tree_to_execute="MainTree">
+                 <BehaviorTree ID="MainTree">
+                   <Sequence><SubTree ID="Get"/><SubTree ID="Leave"/></Sequence>
+                 </BehaviorTree>
+               </root>"#,
+        );
+        dir
+    }
+
+    #[test]
+    fn library_rank_prefers_libraries_over_local_copies() {
+        let dir = tasks_setup();
+        let load = |name: &str| BtFile::load(dir.path().join(name)).unwrap();
+        assert_eq!(library_rank(&load("library.xml"), "Get"), 0);
+        assert_eq!(library_rank(&load("automation.xml"), "Reset"), 1);
+        assert_eq!(library_rank(&load("a_timeout.xml"), "Get"), 2);
+        assert_eq!(library_rank(&load("a_timeout.xml"), "MainTree"), 1);
+    }
+
+    #[test]
+    fn missing_files_take_the_library_not_the_task_copies() {
+        let dir = tasks_setup();
+        let mut project = Project::open_xml(dir.path().join("localize.xml")).unwrap();
+        let found = project.find_missing_files();
+        assert_eq!(
+            file_names(&found.tree_files),
+            ["library.xml", "automation.xml"]
+        );
+        assert!(found.still_missing.is_empty());
+        project.add_missing_files().unwrap();
+        let main = project.file_ids()[0];
+        let get = project.find_tree_from(main, "Get").unwrap();
+        assert!(
+            project
+                .file(get.file)
+                .unwrap()
+                .path()
+                .unwrap()
+                .ends_with("library.xml")
+        );
+    }
+
+    #[test]
+    fn a_subtree_goes_to_the_library_copy_in_a_project_with_all_files() {
+        let dir = tasks_setup();
+        let mut project = Project::new("all");
+        for name in [
+            "a_timeout.xml",
+            "automation.xml",
+            "b_center.xml",
+            "library.xml",
+            "localize.xml",
+        ] {
+            project.add_file(dir.path().join(name)).unwrap();
+        }
+        let file_of = |p: &Project, name: &str| {
+            p.file_ids()
+                .into_iter()
+                .find(|f| p.file(*f).unwrap().path().unwrap().ends_with(name))
+                .unwrap()
+        };
+        let path_of = |p: &Project, tree: super::super::TreeRef| {
+            p.file(tree.file).unwrap().path().unwrap().to_path_buf()
+        };
+        // localize.xml: the library copy, not the copy of a_timeout.xml
+        // (the first file in project order).
+        let localize = file_of(&project, "localize.xml");
+        let get = project.find_tree_from(localize, "Get").unwrap();
+        assert!(path_of(&project, get).ends_with("library.xml"));
+        // A task with its own copy uses its own copy.
+        let timeout = file_of(&project, "a_timeout.xml");
+        let own = project.find_tree_from(timeout, "Get").unwrap();
+        assert!(path_of(&project, own).ends_with("a_timeout.xml"));
     }
 
     #[test]

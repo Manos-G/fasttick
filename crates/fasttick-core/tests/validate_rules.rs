@@ -723,6 +723,34 @@ const CASES: &[Case] = &[
         "<Precondition if=\"a == 1\" else=\"FAILURE\"><AlwaysSuccess/></Precondition>",
     ),
     case(
+        C::ScriptNoEffect,
+        Warning,
+        Accepts,
+        "<Script code=\"offset == 70 - 250\"/>",
+        "<Script code=\"offset := 70 - 250\"/>",
+    ),
+    case(
+        C::ScriptNoEffect,
+        Warning,
+        Accepts,
+        "<AlwaysSuccess _onSuccess=\"done == true\"/>",
+        "<AlwaysSuccess _onSuccess=\"done := true\"/>",
+    ),
+    case(
+        C::ScriptNoEffect,
+        Warning,
+        Accepts,
+        "<AlwaysSuccess _skipIf=\"a == 1; b == 2\"/>",
+        "<AlwaysSuccess _skipIf=\"a == 1 &amp;&amp; b == 2\"/>",
+    ),
+    case(
+        C::ScriptNoEffect,
+        Warning,
+        Accepts,
+        "<ScriptCondition code=\"x == 1; x > 1\"/>",
+        "<ScriptCondition code=\"x := 1; x > 1\"/>",
+    ),
+    case(
         C::SuspiciousAmpersand,
         Warning,
         Accepts,
@@ -1300,8 +1328,21 @@ fn condition_attributes() {
             single(&found, C::EmptyCondition).attribute.as_deref(),
             Some(name)
         );
+        // A pre-condition uses the value of the script; a post-condition
+        // does not, so there a comparison has no effect.
+        let pre = name.ends_with("If") || name == "_while";
         let body = format!("<AlwaysSuccess {name}=\"x == 1\"/>");
-        assert!(problems(&body).is_empty(), "{name}");
+        let found = problems(&body);
+        if pre {
+            assert!(found.is_empty(), "{name}");
+        } else {
+            assert_eq!(
+                single(&found, C::ScriptNoEffect).attribute.as_deref(),
+                Some(name)
+            );
+            let body = format!("<AlwaysSuccess {name}=\"x := 1\"/>");
+            assert!(problems(&body).is_empty(), "{name}");
+        }
     }
     assert!(problems("<AlwaysSuccess _uid=\"3\" _fullpath=\"x\" _other=\"\"/>").is_empty());
 }
@@ -1631,6 +1672,52 @@ fn duplicate_tree_ids_across_files() {
         .collect();
     assert_eq!(errors.len(), 1, "{}", show(&found));
     assert!(errors[0].message.contains("which includes this file"));
+}
+
+#[test]
+fn the_same_main_tree_in_task_files_is_a_note() {
+    // One file for each task, and each file executes its own "MainTree".
+    let task = |action: &str| {
+        format!(
+            "<root BTCPP_format=\"4\" main_tree_to_execute=\"MainTree\">\
+             <BehaviorTree ID=\"MainTree\"><{action}/></BehaviorTree></root>"
+        )
+    };
+    let (grab, leave) = (task("AlwaysSuccess"), task("AlwaysFailure"));
+    let dir = write_files(&[
+        ("grab.xml", &grab),
+        ("leave.xml", &leave),
+        (
+            "library.xml",
+            "<root BTCPP_format=\"4\"><BehaviorTree ID=\"MainTree\"><AlwaysSuccess/>\
+             </BehaviorTree></root>",
+        ),
+    ]);
+    let mut project = Project::new("tasks");
+    let grab = project.add_file(dir.path().join("grab.xml")).unwrap();
+    let leave = project.add_file(dir.path().join("leave.xml")).unwrap();
+    let found = validate_project(&project);
+    let dups = with_code(&found, C::DuplicateTreeId);
+    let files: Vec<(FileId, Severity)> = dups.iter().map(|p| (p.file, p.severity)).collect();
+    assert_eq!(files, [(grab, Info), (leave, Info)], "{}", show(&found));
+    assert!(
+        dups[0].message.contains("main tree of leave.xml"),
+        "{}",
+        dups[0].message
+    );
+    // A file that does not execute the tree: a warning, as before.
+    let library = project.add_file(dir.path().join("library.xml")).unwrap();
+    let found = validate_project(&project);
+    let severities: Vec<(FileId, Severity)> = with_code(&found, C::DuplicateTreeId)
+        .iter()
+        .map(|p| (p.file, p.severity))
+        .collect();
+    assert_eq!(
+        severities,
+        [(grab, Warning), (leave, Warning), (library, Warning)],
+        "{}",
+        show(&found)
+    );
 }
 
 #[test]

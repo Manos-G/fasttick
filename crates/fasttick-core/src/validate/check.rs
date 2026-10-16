@@ -780,6 +780,20 @@ impl<'c, 'p> FileChecker<'c, 'p> {
                      keeps only one of the two trees. Give each tree a different ID."
                 ),
             )
+        } else if self.is_main_tree_of(self.file, name)
+            && others.iter().all(|&f| self.is_main_tree_of(f, name))
+        {
+            // Each file is a different program, for example one file for
+            // each task. An executor usually loads only one of them.
+            let other_name = self.file_name(others[0]);
+            (
+                Severity::Info,
+                format!(
+                    "The tree \"{name}\" is also the main tree of {other_name}. This is \
+                     correct if the executor loads only one of these files. If it loads both, \
+                     it keeps only one of the two trees."
+                ),
+            )
         } else {
             let other_name = self.file_name(others[0]);
             (
@@ -799,6 +813,14 @@ impl<'c, 'p> FileChecker<'c, 'p> {
             Some("ID"),
             message,
         );
+    }
+
+    /// True if `main_tree_to_execute` of the file names the tree `id`.
+    fn is_main_tree_of(&self, file: FileId, id: &str) -> bool {
+        self.ctx
+            .project()
+            .file(file)
+            .is_some_and(|bt| bt.index().main_tree_to_execute.as_deref() == Some(id))
     }
 
     /// True if BT.CPP has a registered node type with this ID: a built-in
@@ -1364,6 +1386,8 @@ impl<'c, 'p> FileChecker<'c, 'p> {
                             ),
                         );
                     }
+                    let value_is_used = matches!(attr.class, AttributeClass::PreCondition(_));
+                    self.check_script_effect(view, name, value, value_is_used, tree);
                     if value.trim_matches([' ', '\t', '\n', '\r']).is_empty() {
                         self.push(
                             Severity::Error,
@@ -1422,6 +1446,36 @@ impl<'c, 'p> FileChecker<'c, 'p> {
         }
     }
 
+    /// Warns about each statement of a script that changes nothing (see
+    /// [`crate::script::statements_without_effect`]).
+    fn check_script_effect(
+        &mut self,
+        view: NodeView<'p>,
+        name: &str,
+        script: &str,
+        value_is_used: bool,
+        tree: &str,
+    ) {
+        for range in crate::script::statements_without_effect(script, value_is_used) {
+            let statement = &script[range];
+            let advice = match crate::script::assignment_for(statement) {
+                Some(fixed) => format!("To set the value, write \"{fixed}\"."),
+                None => "Remove the statement, or use := to set a value.".to_owned(),
+            };
+            self.push(
+                Severity::Warning,
+                ProblemCode::ScriptNoEffect,
+                Some(tree),
+                Some(view.id()),
+                Some(name),
+                format!(
+                    "The statement \"{statement}\" in {name} does not change a value, and \
+                     BT.CPP does not use its result. {advice}"
+                ),
+            );
+        }
+    }
+
     /// Checks a port attribute of a node that is not a SubTree.
     fn check_port(
         &mut self,
@@ -1460,6 +1514,11 @@ impl<'c, 'p> FileChecker<'c, 'p> {
                     error.message
                 ),
             );
+        }
+        if script_port && builtin::is_builtin(&model.id) && blackboard_pointer(value).is_none() {
+            // ScriptNode::tick ignores the value of the script.
+            let value_is_used = model.id != "Script";
+            self.check_script_effect(view, name, value, value_is_used, tree);
         }
         let Some(port) = model.port(name) else {
             // createNodeFromXML: "a port with name [..] is found in the XML

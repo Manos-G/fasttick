@@ -113,6 +113,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     // Edit documents: the file of each row (for the file headers of a
     // project with several files) and the main trees of the files.
     let mut files: Vec<String> = Vec::new();
+    let mut row_files: Vec<fasttick_core::project::FileId> = Vec::new();
     let mut mains: Vec<InstanceIndex> = Vec::new();
     let (list, main) = match &doc.editor {
         Some(editor) => {
@@ -128,6 +129,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                 })
                 .collect();
             files = refs.iter().map(|r| editor.file_name(r.file)).collect();
+            row_files = refs.iter().map(|r| r.file).collect();
             mains = (0..list.len())
                 .filter(|i| editor.is_main_tree(*i))
                 .map(InstanceIndex)
@@ -215,6 +217,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         .auto_shrink([false, false])
         .show(ui, |ui| {
             for (position, row) in list.into_iter().enumerate() {
+                let row_file = row_files.get(position).copied();
                 if several_files
                     && files.get(position) != position.checked_sub(1).and_then(|p| files.get(p))
                 {
@@ -277,6 +280,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                         {
                             cx.actions.push(edit(EditOp::SetMainTree {
                                 id: row.tree_id.clone(),
+                                file: row_file,
                             }));
                             ui.close();
                         }
@@ -285,6 +289,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                                 view: view_id,
                                 purpose: NamePurpose::RenameTree {
                                     old: row.tree_id.clone(),
+                                    file: row_file,
                                 },
                             });
                             ui.close();
@@ -296,6 +301,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                         {
                             cx.actions.push(edit(EditOp::DeleteTree {
                                 id: row.tree_id.clone(),
+                                file: row_file,
                             }));
                             ui.close();
                         }

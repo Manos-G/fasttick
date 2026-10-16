@@ -289,8 +289,24 @@ impl Workspace {
             // stays.
             let trees = editor.trees();
             let shown = &view.canvas.tree().title;
+            // The file of the shown tree: tree IDs can repeat in other
+            // files (a MainTree in each task file).
+            let shown_file = view
+                .canvas
+                .tree()
+                .root()
+                .and_then(|root| view.canvas.tree().get(root))
+                .and_then(|node| match node.source {
+                    crate::canvas::NodeSource::Xml(file, _) => Some(file),
+                    _ => None,
+                })
+                .or_else(|| editor.tree_file(view.root_instance.0));
+            let found = match shown_file {
+                Some(file) => editor.tree_index_in(file, shown),
+                None => editor.tree_index(shown),
+            };
             if trees.get(view.root_instance.0).map(|(_, id)| id) != Some(shown)
-                && let Some(index) = editor.tree_index(shown)
+                && let Some(index) = found
             {
                 view.root_instance = InstanceIndex(index);
             }
@@ -301,6 +317,28 @@ impl Workspace {
             view.canvas.replace_tree(tree, None);
             view.built_revision = editor.revision();
         }
+    }
+
+    /// The tab title of a view: the document title and the shown tree.
+    /// If the tree ID is in more than one file (a `MainTree` in each task
+    /// file), the file name follows in parentheses.
+    pub fn view_title(&self, id: ViewId) -> Option<String> {
+        let view = self.view(id)?;
+        let doc = self.doc(view.doc)?;
+        let tree = &view.canvas.tree().title;
+        let mut title = if doc.title == *tree || tree.is_empty() {
+            doc.title.clone()
+        } else {
+            format!("{} \u{00B7} {tree}", doc.title)
+        };
+        if let Some(editor) = doc.editor.as_deref()
+            && !tree.is_empty()
+            && editor.tree_id_repeats(tree)
+            && let Some(file) = editor.tree_file(view.root_instance.0)
+        {
+            title.push_str(&format!(" ({})", editor.file_name(file)));
+        }
+        Some(title)
     }
 
     /// The editor of a document, for changes.

@@ -24,6 +24,8 @@ pub struct EditMenuContext {
     pub trees: Vec<(usize, String)>,
     /// True if the clipboard has nodes.
     pub has_clipboard: bool,
+    /// The tree of each tree index.
+    pub tree_refs: Vec<fasttick_core::project::TreeRef>,
 }
 
 impl EditMenuContext {
@@ -33,6 +35,7 @@ impl EditMenuContext {
             view: Some(view),
             trees: editor.trees(),
             has_clipboard,
+            tree_refs: editor.tree_refs(),
         }
     }
 
@@ -144,7 +147,12 @@ pub fn edit_menu(
         );
     }
     if let Some(info) = &node.subtree {
-        let index = context.tree_index(&info.tree_id);
+        // The tree that the canvas shows for this node, else the first
+        // tree with the ID.
+        let index = info
+            .target
+            .and_then(|target| context.tree_refs.iter().position(|r| *r == target))
+            .or_else(|| context.tree_index(&info.tree_id));
         if ui
             .add_enabled(
                 index.is_some(),

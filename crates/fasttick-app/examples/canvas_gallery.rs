@@ -94,6 +94,7 @@ fn gallery() -> CanvasState {
         expanded: false,
         can_expand: true,
         inner_count: 12,
+        target: None,
     });
     b.push(Some(others), sub);
 

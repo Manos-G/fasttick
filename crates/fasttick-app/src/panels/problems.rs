@@ -18,8 +18,8 @@ pub struct ProblemFilter {
     pub warnings: bool,
     /// Show notes.
     pub infos: bool,
-    /// Show only problems whose message or tree contains this text
-    /// (case-insensitive).
+    /// Show only problems whose message, tree, code or file name contains
+    /// this text (case-insensitive).
     pub text: String,
 }
 
@@ -35,8 +35,8 @@ impl Default for ProblemFilter {
 }
 
 impl ProblemFilter {
-    /// True if a problem passes the filter.
-    pub fn accepts(&self, problem: &Problem) -> bool {
+    /// True if a problem of the file `file_name` passes the filter.
+    pub fn accepts(&self, problem: &Problem, file_name: &str) -> bool {
         let severity = match problem.severity {
             Severity::Error => self.errors,
             Severity::Warning => self.warnings,
@@ -53,6 +53,7 @@ impl ProblemFilter {
                 .as_deref()
                 .is_some_and(|t| t.to_lowercase().contains(&text))
             || problem.code.to_string().to_lowercase().contains(&text)
+            || file_name.to_lowercase().contains(&text)
     }
 }
 
@@ -88,7 +89,7 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     let rows: Vec<&Problem> = editor
         .problems()
         .iter()
-        .filter(|p| filter.accepts(p))
+        .filter(|p| filter.accepts(p, &editor.file_name(p.file)))
         .collect();
     if rows.is_empty() {
         super::empty(
@@ -102,17 +103,23 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         return;
     }
     let row_height = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
+    // A project with more than one file: a column with the file name.
+    let show_files = editor.project().files().nth(1).is_some();
     // A click on a row reveals the node, so the labels do not take clicks
     // for text selection.
     ui.style_mut().interaction.selectable_labels = false;
-    TableBuilder::new(ui)
+    let mut table = TableBuilder::new(ui)
         .id_salt("problems_table")
         .striped(true)
         .resizable(true)
         .sense(egui::Sense::click())
         .column(Column::exact(22.0))
         .column(Column::remainder().at_least(240.0).clip(true))
-        .column(Column::initial(120.0).at_least(60.0).clip(true))
+        .column(Column::initial(120.0).at_least(60.0).clip(true));
+    if show_files {
+        table = table.column(Column::initial(140.0).at_least(60.0).clip(true));
+    }
+    table
         .column(Column::initial(70.0).at_least(50.0))
         .header(row_height, |mut header| {
             header.col(|_| {});
@@ -122,6 +129,11 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
             header.col(|ui| {
                 ui.strong("Tree");
             });
+            if show_files {
+                header.col(|ui| {
+                    ui.strong("File");
+                });
+            }
             header.col(|ui| {
                 ui.strong("Line");
             });
@@ -140,6 +152,11 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                 row.col(|ui| {
                     ui.label(problem.tree.as_deref().unwrap_or(""));
                 });
+                if show_files {
+                    row.col(|ui| {
+                        ui.label(editor.file_name(problem.file));
+                    });
+                }
                 row.col(|ui| {
                     let text = match problem.line_col(project) {
                         Some((line, col)) => format!("{line}:{col}"),
@@ -176,17 +193,23 @@ mod tests {
         let problems = validate_project(&project);
         let problem = problems.first().expect("an empty Sequence is a problem");
         let mut filter = ProblemFilter::default();
-        assert!(filter.accepts(problem));
+        assert!(filter.accepts(problem, "t.xml"));
         filter.text = "main".into();
-        assert!(filter.accepts(problem), "the tree ID matches");
+        assert!(filter.accepts(problem, "t.xml"), "the tree ID matches");
         filter.text = "no such text".into();
-        assert!(!filter.accepts(problem));
+        assert!(!filter.accepts(problem, "t.xml"));
+        filter.text = "B1_TEST".into();
+        assert!(
+            filter.accepts(problem, "b1_test.xml"),
+            "the file name matches"
+        );
+        assert!(!filter.accepts(problem, "t.xml"));
         filter.text.clear();
         match problem.severity {
             Severity::Error => filter.errors = false,
             Severity::Warning => filter.warnings = false,
             Severity::Info => filter.infos = false,
         }
-        assert!(!filter.accepts(problem));
+        assert!(!filter.accepts(problem, "t.xml"));
     }
 }

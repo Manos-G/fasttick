@@ -12,6 +12,7 @@ use fasttick_app::app::{FastTickApp, Mode, StartOptions};
 use fasttick_app::dock::Tab;
 use fasttick_app::shortcuts::Command;
 use fasttick_app::theme::ThemeChoice;
+use fasttick_core::validate::Severity;
 
 fn main_xml() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test_harness/trees/main.xml")
@@ -328,6 +329,19 @@ fn type_into(
 }
 
 /// Selects a node by a click on its card.
+/// Asserts that the tree list has a header for the file `name`. The
+/// Problems panel can show the file name too, so the header is the label
+/// on the left of the canvas.
+fn tree_list_header(harness: &Harness<'static, FastTickApp>, name: &str) {
+    let canvas = harness.get_by_role(Role::Tree).rect();
+    assert!(
+        harness
+            .query_all(egui_kittest::kittest::by().label(name))
+            .any(|n| n.rect().max.x <= canvas.min.x),
+        "no tree list header {name}"
+    );
+}
+
 fn select(harness: &mut Harness<'static, FastTickApp>, label: &str) {
     harness.get_by_role_and_label(Role::TreeItem, label).click();
     harness.run();
@@ -744,8 +758,8 @@ fn project_with_several_files() {
         .build_eframe(move |cc| FastTickApp::new(cc, options));
     harness.run();
     // The tree list has a header for each file.
-    harness.get_by_label("a.xml");
-    harness.get_by_label("b.xml");
+    tree_list_header(&harness, "a.xml");
+    tree_list_header(&harness, "b.xml");
     let title = |h: &Harness<'static, FastTickApp>| {
         h.state()
             .workspace()
@@ -785,7 +799,7 @@ fn project_with_several_files() {
     );
     harness.run();
     assert!(c.exists());
-    harness.get_by_label("c.xml");
+    tree_list_header(&harness, "c.xml");
     // The view shows the tree of the new file; a node goes into that file.
     let shown = title(&harness);
     command(&mut harness, Command::Save);
@@ -799,6 +813,202 @@ fn project_with_several_files() {
     assert_eq!(
         editor.tree_id(view.root_instance.0).as_deref(),
         Some(shown.as_str())
+    );
+}
+
+/// A project with a file for each task and a library. Each task file
+/// has its own `MainTree`; task_b.xml also has a local copy of the
+/// library tree `Get`.
+#[test]
+fn tasks_that_share_a_library() {
+    let dir = tempfile::tempdir().unwrap();
+    let task = |name: &str, extra: &str| {
+        format!(
+            r#"<root BTCPP_format="4" main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Sequence name="{name}_seq">
+      <SubTree ID="Get" name="get_{name}"/>
+    </Sequence>
+  </BehaviorTree>{extra}
+</root>
+"#
+        )
+    };
+    let a = dir.path().join("task_a.xml");
+    let b = dir.path().join("task_b.xml");
+    let library = dir.path().join("library.xml");
+    let a_text = task("a", "");
+    std::fs::write(&a, &a_text).unwrap();
+    let local_copy = r#"
+  <BehaviorTree ID="Get">
+    <AlwaysFailure name="local_leaf"/>
+  </BehaviorTree>"#;
+    std::fs::write(&b, task("b", local_copy)).unwrap();
+    std::fs::write(
+        &library,
+        r#"<root BTCPP_format="4">
+  <BehaviorTree ID="Get">
+    <AlwaysSuccess name="library_leaf"/>
+  </BehaviorTree>
+</root>
+"#,
+    )
+    .unwrap();
+    let project_path = dir.path().join("tasks.ftproj");
+    let mut project = fasttick_core::project::Project::open_xml(&a).unwrap();
+    project.add_file(&b).unwrap();
+    project.add_file(&library).unwrap();
+    project.save_as(&project_path).unwrap();
+
+    let options = StartOptions {
+        open: vec![project_path.clone()],
+        theme: Some(ThemeChoice::Light),
+        mode: Some(Mode::Edit),
+        connect: None,
+    };
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1400.0, 900.0))
+        .with_max_steps(64)
+        .with_step_dt(1.0 / 30.0)
+        .build_eframe(move |cc| FastTickApp::new(cc, options));
+    harness.run();
+    let shown_file = |h: &Harness<'static, FastTickApp>| {
+        let app = h.state();
+        let view = app.workspace().active().unwrap();
+        let doc = app.workspace().doc(view.doc).unwrap();
+        let editor = doc.editor.as_ref().unwrap();
+        let tree = view.canvas.tree().title.clone();
+        let file = editor.tree_file(view.root_instance.0).unwrap();
+        (tree, editor.file_name(file))
+    };
+    assert_eq!(
+        shown_file(&harness),
+        ("MainTree".into(), "task_a.xml".into())
+    );
+    // The tab tells the two MainTree trees apart.
+    let tab_title = |h: &Harness<'static, FastTickApp>| {
+        let workspace = h.state().workspace();
+        workspace
+            .view_title(workspace.active_view.unwrap())
+            .unwrap()
+    };
+    assert_eq!(
+        tab_title(&harness),
+        "tasks.ftproj \u{00B7} MainTree (task_a.xml)"
+    );
+
+    // The MainTree of each task file is a note, not a warning. The local
+    // copy of Get is a warning.
+    {
+        let app = harness.state();
+        let view = app.workspace().active().unwrap();
+        let editor = app
+            .workspace()
+            .doc(view.doc)
+            .unwrap()
+            .editor
+            .as_ref()
+            .unwrap();
+        let dups: Vec<(Option<&str>, Severity)> = editor
+            .problems()
+            .iter()
+            .filter(|p| p.code == fasttick_core::validate::ProblemCode::DuplicateTreeId)
+            .map(|p| (p.tree.as_deref(), p.severity))
+            .collect();
+        assert!(
+            dups.iter().all(
+                |(tree, severity)| (*tree == Some("MainTree")) == (*severity == Severity::Info)
+            ),
+            "{dups:?}"
+        );
+        assert!(dups.contains(&(Some("Get"), Severity::Warning)), "{dups:?}");
+    }
+
+    // task_a.xml has no copy of Get: Open tree shows the library copy.
+    select(&mut harness, "get_a");
+    harness.get_by_label("Open tree Get").click();
+    harness.run();
+    assert_eq!(shown_file(&harness), ("Get".into(), "library.xml".into()));
+    assert_eq!(
+        tab_title(&harness),
+        "tasks.ftproj \u{00B7} Get (library.xml)"
+    );
+
+    // The tree list: the second MainTree row is the tree of task_b.xml.
+    let rows = |h: &Harness<'static, FastTickApp>, label: &str| {
+        h.query_all(egui_kittest::kittest::by().label(label).role(Role::Button))
+            .count()
+    };
+    assert_eq!(rows(&harness, "MainTree"), 2);
+    harness
+        .query_all(
+            egui_kittest::kittest::by()
+                .label("MainTree")
+                .role(Role::Button),
+        )
+        .nth(1)
+        .unwrap()
+        .click();
+    harness.run();
+    assert_eq!(
+        shown_file(&harness),
+        ("MainTree".into(), "task_b.xml".into())
+    );
+    // task_b.xml has its own copy of Get, and BT.CPP uses it there.
+    select(&mut harness, "get_b");
+    harness.get_by_label("Open tree Get").click();
+    harness.run();
+    assert_eq!(shown_file(&harness), ("Get".into(), "task_b.xml".into()));
+
+    // Rename the MainTree of task_b.xml: task_a.xml does not change.
+    harness
+        .query_all(
+            egui_kittest::kittest::by()
+                .label("MainTree")
+                .role(Role::Button),
+        )
+        .nth(1)
+        .unwrap()
+        .click_secondary();
+    harness.run();
+    harness.get_by_label("Rename…").click();
+    harness.run();
+    type_into(&mut harness, Field::Label("Tree ID"), "TaskB", true);
+    harness
+        .get_by_role_and_label(Role::Button, "Rename")
+        .click();
+    harness.run();
+    assert_eq!(rows(&harness, "MainTree"), 1);
+    assert_eq!(rows(&harness, "TaskB"), 1);
+
+    // Delete the local copy of Get (the first Get row is in task_b.xml).
+    assert_eq!(rows(&harness, "Get"), 2);
+    harness
+        .query_all(egui_kittest::kittest::by().label("Get").role(Role::Button))
+        .next()
+        .unwrap()
+        .click_secondary();
+    harness.run();
+    harness.get_by_label("Delete tree").click();
+    harness.run();
+    assert_eq!(rows(&harness, "Get"), 1);
+    command(&mut harness, Command::Save);
+    let b_text = std::fs::read_to_string(&b).unwrap();
+    assert!(
+        b_text.contains("main_tree_to_execute=\"TaskB\""),
+        "{b_text}"
+    );
+    assert!(b_text.contains("ID=\"TaskB\""), "{b_text}");
+    assert!(!b_text.contains("local_leaf"), "{b_text}");
+    assert_eq!(
+        std::fs::read_to_string(&a).unwrap(),
+        a_text,
+        "task_a.xml did not change"
+    );
+    assert!(
+        std::fs::read_to_string(&library)
+            .unwrap()
+            .contains("library_leaf")
     );
 }
 
@@ -976,8 +1186,8 @@ fn opening_a_file_offers_the_files_with_the_missing_subtrees() {
     harness.run();
     assert_eq!(missing(&harness), 0);
     // The tree list has a header for each new file.
-    harness.get_by_label("library.xml");
-    harness.get_by_label("automation.xml");
+    tree_list_header(&harness, "library.xml");
+    tree_list_header(&harness, "automation.xml");
 }
 
 /// Shows a node at 100 % in the middle of the view.

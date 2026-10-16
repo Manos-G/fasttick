@@ -108,6 +108,8 @@ pub enum NamePurpose {
     RenameTree {
         /// The old ID.
         old: String,
+        /// The file of the tree (`None`: the first file with the ID).
+        file: Option<fasttick_core::project::FileId>,
     },
 }
 
@@ -117,7 +119,7 @@ impl NamePurpose {
         match self {
             NamePurpose::CreateSubTree => "Create SubTree from selection".to_owned(),
             NamePurpose::AddTree => "Add tree".to_owned(),
-            NamePurpose::RenameTree { old } => format!("Rename tree {old}"),
+            NamePurpose::RenameTree { old, .. } => format!("Rename tree {old}"),
         }
     }
 
@@ -135,9 +137,10 @@ impl NamePurpose {
         match self {
             NamePurpose::CreateSubTree => EditOp::CreateSubTree { tree_id: name },
             NamePurpose::AddTree => EditOp::AddTree { id: name },
-            NamePurpose::RenameTree { old } => EditOp::RenameTree {
+            NamePurpose::RenameTree { old, file } => EditOp::RenameTree {
                 old: old.clone(),
                 new: name,
+                file: *file,
             },
         }
     }

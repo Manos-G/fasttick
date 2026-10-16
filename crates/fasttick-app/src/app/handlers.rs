@@ -95,7 +95,7 @@ impl FastTickApp {
                         .map(|e| e.trees().into_iter().map(|(_, id)| id).collect())
                         .unwrap_or_default();
                     let value = match &purpose {
-                        NamePurpose::RenameTree { old } => old.clone(),
+                        NamePurpose::RenameTree { old, .. } => old.clone(),
                         _ => String::new(),
                     };
                     self.name_prompt = Some(NamePrompt {

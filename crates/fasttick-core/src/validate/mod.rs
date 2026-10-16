@@ -260,6 +260,12 @@ problem_codes! {
     /// error (`BT::ParseScript`; see [`crate::script`]). BT.CPP stops when
     /// it creates the tree.
     ScriptSyntax => "A script has a syntax error.",
+    /// A statement of a script has no assignment, and BT.CPP does not use
+    /// its value: the code of a `Script`, a post-condition, or a statement
+    /// before the last one in a condition (`ParseScript` evaluates all
+    /// the statements and returns the value of the last one). A frequent
+    /// cause is `==` in place of `:=` (Warning).
+    ScriptNoEffect => "A script statement has no effect.",
     /// A raw attribute value contains an `&` that does not start a valid
     /// reference. tinyxml2 can change the value (Warning).
     SuspiciousAmpersand => "An attribute value contains a bare &.",
@@ -436,7 +442,7 @@ mod tests {
             assert!(code.summary().ends_with('.'), "{code}");
         }
         assert_eq!(ProblemCode::from_name("Nope"), None);
-        assert_eq!(ProblemCode::ALL.len(), 34);
+        assert_eq!(ProblemCode::ALL.len(), 35);
     }
 
     #[test]

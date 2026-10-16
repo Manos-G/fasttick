@@ -288,6 +288,48 @@ pub struct Project {
     dirty: bool,
 }
 
+/// How much a file is a library for the tree `tree_id` (lower is more):
+///
+/// - 0: the file has no `main_tree_to_execute`: a library of trees.
+/// - 1: the tree is the main tree of the file, or the main tree does not
+///   use it.
+/// - 2: the main tree of the file uses the tree (directly or through other
+///   trees of the file): a local helper of that main tree, for example a
+///   changed copy of a library tree in one task file.
+///
+/// A SubTree of another file goes to the copy with the lowest rank (see
+/// [`Project::best_tree`]), and "Add missing files" takes that file.
+pub fn library_rank(bt: &BtFile, tree_id: &str) -> u8 {
+    let Some(main) = bt.index().main_tree_to_execute.as_deref() else {
+        return 0;
+    };
+    if main == tree_id {
+        return 1;
+    }
+    let doc = bt.doc();
+    let mut stack = vec![main.to_owned()];
+    let mut seen = HashSet::new();
+    while let Some(tree) = stack.pop() {
+        if !seen.insert(tree.clone()) {
+            continue;
+        }
+        let Some(entry) = bt.tree(&tree) else {
+            continue;
+        };
+        for node in doc.descendants(entry.element) {
+            if doc.name(node) == Some("SubTree")
+                && let Some(id) = doc.attribute(node, "ID")
+            {
+                if id == tree_id {
+                    return 2;
+                }
+                stack.push(id.to_owned());
+            }
+        }
+    }
+    1
+}
+
 /// The path that identifies a file: the canonical path if the file exists,
 /// else the normalized path.
 fn identity(path: &Path) -> PathBuf {
@@ -994,10 +1036,25 @@ impl Project {
     }
 
     /// Finds the tree that a SubTree in `file` refers to: first in the file
-    /// and the files that it includes (in that order), then in all files.
+    /// and the files that it includes (in that order), then in all files
+    /// (see [`Project::best_tree`]).
     pub fn find_tree_from(&self, file: FileId, id: &str) -> Option<TreeRef> {
         self.find_tree_in_closure(file, id)
-            .or_else(|| self.find_tree(id))
+            .or_else(|| self.best_tree(id))
+    }
+
+    /// The best tree with this ID in all files, for a SubTree in a file that
+    /// does not include it. If several files define the ID (the executor
+    /// then keeps the one that it loads last), a library copy comes first:
+    /// see [`library_rank`]. Equal ranks keep the project order.
+    pub fn best_tree(&self, id: &str) -> Option<TreeRef> {
+        self.files()
+            .filter_map(|(file, _, bt)| {
+                let index = bt.index().tree_index(id)?;
+                Some((library_rank(bt, id), TreeRef { file, index }))
+            })
+            .min_by_key(|(rank, _)| *rank)
+            .map(|(_, tree)| tree)
     }
 
     /// The blackboard keys that the ports of a tree use (values `{key}` and

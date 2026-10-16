@@ -163,6 +163,9 @@ pub struct SubtreeInfo {
     /// The number of nodes in the target tree (all levels). Zero if the
     /// target is not known.
     pub inner_count: usize,
+    /// The target tree in the project (edit mode): the tree that "Open
+    /// tree" shows (see `Project::find_tree_from`).
+    pub target: Option<fasttick_core::project::TreeRef>,
 }
 
 /// A breakpoint marker.
@@ -674,6 +677,7 @@ impl CanvasTree {
                         .filter(|_| target_root.is_some())
                         .map(|t| linker.instance_size(t))
                         .unwrap_or(0),
+                    target: None,
                 });
                 let id = builder.push(parent, node);
                 if expanded && let (Some(root), Some(target_id)) = (target_root, target_id) {

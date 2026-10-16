@@ -192,12 +192,11 @@ impl CanvasTree {
 
             if view.is_subtree() {
                 let tree_id = view.subtree_id().unwrap_or_default().to_owned();
-                let target = project
-                    .find_tree_from(node_file, &tree_id)
-                    .and_then(|tree_ref| {
-                        let entry = project.tree(tree_ref)?;
-                        Some((tree_ref.file, entry.root?))
-                    });
+                let target_ref = project.find_tree_from(node_file, &tree_id);
+                let target = target_ref.and_then(|tree_ref| {
+                    let entry = project.tree(tree_ref)?;
+                    Some((tree_ref.file, entry.root?))
+                });
                 let cycle = target.is_some_and(|(target_file, _)| {
                     ancestry
                         .iter()
@@ -216,6 +215,7 @@ impl CanvasTree {
                     expanded,
                     can_expand,
                     inner_count,
+                    target: target_ref,
                 });
                 let id = builder.push(parent, canvas_node);
                 if expanded && let Some((target_file, root)) = target {

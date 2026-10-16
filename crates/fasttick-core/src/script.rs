@@ -416,6 +416,8 @@ struct Parser<'a> {
     tokens: Vec<Token>,
     current: usize,
     depth: usize,
+    /// The statements, as ranges of token indexes.
+    statements: Vec<Range<usize>>,
 }
 
 impl Parser<'_> {
@@ -453,16 +455,16 @@ impl Parser<'_> {
         Ok(())
     }
 
-    fn parse_all(&mut self) -> Result<usize, ScriptError> {
-        let mut statements = 0;
+    fn parse_all(&mut self) -> Result<(), ScriptError> {
         while self.peek().kind != TokenKind::EndOfInput {
+            let start = self.current;
             self.parse_expr(0)?;
-            statements += 1;
+            self.statements.push(start..self.current);
             while self.peek().kind == TokenKind::Semicolon {
                 self.advance();
             }
         }
-        Ok(statements)
+        Ok(())
     }
 
     fn parse_prefix(&mut self) -> Result<(), ScriptError> {
@@ -565,20 +567,81 @@ impl Parser<'_> {
 /// number of statements, or the error of BT.CPP. A script without
 /// statements (only white space) is the error [`EMPTY_SCRIPT`].
 pub fn check_script(script: &str) -> Result<usize, ScriptError> {
+    parse_statements(script).map(|(_, statements)| statements.len())
+}
+
+/// Parses a script into its tokens and its statements (ranges of token
+/// indexes).
+fn parse_statements(script: &str) -> Result<(Vec<Token>, Vec<Range<usize>>), ScriptError> {
     let mut parser = Parser {
         script,
         tokens: tokenize(script),
         current: 0,
         depth: 0,
+        statements: Vec::new(),
     };
-    let statements = parser.parse_all()?;
-    if statements == 0 {
+    parser.parse_all()?;
+    if parser.statements.is_empty() {
         return Err(ScriptError {
             message: EMPTY_SCRIPT.to_owned(),
             position: 0,
         });
     }
-    Ok(statements)
+    Ok((parser.tokens, parser.statements))
+}
+
+/// The statements of a script that change nothing. BT.CPP evaluates all
+/// the statements, but it uses only the value of the last one, and only
+/// when `value_is_used` (a condition such as `_skipIf` or the `code` of
+/// `ScriptCondition`). A statement with no assignment (`:=`, `=`, `+=`,
+/// `-=`, `*=`, `/=`) does not change the blackboard, so if BT.CPP does not
+/// use its value, it has no effect. A frequent cause is `==` where `:=` is
+/// necessary. Returns the byte range of each such statement. A script with
+/// a syntax error has none.
+pub fn statements_without_effect(script: &str, value_is_used: bool) -> Vec<Range<usize>> {
+    let Ok((tokens, statements)) = parse_statements(script) else {
+        return Vec::new();
+    };
+    let used = if value_is_used {
+        statements.len() - 1
+    } else {
+        statements.len()
+    };
+    statements[..used]
+        .iter()
+        .filter(|range| {
+            !tokens[(*range).clone()]
+                .iter()
+                .any(|t| is_assignment(t.kind))
+        })
+        .map(|range| {
+            let first = &tokens[range.start];
+            let last = &tokens[range.end - 1];
+            // The text of a string has no quotes; its end is the quote.
+            let end = if last.kind == TokenKind::String {
+                last.text.end + 1
+            } else {
+                last.text.end
+            };
+            first.pos..end
+        })
+        .collect()
+}
+
+/// The statement with `:=` in place of its first `==`, if the statement
+/// starts with `key ==` (for example `x == 1` gives `x := 1`).
+pub fn assignment_for(statement: &str) -> Option<String> {
+    let tokens = tokenize(statement);
+    match tokens.as_slice() {
+        [key, equal, ..]
+            if key.kind == TokenKind::Identifier && equal.kind == TokenKind::EqualEqual =>
+        {
+            let mut fixed = statement.to_owned();
+            fixed.replace_range(equal.text.clone(), ":=");
+            Some(fixed)
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -661,5 +724,48 @@ mod tests {
         );
         let deep = "(".repeat(MAX_DEPTH + 10);
         assert!(message(&deep).contains("nested too deeply"));
+    }
+
+    fn without_effect(script: &str, value_is_used: bool) -> Vec<&str> {
+        statements_without_effect(script, value_is_used)
+            .into_iter()
+            .map(|range| &script[range])
+            .collect()
+    }
+
+    #[test]
+    fn statements_that_change_nothing() {
+        // A Script node and a post-condition do not use the value.
+        assert_eq!(
+            without_effect("pre_offset == -70 + 250", false),
+            ["pre_offset == -70 + 250"]
+        );
+        assert_eq!(without_effect("a := 1; b == 2; c += 3", false), ["b == 2"]);
+        assert_eq!(
+            without_effect("msg == 'done' ; x := 1", false),
+            ["msg == 'done'"]
+        );
+        assert_eq!(without_effect("x > 1\ny < 2", false), ["x > 1", "y < 2"]);
+        // An assignment anywhere in the statement changes the blackboard.
+        assert!(without_effect("flag ? (a := 1) : (a := 2)", false).is_empty());
+        assert!(without_effect("a = b = c", false).is_empty());
+        // A condition uses the value of the last statement only.
+        assert!(without_effect("x == 1", true).is_empty());
+        assert_eq!(without_effect("x == 1; y == 2", true), ["x == 1"]);
+        assert!(without_effect("x := 1; x == 1", true).is_empty());
+        // A script with an error has no such statements.
+        assert!(without_effect("x == (1", false).is_empty());
+        assert!(without_effect("", false).is_empty());
+    }
+
+    #[test]
+    fn assignment_suggestions() {
+        assert_eq!(
+            assignment_for("pre_offset == -70 + 250").as_deref(),
+            Some("pre_offset := -70 + 250")
+        );
+        assert_eq!(assignment_for("@key==1").as_deref(), Some("@key:=1"));
+        assert_eq!(assignment_for("x > 1"), None);
+        assert_eq!(assignment_for("1 == x"), None);
     }
 }

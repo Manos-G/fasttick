@@ -135,7 +135,7 @@ pub fn show(
         });
 
     if let Some(tree_id) = element.subtree_id() {
-        let index = editor.tree_index(tree_id);
+        let index = editor.subtree_target_index(file_id, tree_id);
         if ui
             .add_enabled(
                 index.is_some(),

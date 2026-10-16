@@ -221,16 +221,23 @@ pub enum EditOp {
         old: String,
         /// The new ID.
         new: String,
+        /// The file of the tree (`None`: the first file with the ID). Tree
+        /// IDs can repeat in several files.
+        file: Option<FileId>,
     },
     /// Deletes a tree.
     DeleteTree {
         /// The tree ID.
         id: String,
+        /// The file of the tree (`None`: the first file with the ID).
+        file: Option<FileId>,
     },
     /// Sets `main_tree_to_execute`.
     SetMainTree {
         /// The tree ID.
         id: String,
+        /// The file of the tree (`None`: the first file with the ID).
+        file: Option<FileId>,
     },
     /// Adds a node model to the `<TreeNodesModel>` of the main file.
     AddModel(NodeModel),
@@ -891,21 +898,31 @@ pub fn run(
         }
         EditOp::AddTree { id } => {
             editor.edit(|ed| ed.add_tree(file, &id))?;
-            outcome.show_tree = editor.tree_index(&id).map(InstanceIndex);
+            outcome.show_tree = editor.tree_index_in(file, &id).map(InstanceIndex);
         }
-        EditOp::RenameTree { old, new } => {
-            let file = file_of_tree(editor, &old);
+        EditOp::RenameTree {
+            old,
+            new,
+            file: tree_file,
+        } => {
+            let file = tree_file.unwrap_or_else(|| file_of_tree(editor, &old));
             let count = editor.edit(|ed| ed.rename_tree(file, &old, &new))?;
             outcome.message = Some(format!(
                 "Renamed {old} to {new} ({count} references changed)."
             ));
         }
-        EditOp::DeleteTree { id } => {
-            let file = file_of_tree(editor, &id);
+        EditOp::DeleteTree {
+            id,
+            file: tree_file,
+        } => {
+            let file = tree_file.unwrap_or_else(|| file_of_tree(editor, &id));
             editor.edit(|ed| ed.delete_tree(file, &id))?;
         }
-        EditOp::SetMainTree { id } => {
-            let file = file_of_tree(editor, &id);
+        EditOp::SetMainTree {
+            id,
+            file: tree_file,
+        } => {
+            let file = tree_file.unwrap_or_else(|| file_of_tree(editor, &id));
             editor.edit(|ed| ed.set_main_tree(file, Some(&id)))?;
         }
         EditOp::AddModel(model) => {

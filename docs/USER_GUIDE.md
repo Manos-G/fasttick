@@ -243,6 +243,27 @@ Example: `B1_localize.xml` uses the SubTrees `GetMaterial` and
 
 Next time, open the `.ftproj` file. It opens all the files together.
 
+**One file for each task.** A project can have a file for each task (each
+with its own `MainTree`) and library files with the shared SubTrees. Add
+all the task files and the libraries to one project. Then:
+
+- The tab shows the file name after a tree ID that is in more than one
+  file, for example `MainTree (B1_fast.xml)`. The **Problems** panel has a
+  **File** column, and the filter also finds file names.
+- The same `MainTree` in two task files is a note, not a warning, because
+  the executor usually loads only one task file.
+- When a tree ID is in more than one file, a SubTree node of a file uses
+  the tree of that file or of a file that it includes, as BT.CPP does.
+  Else it uses the tree of a library file (a file without
+  `main_tree_to_execute`). **Open tree** opens that tree.
+- **Add missing files from the folder** adds one file for each missing
+  tree. It takes a library file before a task file that has a local copy
+  of the tree.
+
+Two trees with the same ID that are not the same are a risk: the executor
+keeps only the tree of the last file that it loads. Give each different
+tree its own ID.
+
 The **Trees** panel shows the trees of each file. Click a tree to show it.
 The word "main" marks the `main_tree_to_execute` of each file.
 
@@ -416,6 +437,13 @@ as…**. You can also copy the `<TreeNodesModel>` into a tree file.
 
 - The **Problems** panel lists the problems of all files. Click a problem to
   show the node. The buttons filter errors, warnings and notes.
+- A script statement that does not change a value, and whose result
+  BT.CPP does not use, is a warning. An example is
+  `<Script code="offset == 250"/>`: `==` compares and `:=` sets the value.
+  The warning shows the corrected statement, for example `offset := 250`.
+  This applies to the `code` of a `Script` node, to `_onSuccess`,
+  `_onFailure`, `_onHalted` and `_post`, and to all statements before the
+  last one in a condition.
 - The **XML** panel shows the text of the file. The element of the selected
   node has a coloured background. The panel is read-only.
 - The **Search** panel (Ctrl+F) finds nodes by name, type, port name, port

@@ -949,17 +949,15 @@ impl TabViewer for Viewer<'_> {
     fn title(&mut self, tab: &mut Tab) -> WidgetText {
         match tab {
             Tab::Document(view_id) => {
-                let Some(view) = self.workspace.view(*view_id) else {
+                let Some(mut title) = self.workspace.view_title(*view_id) else {
                     return "Closed".into();
                 };
-                let Some(doc) = self.workspace.doc(view.doc) else {
+                let Some(doc) = self
+                    .workspace
+                    .view(*view_id)
+                    .and_then(|view| self.workspace.doc(view.doc))
+                else {
                     return "Closed".into();
-                };
-                let tree = &view.canvas.tree().title;
-                let mut title = if doc.title == *tree || tree.is_empty() {
-                    doc.title.clone()
-                } else {
-                    format!("{} \u{00B7} {tree}", doc.title)
                 };
                 if self.live_doc == Some(doc.id) && !self.live.is_active() {
                     title.push_str(" (disconnected)");
