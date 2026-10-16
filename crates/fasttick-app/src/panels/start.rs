@@ -26,6 +26,11 @@ pub const WHATS_NEW: &[(&str, &str)] = &[
          the types that you used last come first.",
     ),
     (
+        "Restore after a crash",
+        "FastTick keeps a copy of unsaved changes. If FastTick or the computer \
+         stops before you save, the next start offers to restore the changes.",
+    ),
+    (
         "Open from robot",
         "File > Open from robot opens tree files, projects and logs of another \
          computer over SSH. A save uploads the file, and FastTick warns if the file \

@@ -34,6 +34,8 @@ demo notes [M1](docs/demo/M1.md), [M2](docs/demo/M2.md),
   robot). FastTick uses the `ssh` program of the system and warns if a file
   changed on the robot. A command can restart the robot program after a
   save.
+- Copies of unsaved changes: after a crash or a power cut, the next start
+  offers to restore them.
 - Command search (Ctrl+Shift+P) for commands, trees, recent files and
   themes; Ctrl+P goes to a tree.
 - Export of a tree as an SVG image, with the statuses in live and replay

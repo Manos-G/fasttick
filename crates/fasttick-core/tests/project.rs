@@ -900,3 +900,35 @@ fn absolute_includes_resolve_below_a_mirror_root() {
         Some(Path::new("/opt/lib/x.xml"))
     );
 }
+
+#[test]
+fn restore_file_text_makes_the_file_dirty_and_loads_new_includes() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.xml");
+    fs::write(
+        &main,
+        r#"<root BTCPP_format="4"><BehaviorTree ID="Main"><AlwaysSuccess/></BehaviorTree></root>"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("sub.xml"),
+        r#"<root BTCPP_format="4"><BehaviorTree ID="Sub"><AlwaysFailure/></BehaviorTree></root>"#,
+    )
+    .unwrap();
+    let mut project = Project::open_xml(&main).unwrap();
+    let id = project.file_id_by_path(&main).unwrap();
+    assert!(!project.is_dirty());
+    assert!(project.find_tree("Sub").is_none());
+
+    let text = r#"<root BTCPP_format="4"><include path="sub.xml"/><BehaviorTree ID="Main"><SubTree ID="Sub"/></BehaviorTree></root>"#;
+    project.restore_file_text(id, text).unwrap();
+    assert_eq!(project.dirty_files(), vec![id]);
+    assert_eq!(project.file(id).unwrap().path(), Some(main.as_path()));
+    assert!(project.find_tree("Sub").is_some(), "the include is loaded");
+    // The file on disk does not change.
+    assert!(!fs::read_to_string(&main).unwrap().contains("SubTree"));
+
+    // Text that is not XML does not change the project.
+    assert!(project.restore_file_text(id, "<root").is_err());
+    assert!(project.find_tree("Sub").is_some());
+}

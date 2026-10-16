@@ -152,6 +152,25 @@ FastTick keeps the text of a file. It changes only the elements and the
 attributes that you change. Comments, the order of attributes and the
 white space stay.
 
+**Unsaved changes after a crash.** While a document has unsaved changes,
+FastTick writes a copy of the changed XML files every 30 seconds. The copy
+is not your file: FastTick does not change your files until you save. When
+you save, close the document or close FastTick normally, FastTick deletes
+the copy. If FastTick or the computer stops before you save, the next start
+of FastTick shows **Restore unsaved changes** with the documents and the
+age of the copies:
+
+- **Restore** opens the documents with the changes. The changes are not
+  saved yet: look at them, then save (Ctrl+S). The undo history of the old
+  session is not restored.
+- **Delete** deletes the copies.
+- **Not now** keeps the copies. FastTick asks again at the next start.
+
+FastTick keeps the XML text only. Changes to the project file (`.ftproj`)
+that are not saved, for example a new file in the list, are not in the
+copy. You can run more than one FastTick at the same time: a FastTick does
+not offer the copies of another FastTick that still runs.
+
 ### 3.2 Projects with more than one file
 
 A project lists one or more tree files and model files. Use the **Project**
@@ -484,15 +503,17 @@ Open a log with **File** > **Open log…** (Ctrl+Shift+O): a `.btlog` file
 FastTick keeps the window layout, the theme, the recent files and the poll
 interval in the settings directory of your system (for example
 `~/.local/share/fasttick` on Linux). The copies of the files of robots
-(see 3.8) are in its folder `remote`.
+(see 3.8) are in its folder `remote`. The copies of unsaved changes (see
+3.1) are in its folder `recovery`.
 
-Environment variables for files on robots (optional):
+Environment variables (optional):
 
 | Variable | Meaning |
 |---|---|
 | `FASTTICK_SSH` | The `ssh` program to use (the default is `ssh`). |
 | `FASTTICK_SSH_CONFIG` | An `ssh` configuration file to use instead of `~/.ssh/config`. |
 | `FASTTICK_REMOTE_CACHE` | The folder for the copies of the files of robots. |
+| `FASTTICK_RECOVERY_DIR` | The folder for the copies of unsaved changes. |
 
 ## 7. Troubleshooting
 

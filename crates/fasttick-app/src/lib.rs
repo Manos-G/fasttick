@@ -36,6 +36,7 @@ pub mod jobs;
 pub mod live;
 pub mod model_dialog;
 pub mod panels;
+pub mod recovery;
 pub mod remote;
 pub mod remote_ui;
 pub mod replay;

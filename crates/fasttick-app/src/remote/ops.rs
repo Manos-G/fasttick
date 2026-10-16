@@ -31,7 +31,8 @@ pub struct Entry {
 /// The content of a remote folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Listing {
-    /// The absolute path of the folder (links resolved).
+    /// The absolute path of the folder. A link in the path stays a link, so
+    /// that the paths of the files are the ones that the user chose.
     pub dir: String,
     /// The folders and files, folders first, then by name. Hidden entries
     /// (names that start with `.`) are not in the list.
@@ -46,7 +47,7 @@ pub fn list_dir(config: &SshConfig, host: &RemoteHost, dir: &str) -> Result<List
         format!("cd -- {} || exit 3", shell_quote(dir))
     };
     let script = format!(
-        "{cd}\npwd -P\nfor f in *; do\n  [ -e \"$f\" ] || continue\n  \
+        "{cd}\npwd\nfor f in *; do\n  [ -e \"$f\" ] || continue\n  \
          if [ -d \"$f\" ]; then printf 'd\\t%s\\n' \"$f\"; else printf 'f\\t%s\\n' \"$f\"; fi\ndone\n"
     );
     let output = ssh::run(config, host, &script, b"").map_err(|err| match err {
@@ -177,6 +178,37 @@ fn parse_fetch(paths: &[String], mut data: &[u8]) -> Result<Vec<Fetched>, SshErr
         out.push(fetched);
     }
     Ok(out)
+}
+
+/// The checksums (`cksum`) of remote files, in the order of `paths`:
+/// [`NO_FILE`] for a file that does not exist. Nothing is copied.
+pub fn checksums(
+    config: &SshConfig,
+    host: &RemoteHost,
+    paths: &[String],
+) -> Result<Vec<String>, SshError> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let list: Vec<String> = paths.iter().map(|p| shell_quote(p)).collect();
+    let script = format!(
+        "for p in {}; do\n  \
+         c={no_file}\n  \
+         if [ -f \"$p\" ]; then c=$(cksum < \"$p\") || c={no_file}; fi\n  \
+         printf '%s\\n' \"$c\"\n\
+         done\n",
+        list.join(" "),
+        no_file = shell_quote(NO_FILE),
+    );
+    let output = ssh::run(config, host, &script, b"")?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let sums: Vec<String> = text.lines().map(|l| l.trim().to_owned()).collect();
+    if sums.len() != paths.len() {
+        return Err(SshError::Other(
+            "The computer sent an answer that FastTick cannot read.".into(),
+        ));
+    }
+    Ok(sums)
 }
 
 /// Copies one remote file (for example a large log) to a local file.

@@ -94,6 +94,83 @@ impl EditorDoc {
         EditorDoc::new(project, file)
     }
 
+    /// A document from the text of a tree file that is not saved (for
+    /// example a copy of unsaved changes after a crash). `path` is the file
+    /// to save to (`None` for a new file); it does not need to exist. The
+    /// document has unsaved changes.
+    pub fn from_text(text: &str, path: Option<PathBuf>) -> Result<EditorDoc, String> {
+        let name = path
+            .as_deref()
+            .and_then(Path::file_stem)
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Untitled".to_owned());
+        let file = BtFile::parse(text, path).map_err(|err| err.to_string())?;
+        let (mut project, id) = Project::with_file(name, file);
+        if let Some(file) = project.file_mut(id) {
+            file.bump_generation();
+        }
+        Ok(EditorDoc::new(project, id))
+    }
+
+    /// The paths and texts of the XML files with unsaved changes (the path
+    /// is `None` for a new file). [`EditorDoc::restore_files`] puts them
+    /// back.
+    pub fn unsaved_texts(&self) -> Vec<(Option<PathBuf>, String)> {
+        self.project
+            .dirty_files()
+            .into_iter()
+            .filter_map(|id| {
+                let file = self.project.file(id)?;
+                Some((file.path().map(Path::to_path_buf), file.to_xml_string()))
+            })
+            .collect()
+    }
+
+    /// Puts texts that are not saved into the files of the document (see
+    /// [`EditorDoc::unsaved_texts`]). A text without a path goes into the
+    /// main file. A file that the project does not have yet is added. The
+    /// undo history is cleared: its steps are for the old texts.
+    ///
+    /// Returns the messages of the texts that FastTick could not use.
+    pub fn restore_files(&mut self, files: &[(Option<PathBuf>, String)]) -> Vec<String> {
+        let mut pending: Vec<&(Option<PathBuf>, String)> = files.iter().collect();
+        let mut errors = Vec::new();
+        // A restored file can include a file that has a restored text too:
+        // that file is in the project only after the first file.
+        loop {
+            let before = pending.len();
+            pending.retain(|(path, text)| {
+                let id = match path {
+                    Some(path) => self.project.file_id_by_path(path),
+                    None => Some(self.file),
+                };
+                let Some(id) = id else {
+                    return true;
+                };
+                if let Err(err) = self.project.restore_file_text(id, text) {
+                    errors.push(err.to_string());
+                }
+                false
+            });
+            if pending.is_empty() || pending.len() == before {
+                break;
+            }
+        }
+        for (path, text) in pending {
+            match BtFile::parse(text, path.clone()) {
+                Ok(mut file) => {
+                    file.bump_generation();
+                    self.project.add_bt_file(file, FileRole::Tree);
+                    self.project.refresh();
+                }
+                Err(err) => errors.push(err.to_string()),
+            }
+        }
+        self.history = History::new();
+        self.changed();
+        errors
+    }
+
     /// A tree ID that no tree of the project has: `base` (or `MainTree` if
     /// `base` is not a valid ID), with a number after it if needed.
     pub fn unique_tree_id(&self, base: &str) -> String {

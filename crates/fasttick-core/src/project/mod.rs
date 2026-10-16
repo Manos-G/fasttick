@@ -581,7 +581,36 @@ impl Project {
             .and_then(Option::as_ref)
             .ok_or(ProjectError::UnknownFile(id))?;
         let path = entry.file.path().ok_or(BtError::NoPath)?.to_path_buf();
-        let mut new_file = BtFile::load(&path)?;
+        let new_file = BtFile::load(&path)?;
+        self.replace_file(id, new_file);
+        Ok(())
+    }
+
+    /// Replaces the text of a file with a text that is not saved, for
+    /// example a copy of unsaved changes after a crash. The file keeps its
+    /// path and becomes dirty. The unconnected nodes and the layout states
+    /// stay, as with [`Project::reload_file`].
+    ///
+    /// On error (the text is not valid XML), the project does not change.
+    pub fn restore_file_text(&mut self, id: FileId, text: &str) -> Result<(), ProjectError> {
+        let entry = self
+            .entries
+            .get(id.0)
+            .and_then(Option::as_ref)
+            .ok_or(ProjectError::UnknownFile(id))?;
+        let path = entry.file.path().map(Path::to_path_buf);
+        let mut new_file = BtFile::parse(text, path)?;
+        new_file.bump_generation();
+        self.replace_file(id, new_file);
+        Ok(())
+    }
+
+    /// Puts a new document in the place of a file. The unconnected nodes
+    /// of the file are copied into the new document.
+    fn replace_file(&mut self, id: FileId, mut new_file: BtFile) {
+        let Some(entry) = self.entries.get(id.0).and_then(Option::as_ref) else {
+            return;
+        };
         let old_doc = entry.file.doc();
         let mut moved = Vec::new();
         for ((file, tree), list) in &self.unconnected {
@@ -610,7 +639,6 @@ impl Project {
             entry.file = new_file;
         }
         self.refresh();
-        Ok(())
     }
 
     /// Resolves the includes of all files again, loads included files that

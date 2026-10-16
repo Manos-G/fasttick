@@ -59,6 +59,7 @@ mod commands;
 mod files;
 mod handlers;
 mod popups;
+mod recovery;
 mod remote;
 mod ui;
 
@@ -238,6 +239,9 @@ pub struct FastTickApp {
     add_popup: Option<crate::add_popup::AddPopup>,
     command_search: Option<crate::command_search::CommandSearch>,
     remote: crate::remote_ui::RemoteState,
+    recovery: Option<crate::recovery::Recovery>,
+    recovery_offer: Vec<crate::recovery::Orphan>,
+    recovery_failed: bool,
     notices: Vec<Notice>,
     actions: Vec<AppAction>,
     save_as_view: Option<ViewId>,
@@ -302,6 +306,9 @@ impl FastTickApp {
             add_popup: None,
             command_search: None,
             remote: crate::remote_ui::RemoteState::new(crate::remote::RemoteCache::default_root()),
+            recovery: None,
+            recovery_offer: Vec::new(),
+            recovery_failed: false,
             notices: Vec::new(),
             actions: Vec::new(),
             save_as_view: None,
@@ -314,6 +321,13 @@ impl FastTickApp {
             pending_close: None,
             close_confirmed: false,
         };
+        // The real application keeps copies of unsaved changes; tests set a
+        // folder with `use_recovery_dir`.
+        if (storage.is_some() || std::env::var_os(crate::recovery::ENV_DIR).is_some())
+            && let Some(root) = crate::recovery::Recovery::default_root()
+        {
+            app.use_recovery_dir(&root);
+        }
         crate::fonts::install(&cc.egui_ctx);
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         theme::install(&cc.egui_ctx, app.theme());
@@ -944,6 +958,7 @@ impl eframe::App for FastTickApp {
 
     fn on_exit(&mut self) {
         self.live.shutdown();
+        self.finish_recovery();
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {

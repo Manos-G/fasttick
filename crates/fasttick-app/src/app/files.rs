@@ -459,11 +459,13 @@ impl FastTickApp {
 
     /// Opens a new, empty tree file in edit mode.
     pub(super) fn new_document(&mut self) {
-        let editor = crate::editor::EditorDoc::untitled();
+        self.add_untitled_document(crate::editor::EditorDoc::untitled(), "Untitled");
+    }
+
+    /// Shows a document that has no file yet.
+    pub(super) fn add_untitled_document(&mut self, editor: crate::editor::EditorDoc, title: &str) {
         let main = InstanceIndex(editor.main_tree_index());
-        let doc = self
-            .workspace
-            .add_editor_doc(PathBuf::new(), "Untitled", editor);
+        let doc = self.workspace.add_editor_doc(PathBuf::new(), title, editor);
         if let Some(view) = self.workspace.open_view(doc, main, self.view_options()) {
             dock::add_document(&mut self.docks[Mode::Edit.index()], Tab::Document(view));
             self.focus_view(view);

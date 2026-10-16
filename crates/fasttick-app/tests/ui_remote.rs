@@ -170,6 +170,8 @@ fn open_edit_save_and_conflict_on_a_robot() {
             .as_ref()
             .is_some_and(|d| d.listing.is_some())
     });
+    // The window grows with the list: let its size settle before a click.
+    let _ = harness.try_run();
     // The tree file shows; the text file does not.
     assert!(harness.query_by_label_contains("notes.txt").is_none());
     harness
@@ -253,7 +255,7 @@ fn open_edit_save_and_conflict_on_a_robot() {
         !app.remote().conflicts.is_empty()
     });
     assert_eq!(read(&main), robot_version);
-    harness.run_steps(3);
+    let _ = harness.try_run();
     harness.get_by_label("Changed on the robot");
     assert!(harness.state().remote().index.pending().len() == 1);
     harness

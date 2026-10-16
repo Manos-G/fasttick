@@ -61,6 +61,7 @@ impl FastTickApp {
             self.actions.push(action);
         }
         self.handle_actions(&ctx);
+        self.update_recovery(&ctx);
         self.update_title(&ctx);
     }
 
@@ -566,6 +567,7 @@ impl FastTickApp {
         }
         self.breakpoint_dialog(ctx);
         self.unsaved_dialog(ctx);
+        self.recovery_dialog(ctx);
         self.sqlite_dialog(ctx);
         if let Some(form) = &mut self.model_form {
             match crate::model_dialog::show(ctx, form) {

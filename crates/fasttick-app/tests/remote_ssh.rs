@@ -53,10 +53,9 @@ fn list_fetch_upload_and_conflicts() {
 
     // List.
     let listing = ops::list_dir(&config, &host, &trees_path).unwrap();
-    assert_eq!(
-        listing.dir,
-        std::fs::canonicalize(&trees).unwrap().to_str().unwrap()
-    );
+    // The path stays as given, also if it has a link (on macOS, the
+    // temporary folder is below the link /var).
+    assert_eq!(listing.dir, trees_path);
     let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(
         names,
@@ -92,6 +91,29 @@ fn list_fetch_upload_and_conflicts() {
         );
     }
     assert!(!paths.iter().any(|p| p.ends_with("notes.txt")), "{paths:?}");
+    let unique: std::collections::BTreeSet<&str> = paths.iter().copied().collect();
+    assert_eq!(unique.len(), paths.len(), "no file twice: {paths:?}");
+
+    // A folder that is a link: the files keep the path through the link.
+    #[cfg(unix)]
+    {
+        let link = files.join("linked");
+        std::os::unix::fs::symlink(&trees, &link).unwrap();
+        let link_path = link.to_str().unwrap().to_owned();
+        let listing = ops::list_dir(&config, &host, &link_path).unwrap();
+        assert_eq!(listing.dir, link_path);
+        let collected =
+            ops::collect(&config, &host, &posix_join(&link_path, "main.xml")).unwrap();
+        let paths: Vec<&str> = collected.iter().map(|f| f.path.as_str()).collect();
+        assert!(
+            paths.contains(&posix_join(&link_path, "other.xml").as_str()),
+            "{paths:?}"
+        );
+        assert!(
+            !paths.iter().any(|p| p.starts_with(trees_path.as_str())),
+            "{paths:?}"
+        );
+    }
     let base = collected[0].base.clone();
     assert_ne!(base, NO_FILE);
 
@@ -119,6 +141,14 @@ fn list_fetch_upload_and_conflicts() {
     };
     assert_ne!(new_base, base);
     assert_eq!(text(&main), new_text);
+    // The checksums without a copy: the same as the upload gave.
+    let sums = ops::checksums(
+        &config,
+        &host,
+        &[main_path.clone(), posix_join(&trees_path, "gone.xml")],
+    )
+    .unwrap();
+    assert_eq!(sums, [new_base.clone(), NO_FILE.to_owned()]);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
