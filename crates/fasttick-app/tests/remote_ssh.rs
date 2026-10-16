@@ -277,3 +277,42 @@ fn a_key_that_the_server_refuses_is_a_connection_error() {
     assert!(message.contains("Permission denied"), "{message}");
     assert!(error.to_string().starts_with("FastTick cannot connect"));
 }
+
+#[test]
+fn without_a_shared_connection_a_remembered_passphrase_serves_each_command() {
+    // Windows, or a data folder with a long path: each command is a new
+    // ssh process, which asks again.
+    let Some(server) = TestSshd::start() else {
+        return;
+    };
+    let askpass = AskpassServer::start(|| {}).unwrap();
+    let program = PathBuf::from(env!("CARGO_BIN_EXE_fasttick"));
+    let mut config = server.ssh_config("separate", Some(askpass.env(program)));
+    config.control_dir = None;
+    let host = server.host(HOST_ASK);
+    let dir = server.files().to_str().unwrap().to_owned();
+    let run = || {
+        let (config, host, dir) = (config.clone(), host.clone(), dir.clone());
+        std::thread::spawn(move || ops::list_dir(&config, &host, &dir))
+    };
+
+    let first = run();
+    let prompt = askpass
+        .wait_prompt(Duration::from_secs(20))
+        .expect("host key");
+    assert_eq!(prompt.kind(), PromptKind::Confirm);
+    prompt.answer(Some("yes".into()));
+    let prompt = askpass
+        .wait_prompt(Duration::from_secs(20))
+        .expect("passphrase");
+    askpass.remember(&prompt.text, PASSPHRASE);
+    prompt.answer(Some(PASSPHRASE.into()));
+    first.join().unwrap().unwrap();
+
+    // The next commands get the remembered passphrase: no dialog.
+    for _ in 0..3 {
+        let next = run();
+        assert!(askpass.wait_prompt(Duration::from_millis(500)).is_none());
+        next.join().unwrap().unwrap();
+    }
+}

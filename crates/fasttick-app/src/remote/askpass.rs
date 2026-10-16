@@ -10,17 +10,20 @@
 //!
 //! FastTick never writes a password to a file. With "remember", the
 //! server keeps it in memory until FastTick closes and answers the same
-//! question again without the dialog (not if the same question comes back
-//! at once: then the password was wrong).
+//! question of a new `ssh` process without the dialog. If the same `ssh`
+//! process asks again, the answer was wrong: the server forgets it and
+//! asks the user. (The question program sends the process ID of its
+//! `ssh`; on systems where it cannot, a wrong remembered password makes
+//! the connection fail, and the app forgets the passwords.)
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// The environment variable with the address of the server.
 pub const ENV_ADDRESS: &str = "FASTTICK_ASKPASS";
@@ -31,8 +34,6 @@ pub const ENV_TOKEN: &str = "FASTTICK_ASKPASS_TOKEN";
 const MAX_PROMPT: usize = 4096;
 /// How long the server waits for the answer of the user.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(600);
-/// A remembered answer that is asked again within this time was wrong.
-const RETRY_WINDOW: Duration = Duration::from_secs(15);
 
 /// The settings that make `ssh` ask through FastTick.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,7 +104,8 @@ impl Prompt {
 #[derive(Debug)]
 struct Remembered {
     secret: String,
-    last_used: Option<Instant>,
+    /// The `ssh` processes that got the answer.
+    used_by: HashSet<u32>,
 }
 
 type Memory = Arc<Mutex<HashMap<String, Remembered>>>;
@@ -182,7 +184,7 @@ impl AskpassServer {
                 prompt.to_owned(),
                 Remembered {
                     secret: secret.to_owned(),
-                    last_used: None,
+                    used_by: HashSet::new(),
                 },
             );
         }
@@ -213,6 +215,10 @@ fn handle(
     }
     line.clear();
     reader.read_line(&mut line)?;
+    // The process ID of the ssh that asks (0: unknown).
+    let asker: u32 = line.trim().parse().unwrap_or(0);
+    line.clear();
+    reader.read_line(&mut line)?;
     let length: usize = line
         .trim()
         .parse()
@@ -223,7 +229,7 @@ fn handle(
     let mut text = vec![0u8; length];
     reader.read_exact(&mut text)?;
     let text = String::from_utf8_lossy(&text).trim().to_owned();
-    let answer = match remembered_answer(memory, &text) {
+    let answer = match remembered_answer(memory, &text, asker) {
         Some(secret) => Some(secret),
         None => {
             let (reply, answers) = mpsc::channel();
@@ -242,19 +248,15 @@ fn handle(
     stream.flush()
 }
 
-/// The remembered answer to a question, unless it was used just before
-/// (then it was wrong, and FastTick forgets it).
-fn remembered_answer(memory: &Memory, text: &str) -> Option<String> {
+/// The remembered answer to a question, unless the same `ssh` process got
+/// it before (then it was wrong, and FastTick forgets it).
+fn remembered_answer(memory: &Memory, text: &str, asker: u32) -> Option<String> {
     let mut memory = memory.lock().ok()?;
     let entry = memory.get_mut(text)?;
-    if entry
-        .last_used
-        .is_some_and(|used| used.elapsed() < RETRY_WINDOW)
-    {
+    if asker != 0 && !entry.used_by.insert(asker) {
         memory.remove(text);
         return None;
     }
-    entry.last_used = Some(Instant::now());
     Some(entry.secret.clone())
 }
 
@@ -293,7 +295,7 @@ pub fn client_main(args: &[String]) -> i32 {
         return 1;
     };
     let text = args.join(" ");
-    match ask(&address, &token, &text) {
+    match ask(&address, &token, &text, parent_id()) {
         Ok(Some(answer)) => {
             let mut out = io::stdout().lock();
             let _ = writeln!(out, "{answer}");
@@ -304,14 +306,27 @@ pub fn client_main(args: &[String]) -> i32 {
     }
 }
 
-/// Sends a question to a server and waits for the answer.
-fn ask(address: &str, token: &str, text: &str) -> io::Result<Option<String>> {
+/// The process ID of the parent process (the `ssh` that asks), or 0.
+fn parent_id() -> u32 {
+    #[cfg(unix)]
+    {
+        std::os::unix::process::parent_id()
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+/// Sends a question to a server and waits for the answer. `asker` is the
+/// process ID of the `ssh` that asks (0: unknown).
+fn ask(address: &str, token: &str, text: &str, asker: u32) -> io::Result<Option<String>> {
     let address = address
         .parse()
         .map_err(|_| io::Error::other("bad address"))?;
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(5))?;
     stream.set_read_timeout(Some(ANSWER_TIMEOUT + Duration::from_secs(10)))?;
-    write!(stream, "{token}\n{}\n{text}", text.len())?;
+    write!(stream, "{token}\n{asker}\n{}\n{text}", text.len())?;
     stream.flush()?;
     let mut reply = String::new();
     stream.read_to_string(&mut reply)?;
@@ -327,7 +342,7 @@ mod tests {
         let server = AskpassServer::start(|| {}).unwrap();
         let env = server.env(PathBuf::from("fasttick"));
         let (address, token) = (env.address.clone(), env.token.clone());
-        let asker = std::thread::spawn(move || ask(&address, &token, "pi@robot's password:"));
+        let asker = std::thread::spawn(move || ask(&address, &token, "pi@robot's password:", 7));
         let prompt = server.wait_prompt(Duration::from_secs(5)).unwrap();
         assert_eq!(prompt.text, "pi@robot's password:");
         assert_eq!(prompt.kind(), PromptKind::Secret);
@@ -341,6 +356,7 @@ mod tests {
                 &address,
                 &token,
                 "Are you sure you want to continue connecting (yes/no/[fingerprint])?",
+                7,
             )
         });
         let prompt = server.wait_prompt(Duration::from_secs(5)).unwrap();
@@ -349,25 +365,38 @@ mod tests {
         assert_eq!(asker.join().unwrap().unwrap(), None);
 
         // A wrong token gets no answer and no dialog.
-        assert_eq!(ask(&env.address, "wrong", "x").unwrap(), None);
+        assert_eq!(ask(&env.address, "wrong", "x", 7).unwrap(), None);
         assert!(server.wait_prompt(Duration::from_millis(200)).is_none());
     }
 
     #[test]
-    fn a_remembered_answer_is_used_once_then_asked_again() {
+    fn a_remembered_answer_serves_new_connections_until_it_is_wrong() {
         let server = AskpassServer::start(|| {}).unwrap();
         let env = server.env(PathBuf::from("fasttick"));
         server.remember("pw:", "secret");
-        assert_eq!(
-            ask(&env.address, &env.token, "pw:").unwrap().as_deref(),
-            Some("secret")
-        );
-        // At once again: the password was wrong, so the user is asked.
+        // Two ssh processes (new connections): no dialog.
+        for asker in [100, 101] {
+            assert_eq!(
+                ask(&env.address, &env.token, "pw:", asker)
+                    .unwrap()
+                    .as_deref(),
+                Some("secret")
+            );
+        }
+        // The same ssh asks again: the password was wrong, so the user is
+        // asked, and the wrong answer is forgotten.
         let (address, token) = (env.address.clone(), env.token.clone());
-        let asker = std::thread::spawn(move || ask(&address, &token, "pw:"));
+        let asker = std::thread::spawn(move || ask(&address, &token, "pw:", 101));
         let prompt = server.wait_prompt(Duration::from_secs(5)).unwrap();
         prompt.answer(Some("right".into()));
         assert_eq!(asker.join().unwrap().unwrap().as_deref(), Some("right"));
+        let (address, token) = (env.address.clone(), env.token.clone());
+        let asker = std::thread::spawn(move || ask(&address, &token, "pw:", 102));
+        let prompt = server
+            .wait_prompt(Duration::from_secs(5))
+            .expect("asked again");
+        prompt.answer(None);
+        assert_eq!(asker.join().unwrap().unwrap(), None);
     }
 
     #[test]

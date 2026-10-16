@@ -757,8 +757,8 @@ fn prompt_dialog(ctx: &egui::Context, dialog: &mut PromptDialog) -> Option<Optio
             if confirm {
                 ui.label(
                     RichText::new(
-                        "Answer yes only if this is your robot. FastTick then keeps its key \
-                         in your known hosts file.",
+                        "Answer yes only if this is your robot. Then ssh keeps the key of \
+                         the robot in your known hosts file and does not ask again.",
                     )
                     .small()
                     .weak(),

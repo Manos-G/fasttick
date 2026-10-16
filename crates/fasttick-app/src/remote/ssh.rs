@@ -50,19 +50,42 @@ impl SshConfig {
             program: env_path("FASTTICK_SSH").unwrap_or_else(|| PathBuf::from("ssh")),
             config_file: env_path("FASTTICK_SSH_CONFIG"),
             askpass,
-            control_dir: control_dir.filter(|dir| usable_control_dir(dir)),
+            control_dir: control_dir
+                .into_iter()
+                .chain(fallback_control_dir())
+                .find(|dir| usable_control_dir(dir)),
         }
     }
 }
 
-/// True if sockets in `dir` have short enough paths (a Unix socket path has
-/// at most about 104 bytes; `%C` is 40 characters) and the folder can be
-/// made private.
+/// The characters that a socket name adds to its folder: `/`, the name
+/// (12 characters, see [`control_path`]) and the 17 characters of the
+/// temporary name that `ssh` uses while the connection starts.
+const SOCKET_NAME_LENGTH: usize = 1 + 12 + 17;
+
+/// The longest socket path (macOS allows 104 bytes, Linux 108).
+const MAX_SOCKET_PATH: usize = 100;
+
+/// True if sockets in `dir` have short enough paths and the folder can be
+/// made private (a folder of another user cannot).
 fn usable_control_dir(dir: &Path) -> bool {
-    if !cfg!(unix) || dir.as_os_str().len() + 42 > 100 {
-        return false;
-    }
-    make_private_dir(dir).is_ok()
+    cfg!(unix)
+        && dir.as_os_str().len() + SOCKET_NAME_LENGTH <= MAX_SOCKET_PATH
+        && make_private_dir(dir).is_ok()
+}
+
+/// A short folder for the sockets if the preferred one has a long path:
+/// `fasttick-ssh-<user>` in the temporary folder.
+fn fallback_control_dir() -> Option<PathBuf> {
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .ok()
+        .filter(|u| {
+            !u.is_empty()
+                && u.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+        })?;
+    Some(std::env::temp_dir().join(format!("fasttick-ssh-{user}")))
 }
 
 #[cfg(unix)]
@@ -176,9 +199,25 @@ fn hide_console(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_console(_command: &mut Command) {}
 
-/// The socket of the shared connection to a computer.
-fn control_path(dir: &Path) -> String {
-    format!("ControlPath={}", dir.join("%C").display())
+/// The socket of the shared connection to a computer: a short name from a
+/// hash of the program, the configuration file, the destination and the
+/// port (the `%C` token of `ssh` has 40 characters, too long for some home
+/// folders). `%` is the token character of `ssh`; a path with spaces is
+/// quoted.
+fn control_path(config: &SshConfig, host: &RemoteHost, dir: &Path) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    config.program.hash(&mut hasher);
+    config.config_file.hash(&mut hasher);
+    host.destination().hash(&mut hasher);
+    host.port.hash(&mut hasher);
+    let name = format!("{:012x}", hasher.finish() & 0xffff_ffff_ffff);
+    let path = dir.join(name).display().to_string().replace('%', "%%");
+    if path.contains(char::is_whitespace) {
+        format!("ControlPath=\"{path}\"")
+    } else {
+        format!("ControlPath={path}")
+    }
 }
 
 /// One shared connection start at a time (two operations must not start
@@ -189,7 +228,7 @@ static MASTER_LOCK: Mutex<()> = Mutex::new(());
 fn ensure_master(config: &SshConfig, host: &RemoteHost, dir: &Path) -> Result<(), SshError> {
     let _guard = MASTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     make_private_dir(dir).map_err(|err| SshError::Other(err.to_string()))?;
-    let path = control_path(dir);
+    let path = control_path(config, host, dir);
     let check = base_command(config, host)
         .args(["-o", &path, "-O", "check", "--", &host.destination()])
         .stdin(Stdio::null())
@@ -239,7 +278,7 @@ pub fn close_master(config: &SshConfig, host: &RemoteHost) {
         let _ = base_command(config, host)
             .args([
                 "-o",
-                &control_path(dir),
+                &control_path(config, host, dir),
                 "-O",
                 "exit",
                 "--",
@@ -261,7 +300,12 @@ fn script_command(
     let mut command = base_command(config, host);
     if let Some(dir) = &config.control_dir {
         ensure_master(config, host, dir)?;
-        command.args(["-o", "ControlMaster=no", "-o", &control_path(dir)]);
+        command.args([
+            "-o",
+            "ControlMaster=no",
+            "-o",
+            &control_path(config, host, dir),
+        ]);
     }
     command
         .arg("--")
@@ -401,6 +445,32 @@ mod tests {
         let end = args.iter().position(|a| a == "--").unwrap();
         assert_eq!(args[end + 1], "pi@robot");
         assert_eq!(args[end + 2], r"sh -c 'echo '\''hi'\'''");
+    }
+
+    #[test]
+    fn socket_paths_are_short() {
+        let config = SshConfig {
+            program: PathBuf::from("ssh"),
+            config_file: None,
+            askpass: None,
+            control_dir: None,
+        };
+        let host = RemoteHost::parse("pi@robot.local").unwrap();
+        // A usual data folder: the socket path with the temporary name of
+        // ssh fits.
+        let dir = Path::new("/home/manos-georgoudakis/.local/share/fasttick/remote/ctl");
+        let option = control_path(&config, &host, dir);
+        let path = option.strip_prefix("ControlPath=").unwrap();
+        assert!(path.len() + 17 <= MAX_SOCKET_PATH, "{path}");
+        assert!(dir.as_os_str().len() + SOCKET_NAME_LENGTH <= MAX_SOCKET_PATH);
+        // Another computer, another socket.
+        let other = RemoteHost::parse("pi@robot2.local").unwrap();
+        assert_ne!(option, control_path(&config, &other, dir));
+        // '%' is not a token; spaces are quoted.
+        assert!(control_path(&config, &host, Path::new("/a%b")).starts_with("ControlPath=/a%%b/"));
+        assert!(control_path(&config, &host, Path::new("/a b")).starts_with("ControlPath=\"/a b/"));
+        // A folder that is too long is not used.
+        assert!(!usable_control_dir(&Path::new("/x").join("y".repeat(80))));
     }
 
     #[test]
