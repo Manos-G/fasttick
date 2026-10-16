@@ -56,7 +56,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --all-targets
       # The real-executor and SSH tests skip here (no BT.CPP, no sshd).
-      - run: cargo test --workspace
+      - run: cargo test --workspace --no-fail-fast
 
   deny:
     name: cargo deny

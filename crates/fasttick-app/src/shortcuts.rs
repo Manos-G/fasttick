@@ -631,6 +631,9 @@ mod tests {
     #[test]
     fn shortcut_text_uses_symbols() {
         let ctx = egui::Context::default();
+        // On a Mac, egui uses key symbols when the fonts have them; the
+        // expected texts below are the names that other systems use.
+        ctx.set_os(egui::os::OperatingSystem::Nix);
         let map = KeyMap::default();
         assert_eq!(
             map.shortcut_text(&ctx, Command::ZoomIn).as_deref(),
