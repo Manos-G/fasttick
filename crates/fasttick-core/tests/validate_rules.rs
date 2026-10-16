@@ -1721,6 +1721,33 @@ fn the_same_main_tree_in_task_files_is_a_note() {
 }
 
 #[test]
+fn a_library_without_a_main_tree_is_a_note() {
+    let dir = write_files(&[
+        (
+            "library.xml",
+            "<root BTCPP_format=\"4\"><BehaviorTree ID=\"Get\"><AlwaysSuccess/></BehaviorTree>\
+             <BehaviorTree ID=\"Put\"><AlwaysSuccess/></BehaviorTree></root>",
+        ),
+        (
+            "task.xml",
+            "<root BTCPP_format=\"4\" main_tree_to_execute=\"MainTree\">\
+             <BehaviorTree ID=\"MainTree\"><SubTree ID=\"Get\"/></BehaviorTree></root>",
+        ),
+    ]);
+    let mut project = Project::new("library");
+    let library = project.add_file(dir.path().join("library.xml")).unwrap();
+    // Alone, the file is a warning: BT.CPP cannot select its main tree.
+    let found = validate_file(&project, library);
+    assert_eq!(single(&found, C::AmbiguousMainTree).severity, Warning);
+    // A task file uses its trees: the file is a library.
+    project.add_file(dir.path().join("task.xml")).unwrap();
+    let found = validate_file(&project, library);
+    let p = single(&found, C::AmbiguousMainTree);
+    assert_eq!(p.severity, Info);
+    assert!(p.message.contains("library"), "{}", p.message);
+}
+
+#[test]
 fn subtree_cycle_across_files() {
     let dir = write_files(&[
         (

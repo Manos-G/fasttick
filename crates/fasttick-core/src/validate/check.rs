@@ -598,23 +598,62 @@ impl<'c, 'p> FileChecker<'c, 'p> {
             MainTree::Ambiguous => {
                 // Only for a file that an executor loads directly: a listed
                 // tree file that no other file includes.
-                if self.ctx.is_listed_tree_file(self.file) && !self.ctx.is_included(self.file) {
-                    self.push(
+                if !self.ctx.is_listed_tree_file(self.file) || self.ctx.is_included(self.file) {
+                    return;
+                }
+                let (severity, message) = if self.is_library() {
+                    (
+                        Severity::Info,
+                        "The file has more than one tree and no main_tree_to_execute. This is \
+                         correct for a library, because other files use its trees as SubTrees. \
+                         To load the file as the main file, add \
+                         main_tree_to_execute=\"<tree ID>\" to <root>, or select the tree in \
+                         the executor.",
+                    )
+                } else {
+                    (
                         Severity::Warning,
-                        ProblemCode::AmbiguousMainTree,
-                        None,
-                        root,
-                        Some("main_tree_to_execute"),
                         "The file has more than one tree and no main_tree_to_execute. BT.CPP \
                          cannot select the tree to execute when it loads the file. Add \
                          main_tree_to_execute=\"<tree ID>\" to <root>, or select the tree in \
-                         the executor."
-                            .to_owned(),
-                    );
-                }
+                         the executor.",
+                    )
+                };
+                self.push(
+                    severity,
+                    ProblemCode::AmbiguousMainTree,
+                    None,
+                    root,
+                    Some("main_tree_to_execute"),
+                    message.to_owned(),
+                );
             }
             MainTree::Single(_) | MainTree::None => {}
         }
+    }
+
+    /// True if a `<SubTree>` of another file of the project uses a tree ID
+    /// of this file: the file is a library.
+    fn is_library(&self) -> bool {
+        let ids: Vec<&str> = self
+            .bt
+            .index()
+            .trees
+            .iter()
+            .map(|t| t.id.as_str())
+            .collect();
+        self.ctx.project().files().any(|(file, _, bt)| {
+            let doc = bt.doc();
+            file != self.file
+                && bt.index().root.is_some_and(|root| {
+                    doc.descendants(root).any(|node| {
+                        doc.name(node) == Some("SubTree")
+                            && doc
+                                .attribute(node, "ID")
+                                .is_some_and(|id| ids.contains(&id))
+                    })
+                })
+        })
     }
 
     fn file_name(&self, file: FileId) -> String {

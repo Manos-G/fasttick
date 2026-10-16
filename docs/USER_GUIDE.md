@@ -251,7 +251,8 @@ all the task files and the libraries to one project. Then:
   file, for example `MainTree (B1_fast.xml)`. The **Problems** panel has a
   **File** column, and the filter also finds file names.
 - The same `MainTree` in two task files is a note, not a warning, because
-  the executor usually loads only one task file.
+  the executor usually loads only one task file. A library without
+  `main_tree_to_execute` is also a note when other files use its trees.
 - When a tree ID is in more than one file, a SubTree node of a file uses
   the tree of that file or of a file that it includes, as BT.CPP does.
   Else it uses the tree of a library file (a file without
