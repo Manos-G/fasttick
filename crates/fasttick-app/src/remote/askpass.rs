@@ -210,9 +210,9 @@ fn handle(
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
     reader.read_line(&mut line)?;
-    if line.trim_end() != token {
-        return Ok(());
-    }
+    // Read the whole question before the answer, also with a wrong token:
+    // a socket that closes with unread data resets the connection.
+    let token_ok = line.trim_end() == token;
     line.clear();
     reader.read_line(&mut line)?;
     // The process ID of the ssh that asks (0: unknown).
@@ -229,15 +229,19 @@ fn handle(
     let mut text = vec![0u8; length];
     reader.read_exact(&mut text)?;
     let text = String::from_utf8_lossy(&text).trim().to_owned();
-    let answer = match remembered_answer(memory, &text, asker) {
-        Some(secret) => Some(secret),
-        None => {
-            let (reply, answers) = mpsc::channel();
-            sender
-                .send(Prompt { text, reply })
-                .map_err(|_| io::Error::other("FastTick is closing"))?;
-            wake();
-            answers.recv_timeout(ANSWER_TIMEOUT).ok().flatten()
+    let answer = if !token_ok {
+        None
+    } else {
+        match remembered_answer(memory, &text, asker) {
+            Some(secret) => Some(secret),
+            None => {
+                let (reply, answers) = mpsc::channel();
+                sender
+                    .send(Prompt { text, reply })
+                    .map_err(|_| io::Error::other("FastTick is closing"))?;
+                wake();
+                answers.recv_timeout(ANSWER_TIMEOUT).ok().flatten()
+            }
         }
     };
     let mut stream = stream;
@@ -329,8 +333,21 @@ fn ask(address: &str, token: &str, text: &str, asker: u32) -> io::Result<Option<
     write!(stream, "{token}\n{asker}\n{}\n{text}", text.len())?;
     stream.flush()?;
     let mut reply = String::new();
-    stream.read_to_string(&mut reply)?;
-    Ok(reply.strip_prefix("1\n").map(str::to_owned))
+    match stream.read_to_string(&mut reply) {
+        Ok(_) => Ok(reply.strip_prefix("1\n").map(str::to_owned)),
+        // A closed or reset connection is no answer.
+        Err(err)
+            if matches!(
+                err.kind(),
+                io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::UnexpectedEof
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(err) => Err(err),
+    }
 }
 
 #[cfg(test)]
