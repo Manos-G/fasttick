@@ -43,6 +43,21 @@ jobs:
         # The real-executor and SSH tests must run, not skip.
         run: FASTTICK_BTCPP_PREFIX="$HOME/btcpp-install" FASTTICK_REQUIRE_HARNESS=1 FASTTICK_REQUIRE_SSHD=1 cargo test --workspace
 
+  other-platforms:
+    name: build and test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --all-targets
+      # The real-executor and SSH tests skip here (no BT.CPP, no sshd).
+      - run: cargo test --workspace
+
   deny:
     name: cargo deny
     runs-on: ubuntu-24.04

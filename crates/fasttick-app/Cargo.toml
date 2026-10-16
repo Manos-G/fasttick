@@ -28,6 +28,8 @@ through the BT.CPP publisher protocol, and replays .btlog and SQLite logs."""
 section = "devel"
 priority = "optional"
 depends = "$auto"
+# "Open from robot" runs the ssh program.
+recommends = "openssh-client"
 assets = [
     ["target/release/fasttick", "usr/bin/", "755"],
     ["packaging/fasttick.desktop", "usr/share/applications/", "644"],
