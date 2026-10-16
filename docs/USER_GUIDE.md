@@ -7,14 +7,52 @@ FastTick is an editor, live debugger and log replayer for BehaviorTree.CPP 4
 
 ### 1.1 Install
 
-Use one of these procedures:
+The packages are on the releases page:
+<https://github.com/Manos-G/fasttick/releases>.
 
-- Debian or Ubuntu: install the package.
-  `sudo apt install ./fasttick_<version>_amd64.deb`
-- Other Linux systems: make the AppImage executable and run it.
-  `chmod +x FastTick-<version>-x86_64.AppImage`
-- From the source code: run `cargo build --release`. The program is
-  `target/release/fasttick`.
+**Ubuntu, Debian and Raspberry Pi OS (64-bit).** Open a terminal and type
+this command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Manos-G/fasttick/main/install.sh | sh
+```
+
+The command downloads the Debian package of the latest release for your
+computer (amd64 or arm64). It checks the SHA-256 checksum of the package,
+then installs the package with `apt-get`. It asks for your password
+(`sudo`). FastTick is then in the application menu.
+
+- To update FastTick, type the same command again.
+- To install a specific version, type
+  `curl -fsSL https://raw.githubusercontent.com/Manos-G/fasttick/main/install.sh | FASTTICK_VERSION=v0.1.0 sh`.
+- To remove FastTick, type `sudo apt-get remove fasttick`.
+
+You can also download the package from the releases page and install it:
+`sudo apt install ./fasttick_<version>_amd64.deb`.
+
+The Linux packages need Ubuntu 22.04 or later, Debian 12 or later, or a
+system with glibc 2.35 or later.
+
+**Other Linux systems.** Download the AppImage for your computer
+(`x86_64` or `aarch64`). Make it executable, then start it:
+
+```sh
+chmod +x FastTick-<version>-x86_64.AppImage
+./FastTick-<version>-x86_64.AppImage
+```
+
+**Windows (64-bit).** Download `FastTick-<version>-windows-x86_64.zip`.
+Extract it and start `fasttick.exe`. The program has no code signature:
+if Windows shows "Windows protected your PC", click **More info**, then
+**Run anyway**.
+
+**macOS (Apple silicon).** Download `FastTick-<version>-macos-arm64.zip`.
+Extract it and move `FastTick.app` to the Applications folder. The app has
+no code signature: the first time, right-click the app, select **Open**,
+then click **Open**.
+
+**From the source code.** Install Rust and a C and C++ compiler. Then run
+`cargo build --release`. The program is `target/release/fasttick`.
 
 ### 1.2 Start
 

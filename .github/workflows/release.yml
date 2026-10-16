@@ -1,0 +1,207 @@
+name: Release
+
+# Builds the packages of a version and publishes them as a GitHub release:
+# - Linux amd64 and arm64: a Debian package (.deb) and an AppImage. They
+#   are built on Ubuntu 22.04, so they run on Ubuntu 22.04 and later,
+#   Debian 12 and later, and Raspberry Pi OS (64-bit, Bookworm).
+# - Windows x86_64: a zip file with fasttick.exe.
+# - macOS arm64 (Apple silicon): a zip file with FastTick.app.
+# - SHA256SUMS for all files.
+#
+# Start it with a tag push (git push origin v0.1.0), or from the Actions tab
+# (Run workflow) with the tag: the workflow then makes the tag on the
+# selected branch. The tag must be "v" + the version in Cargo.toml.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag of the release, for example v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: check the version
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then TAG="$GITHUB_REF_NAME"; else TAG="$INPUT_TAG"; fi
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::The tag '$TAG' is not 'v$VERSION' (the version in Cargo.toml)."
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ dpkg-dev file
+          cargo install cargo-deb --locked
+      - name: AppImage (also builds the release binary)
+        run: tools/build-appimage.sh
+      - name: Debian package
+        run: |
+          mkdir -p target/dist
+          cargo deb -p fasttick-app --no-build --output "target/dist/fasttick_${VERSION}_${{ matrix.arch }}.deb"
+          cp target/appimage/FastTick-*.AppImage target/dist/
+      - name: Install and start the package
+        run: |
+          dpkg-deb --info target/dist/fasttick_*.deb
+          sudo apt-get install -y ./target/dist/fasttick_*.deb
+          fasttick --version
+          target/dist/FastTick-*.AppImage --appimage-extract-and-run --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: target/dist/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows x86_64
+    needs: version
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p fasttick-app
+      - name: Zip file
+        shell: pwsh
+        run: |
+          $name = "FastTick-$env:VERSION-windows-x86_64"
+          $dir = "target/dist/$name"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item target/release/fasttick.exe, LICENSE, README.md, THIRD_PARTY_LICENSES.md $dir
+          Compress-Archive -Path $dir -DestinationPath "target/dist/$name.zip"
+          Remove-Item -Recurse $dir
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: target/dist/*.zip
+          if-no-files-found: error
+
+  macos:
+    name: macOS arm64
+    needs: version
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p fasttick-app
+      - name: App bundle
+        run: |
+          APP=target/dist/FastTick.app
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp target/release/fasttick "$APP/Contents/MacOS/fasttick"
+          cp LICENSE README.md THIRD_PARTY_LICENSES.md "$APP/Contents/Resources/"
+          ICONSET=target/FastTick.iconset
+          mkdir -p "$ICONSET"
+          PNG=crates/fasttick-app/packaging/fasttick-256.png
+          sips -z 16 16 "$PNG" --out "$ICONSET/icon_16x16.png"
+          sips -z 32 32 "$PNG" --out "$ICONSET/icon_16x16@2x.png"
+          sips -z 32 32 "$PNG" --out "$ICONSET/icon_32x32.png"
+          sips -z 64 64 "$PNG" --out "$ICONSET/icon_32x32@2x.png"
+          sips -z 128 128 "$PNG" --out "$ICONSET/icon_128x128.png"
+          cp "$PNG" "$ICONSET/icon_128x128@2x.png"
+          cp "$PNG" "$ICONSET/icon_256x256.png"
+          # Without an icon, macOS shows the default icon.
+          iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/fasttick.icns" || true
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>FastTick</string>
+            <key>CFBundleDisplayName</key><string>FastTick</string>
+            <key>CFBundleIdentifier</key><string>io.github.manos-g.fasttick</string>
+            <key>CFBundleVersion</key><string>$VERSION</string>
+            <key>CFBundleShortVersionString</key><string>$VERSION</string>
+            <key>CFBundleExecutable</key><string>fasttick</string>
+            <key>CFBundleIconFile</key><string>fasttick</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          plutil -lint "$APP/Contents/Info.plist"
+          "$APP/Contents/MacOS/fasttick" --version
+          cd target/dist
+          ditto -c -k --keepParent FastTick.app "FastTick-$VERSION-macos-arm64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: target/dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: publish the release
+    needs: [version, linux, windows, macos]
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish
+        run: |
+          NOTES="docs/releases/$TAG.md"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          elif [ -f "$NOTES" ]; then
+            gh release create "$TAG" dist/* --title "FastTick $VERSION" \
+              --notes-file "$NOTES" --target "$GITHUB_SHA"
+          else
+            gh release create "$TAG" dist/* --title "FastTick $VERSION" \
+              --generate-notes --target "$GITHUB_SHA"
+          fi

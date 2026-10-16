@@ -4,6 +4,11 @@
 //! Usage: `fasttick [--theme THEME] [--mode edit|live|replay]
 //! [--connect HOST[:PORT]] [FILE...]`
 
+// A release build on Windows opens no console window beside the FastTick
+// window. Output that goes to a pipe (for example the answer to ssh) still
+// works.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use fasttick_app::app::{FastTickApp, Mode, StartOptions, parse_endpoint};
 use fasttick_app::theme::ThemeChoice;
 

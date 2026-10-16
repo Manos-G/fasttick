@@ -46,6 +46,20 @@ demo notes [M1](docs/demo/M1.md), [M2](docs/demo/M2.md),
   Dark+, Light Modern).
 - Smooth with trees of 5,000 nodes.
 
+## Install
+
+On Ubuntu, Debian or Raspberry Pi OS (64-bit, amd64 or arm64), type:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Manos-G/fasttick/main/install.sh | sh
+```
+
+The script installs the Debian package of the latest release, after a
+check of its SHA-256 checksum. Type the same command again to update.
+The [releases page](https://github.com/Manos-G/fasttick/releases) also has
+AppImages for other Linux systems and packages for Windows and macOS. See
+the [user guide](docs/USER_GUIDE.md), section 1.1.
+
 ## Build
 
 1. Install Rust (stable) with rustup.
@@ -59,6 +73,11 @@ demo notes [M1](docs/demo/M1.md), [M2](docs/demo/M2.md),
   The package goes to `target/debian/`.
 - AppImage: `tools/build-appimage.sh`. The AppImage goes to
   `target/appimage/`.
+- A release: the workflow `.github/workflows/release.yml` builds the
+  packages for Linux (amd64 and arm64), Windows and macOS, and publishes
+  them with `SHA256SUMS`. Push a tag `v<version>` (the version in
+  `Cargo.toml`), or start the workflow on the Actions tab with the tag.
+  The release notes come from `docs/releases/<tag>.md`.
 
 ## Tests
 
