@@ -62,6 +62,11 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<StartOptions>
 }
 
 fn main() -> eframe::Result {
+    // `ssh` runs FastTick as its question program (see `remote::askpass`).
+    if fasttick_app::remote::askpass::is_askpass_call() {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        std::process::exit(fasttick_app::remote::askpass::client_main(&args));
+    }
     let options = match parse_args(std::env::args().skip(1)) {
         Ok(Some(options)) => options,
         Ok(None) => return Ok(()),
