@@ -853,7 +853,7 @@ pub fn open_dialog(
 
 /// A long text shortened at its start: `…` and the last `max` characters
 /// (the end of a path is the part that the user needs).
-fn short_path(text: &str, max: usize) -> String {
+pub fn short_path(text: &str, max: usize) -> String {
     let count = text.chars().count();
     if count <= max {
         return text.to_owned();

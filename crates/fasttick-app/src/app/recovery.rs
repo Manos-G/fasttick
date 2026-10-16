@@ -153,10 +153,21 @@ impl FastTickApp {
                                 .unwrap_or_else(|| p.display().to_string())
                         })
                         .unwrap_or_else(|| "a new file".to_owned());
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new(&record.title).strong());
-                        ui.label(RichText::new(format!("({}, {place})", record.age_text())).weak());
-                    });
+                    // A long path is shortened at its start: the dialog
+                    // keeps its width.
+                    ui.label(RichText::new(&record.title).strong());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!(
+                                "{}, {}",
+                                record.age_text(),
+                                crate::remote_ui::short_path(&place, 60)
+                            ))
+                            .weak(),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(place);
                 }
                 ui.add_space(6.0);
                 ui.label(

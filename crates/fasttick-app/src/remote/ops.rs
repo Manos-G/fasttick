@@ -242,7 +242,8 @@ pub enum Upload {
 /// that checksum ([`NO_FILE`]: it must not exist), else nothing is written
 /// and the result is [`Upload::Conflict`]. The new content goes to a
 /// temporary file in the same folder, which then replaces the file (a
-/// reader never sees a half-written file). The file keeps its permissions;
+/// reader never sees a half-written file). The file keeps its permissions
+/// (GNU and BSD `stat`);
 /// a link stays a link (the file it points to changes).
 pub fn upload(
     config: &SshConfig,
@@ -263,7 +264,7 @@ pub fn upload(
          mkdir -p -- \"$d\" || exit 4\n\
          t=\"$d/.$b.fasttick-$$.tmp\"\n\
          cat > \"$t\" || {{ rm -f -- \"$t\"; exit 4; }}\n\
-         if [ -f \"$p\" ]; then m=$(stat -c %a -- \"$p\" 2>/dev/null) && chmod \"$m\" \"$t\" 2>/dev/null; fi\n\
+         if [ -f \"$p\" ]; then m=$(stat -c %a -- \"$p\" 2>/dev/null || stat -f %Lp -- \"$p\" 2>/dev/null) && chmod \"$m\" \"$t\" 2>/dev/null; fi\n\
          mv -f -- \"$t\" \"$p\" || {{ rm -f -- \"$t\"; exit 5; }}\n\
          printf 'OK\\n'\n\
          cksum < \"$p\"\n",
