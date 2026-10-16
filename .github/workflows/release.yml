@@ -10,7 +10,9 @@ name: Release
 #
 # Start it with a tag push (git push origin v0.1.0), or from the Actions tab
 # (Run workflow) with the tag: the workflow then makes the tag on the
-# selected branch. The tag must be "v" + the version in Cargo.toml.
+# selected branch. The tag must be "v" + the version in Cargo.toml. Clear
+# "publish" to build and test the packages without a release (the
+# packages are then artifacts of the run).
 
 on:
   push:
@@ -20,6 +22,10 @@ on:
       tag:
         description: "The tag of the release, for example v0.1.0"
         required: true
+      publish:
+        description: "Publish the release (clear it to build and test the packages only)"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -177,6 +183,7 @@ jobs:
   release:
     name: publish the release
     needs: [version, linux, windows, macos]
+    if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-24.04
     env:
       TAG: ${{ needs.version.outputs.tag }}
