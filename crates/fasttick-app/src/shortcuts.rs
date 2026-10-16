@@ -35,11 +35,11 @@ pub enum Command {
     Paste,
     /// Duplicate the selection.
     Duplicate,
-    /// Delete the selection.
-    Delete,
-    /// Delete the selected nodes, but keep their children as unconnected
+    /// Delete the selected nodes. Their children stay as unconnected
     /// nodes.
-    DeleteKeepChildren,
+    Delete,
+    /// Delete the selected nodes with all their children.
+    DeleteWithChildren,
     /// Select all nodes.
     SelectAll,
     /// Add a node to the selected node (a search window asks for the type).
@@ -156,7 +156,7 @@ impl Command {
         Command::Paste,
         Command::Duplicate,
         Command::Delete,
-        Command::DeleteKeepChildren,
+        Command::DeleteWithChildren,
         Command::SelectAll,
         Command::AddNode,
         Command::MoveUp,
@@ -218,7 +218,7 @@ impl Command {
             Command::Paste => "Paste",
             Command::Duplicate => "Duplicate",
             Command::Delete => "Delete",
-            Command::DeleteKeepChildren => "Delete, keep children",
+            Command::DeleteWithChildren => "Delete with children",
             Command::SelectAll => "Select all",
             Command::AddNode => "Add node\u{2026}",
             Command::Find => "Find\u{2026}",
@@ -289,7 +289,7 @@ impl Command {
             | Command::Paste
             | Command::Duplicate
             | Command::Delete
-            | Command::DeleteKeepChildren
+            | Command::DeleteWithChildren
             | Command::SelectAll
             | Command::AddNode
             | Command::MoveUp
@@ -398,7 +398,7 @@ impl Default for KeyMap {
                 bind(Command::Paste, cmd, Key::V),
                 bind(Command::Duplicate, cmd, Key::D),
                 bind(Command::Delete, none, Key::Delete),
-                bind(Command::DeleteKeepChildren, cmd, Key::Delete),
+                bind(Command::DeleteWithChildren, cmd, Key::Delete),
                 bind(Command::SelectAll, cmd, Key::A),
                 bind(Command::AddNode, Modifiers::SHIFT, Key::A),
                 bind(Command::MoveUp, Modifiers::ALT, Key::ArrowUp),
@@ -498,7 +498,7 @@ impl KeyMap {
                         | Command::Paste
                         | Command::MoveUp
                         | Command::MoveDown
-                        | Command::DeleteKeepChildren
+                        | Command::DeleteWithChildren
                 );
                 if ((plain || text_command) && typing) || !enabled(binding.command) {
                     continue;

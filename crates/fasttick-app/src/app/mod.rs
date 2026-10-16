@@ -524,7 +524,7 @@ fn disabled_reason(command: Command) -> &'static str {
         | Command::Paste
         | Command::Duplicate
         | Command::Delete
-        | Command::DeleteKeepChildren => "This comes with the tree editor.",
+        | Command::DeleteWithChildren => "This comes with the tree editor.",
         Command::Disconnect => "No connection.",
         Command::SaveAs => "Open a tree file first.",
         _ => "Open a document first.",
@@ -651,9 +651,9 @@ impl Viewer<'_> {
                 CanvasEvent::SelectionChanged | CanvasEvent::Activated(_) => {
                     self.workspace.active_view = Some(view_id);
                 }
-                CanvasEvent::MoveNodes { nodes, spot } => {
+                CanvasEvent::MoveNodes { nodes, spot, delta } => {
                     self.workspace.active_view = Some(view_id);
-                    if let Some(op) = self.move_op(view_id, &nodes, spot) {
+                    if let Some(op) = self.move_op(view_id, &nodes, spot, delta) {
                         self.actions.push(AppAction::Edit(view_id, op));
                     }
                 }
@@ -687,7 +687,7 @@ impl Viewer<'_> {
                         });
                     }
                 }
-                CanvasEvent::DropNew { type_id, spot } => {
+                CanvasEvent::DropNew { type_id, spot, at } => {
                     self.workspace.active_view = Some(view_id);
                     let op = match spot {
                         DropSpot::Node { target, placement } => {
@@ -696,7 +696,11 @@ impl Viewer<'_> {
                                 target: Some((node, placement_of(placement))),
                             })
                         }
-                        _ => Some(EditOp::AddUnconnected { type_id }),
+                        // The new card: about centred on the drop point.
+                        _ => Some(EditOp::AddUnconnected {
+                            type_id,
+                            position: Some([at.x - 60.0, at.y - 20.0]),
+                        }),
                     };
                     if let Some(op) = op {
                         self.actions.push(AppAction::Edit(view_id, op));
@@ -718,17 +722,30 @@ impl Viewer<'_> {
         }
     }
 
-    /// The edit operation for a move gesture.
-    fn move_op(&self, view: ViewId, nodes: &[CanvasNodeId], spot: DropSpot) -> Option<EditOp> {
-        let nodes: Vec<_> = nodes
+    /// The edit operation for a move gesture. A drop on an empty place
+    /// puts each card at its old place plus `delta`.
+    fn move_op(
+        &self,
+        view: ViewId,
+        nodes: &[CanvasNodeId],
+        spot: DropSpot,
+        delta: egui::Vec2,
+    ) -> Option<EditOp> {
+        let canvas = &self.workspace.view(view)?.canvas;
+        let (nodes, positions): (Vec<_>, Vec<_>) = nodes
             .iter()
-            .filter_map(|id| self.xml_node(view, *id))
-            .collect();
+            .filter_map(|id| {
+                let xml = self.xml_node(view, *id)?;
+                let rect = canvas.layout().rects.get(id.index())?;
+                let min = rect.min + delta;
+                Some((xml, [min.x, min.y]))
+            })
+            .unzip();
         if nodes.is_empty() {
             return None;
         }
         match spot {
-            DropSpot::Background => Some(EditOp::DisconnectNodes { nodes }),
+            DropSpot::Background => Some(EditOp::DisconnectNodes { nodes, positions }),
             DropSpot::Node { target, placement } => Some(EditOp::MoveNodes {
                 nodes,
                 target: self.xml_node(view, target)?,

@@ -1204,7 +1204,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "fasttick-app"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "eframe",
@@ -1226,7 +1226,7 @@ dependencies = [
 
 [[package]]
 name = "fasttick-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "fasttick-testkit",
  "insta",
@@ -1241,7 +1241,7 @@ dependencies = [
 
 [[package]]
 name = "fasttick-log"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "fasttick-core",
  "fasttick-testkit",
@@ -1255,7 +1255,7 @@ dependencies = [
 
 [[package]]
 name = "fasttick-protocol"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "fasttick-core",
  "fasttick-log",
@@ -1271,7 +1271,7 @@ dependencies = [
 
 [[package]]
 name = "fasttick-testkit"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "fax"

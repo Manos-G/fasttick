@@ -166,6 +166,7 @@ fn item(
                 view,
                 EditOp::AddUnconnected {
                     type_id: model.id.clone(),
+                    position: None,
                 },
             ));
             ui.close();

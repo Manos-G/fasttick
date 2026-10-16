@@ -126,21 +126,35 @@ fn drag(harness: &mut Harness<'static, FastTickApp>, from: Pos2, to: Pos2) {
     harness.run();
 }
 
+/// The world rectangle of a card.
+fn world_rect(harness: &Harness<'static, FastTickApp>, label: &str) -> egui::Rect {
+    let app = harness.state();
+    let canvas = &app.workspace().active().unwrap().canvas;
+    let id = canvas
+        .tree()
+        .ids()
+        .find(|id| canvas.tree().get(*id).unwrap().label == label)
+        .expect("the node");
+    canvas.layout().rects[id.index()]
+}
+
 #[test]
-fn delete_keep_children_leaves_the_children_unconnected() {
+fn delete_keeps_the_children_where_they_were() {
     let dir = tempfile::tempdir().unwrap();
     let mut harness = harness(&dir.path().join("t.xml"));
+    let before = [world_rect(&harness, "a"), world_rect(&harness, "b")];
     harness.get_by_role_and_label(Role::TreeItem, "fb").click();
     harness.run();
-    assert!(harness.state().is_enabled(Command::DeleteKeepChildren));
-    // Ctrl+Delete.
-    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Delete);
+    // The Delete key keeps the children.
+    harness.key_press(egui::Key::Delete);
     harness.run();
     assert!(!xml(&harness).contains("Fallback"));
     assert_eq!(children(&harness, "seq"), ["first", "last"]);
     assert_eq!(unconnected(&harness), ["a", "b"]);
-    // The kept children are selected.
+    // The kept children are selected, and they stay where they were.
     assert_eq!(selected(&harness), ["a", "b"]);
+    assert_eq!(world_rect(&harness, "a").min, before[0].min);
+    assert_eq!(world_rect(&harness, "b").min, before[1].min);
     // Undo brings the Fallback back with its children.
     command(&mut harness, Command::Undo);
     assert_eq!(children(&harness, "seq"), ["first", "fb", "last"]);
@@ -149,22 +163,78 @@ fn delete_keep_children_leaves_the_children_unconnected() {
 }
 
 #[test]
-fn the_context_menu_has_delete_keep_children() {
+fn ctrl_delete_deletes_the_children_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = harness(&dir.path().join("t.xml"));
+    harness.get_by_role_and_label(Role::TreeItem, "fb").click();
+    harness.run();
+    assert!(harness.state().is_enabled(Command::DeleteWithChildren));
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::Delete);
+    harness.run();
+    assert_eq!(children(&harness, "seq"), ["first", "last"]);
+    assert!(unconnected(&harness).is_empty());
+    assert!(!xml(&harness).contains("name=\"a\""));
+}
+
+#[test]
+fn the_context_menu_deletes_with_or_without_the_children() {
     let dir = tempfile::tempdir().unwrap();
     let mut harness = harness(&dir.path().join("t.xml"));
     harness
         .get_by_role_and_label(Role::TreeItem, "fb")
         .click_secondary();
     harness.run();
-    harness.get_by_label("Delete, keep children").click();
+    harness
+        .get_by_role_and_label(Role::Button, "Delete")
+        .click();
     harness.run();
     assert_eq!(unconnected(&harness), ["a", "b"]);
-    // A leaf has no such entry: it has no children to keep.
+    command(&mut harness, Command::Undo);
+    harness
+        .get_by_role_and_label(Role::TreeItem, "fb")
+        .click_secondary();
+    harness.run();
+    harness.get_by_label("Delete with children").click();
+    harness.run();
+    assert!(unconnected(&harness).is_empty());
+    assert_eq!(children(&harness, "seq"), ["first", "last"]);
+    // A leaf has no such entry: it has no children.
     harness
         .get_by_role_and_label(Role::TreeItem, "first")
         .click_secondary();
     harness.run();
-    assert!(harness.query_by_label("Delete, keep children").is_none());
+    assert!(harness.query_by_label("Delete with children").is_none());
+}
+
+#[test]
+fn a_drag_to_an_empty_place_moves_or_disconnects_a_node_there() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut harness = harness(&dir.path().join("t.xml"));
+    let zoom = harness
+        .state()
+        .workspace()
+        .active()
+        .unwrap()
+        .canvas
+        .viewport()
+        .zoom;
+    // A connected leaf to an empty place: it is unconnected there.
+    let old = world_rect(&harness, "last");
+    let from = item_rect(&harness, "last").center();
+    let to = from + egui::vec2(0.0, 250.0);
+    drag(&mut harness, from, to);
+    assert_eq!(unconnected(&harness), ["last"]);
+    let moved = world_rect(&harness, "last").min - old.min;
+    assert!((moved.y - 250.0 / zoom).abs() < 2.0, "{moved:?}");
+    assert!(moved.x.abs() < 2.0, "{moved:?}");
+    // An unconnected node: it only moves.
+    let old = world_rect(&harness, "last");
+    let from = item_rect(&harness, "last").center();
+    drag(&mut harness, from, from + egui::vec2(-150.0, 30.0));
+    assert_eq!(unconnected(&harness), ["last"]);
+    let moved = world_rect(&harness, "last").min - old.min;
+    assert!((moved.x + 150.0 / zoom).abs() < 2.0, "{moved:?}");
+    assert!((moved.y - 30.0 / zoom).abs() < 2.0, "{moved:?}");
 }
 
 #[test]
@@ -173,7 +243,7 @@ fn the_parent_dot_connects_an_unconnected_node() {
     let mut harness = harness(&dir.path().join("t.xml"));
     harness.get_by_role_and_label(Role::TreeItem, "fb").click();
     harness.run();
-    command(&mut harness, Command::DeleteKeepChildren);
+    command(&mut harness, Command::Delete);
     command(&mut harness, Command::FitToView);
 
     // From the dot of "a" to the Sequence: the last child.
@@ -232,6 +302,7 @@ fn a_release_on_a_leaf_without_room_or_on_nothing_changes_nothing() {
         view,
         fasttick_app::edit_ops::EditOp::AddUnconnected {
             type_id: "Sleep".into(),
+            position: None,
         },
     );
     harness.run();

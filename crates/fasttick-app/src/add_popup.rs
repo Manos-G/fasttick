@@ -122,7 +122,10 @@ impl AddPopup {
                 type_id,
                 target: Some(target),
             },
-            None => EditOp::AddUnconnected { type_id },
+            None => EditOp::AddUnconnected {
+                type_id,
+                position: None,
+            },
         }
     }
 }
@@ -228,7 +231,8 @@ mod tests {
         assert_eq!(
             popup.op("Sleep".into()),
             EditOp::AddUnconnected {
-                type_id: "Sleep".into()
+                type_id: "Sleep".into(),
+                position: None,
             }
         );
     }

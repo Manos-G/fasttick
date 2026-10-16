@@ -164,7 +164,7 @@ pub fn edit_menu(
         ("Cut", EditOp::Cut),
         ("Copy", EditOp::Copy),
         ("Duplicate", EditOp::Duplicate),
-        ("Delete", EditOp::Delete),
+        ("Delete", EditOp::DeleteKeepChildren),
     ] {
         if ui.button(label).clicked() {
             edit(op);
@@ -173,14 +173,14 @@ pub fn edit_menu(
     }
     if container
         && ui
-            .button("Delete, keep children")
+            .button("Delete with children")
             .on_hover_text(
-                "Delete the node. Its children stay as unconnected nodes; drag the dot on \
-                 top of a node to connect it again.",
+                "Delete the node and all nodes below it. (Delete keeps the children as \
+                 unconnected nodes.)",
             )
             .clicked()
     {
-        edit(EditOp::DeleteKeepChildren);
+        edit(EditOp::Delete);
         ui.close();
     }
     if container

@@ -45,11 +45,15 @@ pub enum EditOp {
     AddUnconnected {
         /// The type ID.
         type_id: String,
+        /// The top-left corner of the new card (world units), or `None` for
+        /// an automatic place.
+        position: Option<[f32; 2]>,
     },
     /// Deletes the selected nodes (with their subtrees).
     Delete,
     /// Deletes the selected nodes, but keeps their children: the children
-    /// become unconnected nodes and are selected.
+    /// become unconnected nodes at the places where the canvas shows them,
+    /// and are selected.
     DeleteKeepChildren,
     /// Copies the selected nodes to the clipboard.
     Copy,
@@ -63,7 +67,8 @@ pub enum EditOp {
     PasteUnconnected,
     /// Duplicates the selected nodes next to themselves.
     Duplicate,
-    /// Moves the selected nodes to the unconnected area.
+    /// Moves the selected nodes to the unconnected area. They stay at the
+    /// places where the canvas shows them.
     Disconnect,
     /// Moves nodes (drag and drop). Unconnected nodes connect.
     MoveNodes {
@@ -74,10 +79,13 @@ pub enum EditOp {
         /// The placement.
         placement: Placement,
     },
-    /// Moves nodes to the unconnected area (a drop on an empty place).
+    /// Moves nodes to the unconnected area (a drop on an empty place). An
+    /// unconnected node only moves to its new place.
     DisconnectNodes {
         /// The nodes.
         nodes: Vec<NodeId>,
+        /// The new top-left corner of the card of each node (world units).
+        positions: Vec<[f32; 2]>,
     },
     /// Moves the selected node one place up (-1) or down (+1) among its
     /// siblings.
@@ -302,13 +310,15 @@ fn place(
 }
 
 /// Adds a node at a target place; without a target, as the root of an
-/// empty tree or as an unconnected node of the tree `tree_id`.
+/// empty tree or as an unconnected node of the tree `tree_id` at
+/// `position` (see [`AUTO_POSITION`]).
 fn add_node(
     editor: &mut EditorDoc,
     file: FileId,
     tree_id: Option<String>,
     type_id: &str,
     target: Option<(NodeId, Placement)>,
+    position: [f32; 2],
 ) -> Result<NodeId, String> {
     let model = editor
         .project()
@@ -330,7 +340,7 @@ fn add_node(
                     editor.edit(|ed| ed.add_node(file, element, 0, type_id, model.as_ref()))
                 }
                 _ => editor.edit(|ed| {
-                    ed.add_unconnected_node(file, &tree_id, type_id, model.as_ref(), [0.0, 0.0])
+                    ed.add_unconnected_node(file, &tree_id, type_id, model.as_ref(), position)
                 }),
             }
         }
@@ -362,6 +372,35 @@ fn paste(
     }
 }
 
+/// The place of an unconnected node that the canvas chooses itself: the
+/// layout puts such nodes in a row next to the tree. Any other position
+/// is the top-left corner of the card (world units, see
+/// [`crate::canvas::layout`]).
+pub const AUTO_POSITION: [f32; 2] = [0.0, 0.0];
+
+/// The top-left corner of the card of each XML node that the view shows
+/// (world units).
+fn card_positions(
+    workspace: &Workspace,
+    view: ViewId,
+) -> std::collections::HashMap<NodeId, [f32; 2]> {
+    let Some(view) = workspace.view(view) else {
+        return Default::default();
+    };
+    let rects = &view.canvas.layout().rects;
+    view.canvas
+        .tree()
+        .nodes()
+        .iter()
+        .zip(rects)
+        .filter(|(node, _)| !node.inline)
+        .filter_map(|(node, rect)| match node.source {
+            NodeSource::Xml(_, xml) => Some((xml, [rect.min.x, rect.min.y])),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The tree ID that a view shows.
 fn view_tree_id(workspace: &Workspace, view: ViewId) -> Option<String> {
     let view_ref = workspace.view(view)?;
@@ -379,6 +418,12 @@ pub fn run(
 ) -> Result<EditOutcome, String> {
     let selected = selected_nodes(workspace, view);
     let primary = primary_node(workspace, view);
+    // Nodes that become unconnected stay where the canvas shows them.
+    let positions = match op {
+        EditOp::Disconnect | EditOp::DeleteKeepChildren => card_positions(workspace, view),
+        _ => Default::default(),
+    };
+    let place_of = |node: &NodeId| positions.get(node).copied().unwrap_or(AUTO_POSITION);
     let takes_children = primary_takes_children(workspace, view);
     let tree_id = view_tree_id(workspace, view);
     let file = view_file(workspace, view).ok_or("the view is closed")?;
@@ -402,10 +447,24 @@ pub fn run(
     match op {
         EditOp::AddNode { type_id, target } => {
             let target = target.or(primary.map(|node| (node, Placement::Inside)));
-            outcome.select = vec![add_node(editor, file, tree_id, &type_id, target)?];
+            outcome.select = vec![add_node(
+                editor,
+                file,
+                tree_id,
+                &type_id,
+                target,
+                AUTO_POSITION,
+            )?];
         }
-        EditOp::AddUnconnected { type_id } => {
-            outcome.select = vec![add_node(editor, file, tree_id, &type_id, None)?];
+        EditOp::AddUnconnected { type_id, position } => {
+            outcome.select = vec![add_node(
+                editor,
+                file,
+                tree_id,
+                &type_id,
+                None,
+                position.unwrap_or(AUTO_POSITION),
+            )?];
         }
         EditOp::Delete => {
             if selected.is_empty() {
@@ -417,7 +476,13 @@ pub fn run(
             if selected.is_empty() {
                 return Err("Select the nodes to delete.".into());
             }
-            outcome.select = editor.edit(|ed| ed.delete_keep_children(file, &selected))?;
+            outcome.select = editor.edit(|ed| {
+                let kept = ed.delete_keep_children(file, &selected)?;
+                for node in &kept {
+                    ed.set_unconnected_position(file, *node, place_of(node))?;
+                }
+                Ok(kept)
+            })?;
         }
         EditOp::Copy | EditOp::Cut => {
             if selected.is_empty() {
@@ -464,7 +529,7 @@ pub fn run(
             }
             editor.edit(|ed| {
                 for node in &selected {
-                    ed.disconnect(file, *node, [0.0, 0.0])?;
+                    ed.disconnect(file, *node, place_of(node))?;
                 }
                 Ok(())
             })?;
@@ -504,10 +569,19 @@ pub fn run(
             })?;
             outcome.select = nodes;
         }
-        EditOp::DisconnectNodes { nodes } => {
+        EditOp::DisconnectNodes { nodes, positions } => {
             editor.edit(|ed| {
-                for node in &nodes {
-                    ed.disconnect(file, *node, [0.0, 0.0])?;
+                for (index, node) in nodes.iter().enumerate() {
+                    let position = positions.get(index).copied().unwrap_or(AUTO_POSITION);
+                    let unconnected = matches!(
+                        fasttick_core::edit::node_place(ed.project(), file, *node),
+                        Ok(fasttick_core::edit::NodePlace::Unconnected { root, .. }) if root == *node
+                    );
+                    if unconnected {
+                        ed.set_unconnected_position(file, *node, position)?;
+                    } else {
+                        ed.disconnect(file, *node, position)?;
+                    }
                 }
                 Ok(())
             })?;

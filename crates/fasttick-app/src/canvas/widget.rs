@@ -114,6 +114,10 @@ pub enum CanvasEvent {
         nodes: Vec<CanvasNodeId>,
         /// Where the nodes go.
         spot: DropSpot,
+        /// How far the cards moved (world units). For
+        /// [`DropSpot::Background`], each card goes to its old place plus
+        /// this.
+        delta: Vec2,
     },
     /// The user dropped a node type from the palette (editable canvas
     /// only). The spot is never [`DropSpot::Invalid`].
@@ -122,6 +126,8 @@ pub enum CanvasEvent {
         type_id: String,
         /// Where the node goes.
         spot: DropSpot,
+        /// The drop point (world units).
+        at: Pos2,
     },
     /// The user released a connection from the dot of a node, or clicked
     /// the dot (editable canvas only). The owner asks for the type of the
@@ -518,6 +524,16 @@ impl CanvasState {
             self.tree.select_only(id);
             self.primary = Some(id);
             self.pending = Some(PendingView::Focus { id, animate });
+        }
+    }
+
+    /// Makes a node the primary node and moves the view as little as
+    /// possible so that its card is visible: the view does not move if the
+    /// card is visible. The selection does not change.
+    pub fn reveal(&mut self, id: CanvasNodeId) {
+        if self.tree.get(id).is_some() {
+            self.primary = Some(id);
+            self.pending = Some(PendingView::Reveal { id });
         }
     }
 
@@ -1186,14 +1202,16 @@ fn handle_input(
         _ => {}
     }
     if response.drag_stopped() {
-        if let DragMode::Move { .. } = state.drag
+        if let DragMode::Move { start } = state.drag
             && let Some(spot) = state.drop
             && spot != DropSpot::Invalid
             && !state.moving.is_empty()
         {
+            let end = state.band_end.or(world_pointer).unwrap_or(start);
             events.push(CanvasEvent::MoveNodes {
                 nodes: std::mem::take(&mut state.moving),
                 spot,
+                delta: end - start,
             });
         }
         if let DragMode::Connect { from } = state.drag {
@@ -1204,6 +1222,7 @@ fn handle_input(
                         target: from,
                         placement: DropPlacement::Inside,
                     },
+                    delta: Vec2::ZERO,
                 }),
                 Some(ConnectEnd::Add(spot)) => events.push(CanvasEvent::AddChild {
                     spot,
@@ -1218,6 +1237,7 @@ fn handle_input(
             events.push(CanvasEvent::MoveNodes {
                 nodes: vec![child],
                 spot,
+                delta: Vec2::ZERO,
             });
         }
         state.moving.clear();
@@ -1443,6 +1463,7 @@ fn handle_palette_drop(
                 events.push(CanvasEvent::DropNew {
                     type_id: payload.type_id.clone(),
                     spot,
+                    at: p,
                 });
             }
         }
@@ -1955,7 +1976,19 @@ fn paint_drop(
             .unwrap_or_default()
     };
     let (hint, color) = match spot {
-        DropSpot::Background if moving => ("Disconnect".to_owned(), palette.accent),
+        DropSpot::Background if moving => {
+            // Unconnected nodes only move; other nodes become unconnected.
+            let all_unconnected = state
+                .moving
+                .iter()
+                .all(|id| state.tree.get(*id).is_some_and(|n| n.detached));
+            let text = if all_unconnected {
+                "Move here"
+            } else {
+                "Disconnect here"
+            };
+            (text.to_owned(), palette.accent)
+        }
         DropSpot::Background => ("Add as unconnected node".to_owned(), palette.accent),
         DropSpot::Invalid => ("Cannot drop here".to_owned(), palette.error),
         DropSpot::Node { target, placement } => {

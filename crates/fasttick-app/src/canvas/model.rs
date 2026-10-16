@@ -307,6 +307,10 @@ pub struct CanvasNode {
     /// `<BehaviorTree>` element. Such a node shows a dot on its parent side
     /// (see [`super::connect`]).
     pub detached: bool,
+    /// The place of a detached node that has one: the top-left corner of
+    /// its card (world units). The layout puts the node (with its subtree)
+    /// there. `None`: the layout chooses the place.
+    pub free_position: Option<[f32; 2]>,
     /// The decorations.
     pub deco: Decorations,
     /// Display text and size. Empty until the canvas measures the tree.
@@ -334,6 +338,7 @@ impl CanvasNode {
             path: String::new(),
             inline: false,
             detached: false,
+            free_position: None,
             deco: Decorations::default(),
             card: CardText::default(),
         }

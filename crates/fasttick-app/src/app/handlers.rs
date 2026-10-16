@@ -181,15 +181,15 @@ impl FastTickApp {
                         .iter()
                         .filter_map(|n| tree.find_source(NodeSource::Xml(file, *n)))
                         .collect();
-                    // The view moves to the first node (and selects only
-                    // it), then all nodes of the outcome are selected.
-                    if let Some(first) = ids.first() {
-                        view_ref.canvas.focus_on(*first, true);
-                    }
                     let tree = view_ref.canvas.tree_mut();
                     tree.clear_selection();
                     for id in &ids {
                         tree.set_selected(*id, true);
+                    }
+                    // The view moves only if the first node is not visible,
+                    // so the cards stay where the user saw them.
+                    if let Some(first) = ids.first() {
+                        view_ref.canvas.reveal(*first);
                     }
                 }
                 if let Some(message) = outcome.message {

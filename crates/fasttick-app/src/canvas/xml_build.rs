@@ -96,7 +96,16 @@ impl CanvasTree {
         let main_root = entry.root;
         let mut roots: Vec<NodeId> = entry.root.iter().copied().collect();
         roots.extend(entry.extra_roots.iter().copied());
-        roots.extend(project.unconnected(file, &title).iter().map(|u| u.node));
+        let unconnected = project.unconnected(file, &title);
+        roots.extend(unconnected.iter().map(|u| u.node));
+        // [0, 0] is the automatic place (see `edit_ops::AUTO_POSITION`).
+        let free_position = |node: NodeId| {
+            unconnected
+                .iter()
+                .find(|u| u.node == node)
+                .map(|u| u.position)
+                .filter(|p| *p != [0.0, 0.0])
+        };
 
         let mut builder = CanvasTreeBuilder::new();
         // The trees of the expanded SubTrees on the current path, to stop
@@ -137,6 +146,9 @@ impl CanvasTree {
             let mut canvas_node = CanvasNode::new(source, label, type_id);
             canvas_node.inline = inline;
             canvas_node.detached = parent.is_none() && Some(node_id) != main_root;
+            if canvas_node.detached {
+                canvas_node.free_position = free_position(node_id);
+            }
             canvas_node.ports = view
                 .ports()
                 .map(|(name, value)| PortLine {

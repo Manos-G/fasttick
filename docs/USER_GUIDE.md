@@ -280,13 +280,14 @@ Other ways to add nodes:
 - Drag a node to move it with its children. You do not have to drop on a
   card exactly: a drop near a card (for example between two siblings)
   goes to the nearest card, as if it were on the nearest end of that card.
-  Only a drop far from all cards disconnects the node. The label next to
-  the pointer tells where the node goes. Push Escape during the drag to
-  cancel the move.
+  Only a drop far from all cards disconnects the node: it stays where you
+  drop it. The label next to the pointer tells where the node goes. Push
+  Escape during the drag to cancel the move.
+- Drag an unconnected node to an empty place to move it there.
 - Right-click a node to see the edit actions: **Add child…**, **Add sibling
   before…**, **Add sibling after…** (these open the search window),
   **Cut**, **Copy**, **Duplicate**,
-  **Delete**, **Delete, keep children**, **Paste as child**, **Move up**,
+  **Delete**, **Delete with children**, **Paste as child**, **Move up**,
   **Move down**, **Disconnect** and **Create SubTree from selection…**.
 - Right-click an empty place to add or paste an unconnected node.
 - Alt+Left or Alt+Up moves the selected node before its previous sibling.
@@ -299,12 +300,19 @@ Other ways to add nodes:
   system clipboard. You can also paste the XML of nodes that you copied
   in another program, for example `<Sleep msec="100"/>`.
 
-**Delete a node and keep its children.** Select a node and push
-Ctrl+Delete (or select **Edit** > **Delete, keep children**, or
-right-click the node). FastTick deletes the node, but not its children:
-each child (with its own children) becomes an unconnected node. The
-children stay selected. Push Ctrl+Z to undo it in one step. Delete
-(without Ctrl) deletes the node with all its children.
+**Delete a node.** Select a node and push Delete (or select **Edit** >
+**Delete**, or right-click the node). FastTick deletes the node, but not
+its children: each child (with its own children) becomes an unconnected
+node and stays at its place on the canvas. The children stay selected.
+Push Ctrl+Z to undo it in one step.
+
+To delete a node with all its children, push Ctrl+Delete (or select
+**Edit** > **Delete with children**). Cut (Ctrl+X) also takes the
+children.
+
+An unconnected node stays where it is: where its parent was deleted,
+where you disconnected it, or where you dropped it. If it then covers a
+node of the tree, FastTick moves it down a little.
 
 **Connect an unconnected node.** An unconnected node has a dot with a
 point at the middle of its top edge (left edge in the left-to-right
@@ -323,7 +331,10 @@ shows a node that cannot take one more child. Push Escape during the drag
 to cancel. You can also drag the unconnected node itself onto a node, or
 drag from the plus dot of a parent to the unconnected node.
 
-Unconnected nodes stay in the project file. BT.CPP does not see them.
+Unconnected nodes are not in the XML file, so BT.CPP does not see them.
+A project file (`.ftproj`) keeps them with their places. A plain XML file
+keeps them only while it is open: connect them before you close it, or
+they are gone.
 
 A drop that BT.CPP does not allow (for example a second child of a
 decorator) shows a notice. The tree does not change.

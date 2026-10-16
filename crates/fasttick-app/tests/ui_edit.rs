@@ -1096,6 +1096,7 @@ fn a_drag_from_the_dot_to_an_unconnected_node_connects_it() {
         view,
         fasttick_app::edit_ops::EditOp::AddUnconnected {
             type_id: "Sleep".into(),
+            position: None,
         },
     );
     harness.run();

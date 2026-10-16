@@ -9,6 +9,13 @@
 //! algorithm, for nodes of different sizes). It packs subtrees tightly and
 //! lays out a forest (the tree and its unconnected nodes). [`LayeredLayout`]
 //! is a simpler engine that the tests use for comparison.
+//!
+//! An unconnected node with a stored place
+//! ([`CanvasNode::free_position`](super::model::CanvasNode::free_position))
+//! goes there with its subtree, in world units: the main tree starts at the
+//! origin. If one of its cards then covers another card, the node moves
+//! along the depth axis (down in the top-down layout) until it is free, so
+//! it stays near its place.
 
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
@@ -221,20 +228,24 @@ impl LayoutEngine for TidyLayout {
             return LayeredLayout.layout(tree, direction, params);
         };
         let depth_axis = direction.depth_axis();
+        let mut rects: Vec<Rect> = (0..nodes.len())
+            .map(|index| {
+                let position = result.positions[index];
+                let size = result.sizes[index];
+                Rect::from_min_size(pos2(position.x, position.y), vec2(size.x, size.y))
+            })
+            .collect();
+        let mut node_bus = result.bus_positions;
+        place_free_roots(tree, direction, &mut rects, &mut node_bus);
         let mut level_starts: Vec<f32> = Vec::new();
-        let mut rects = Vec::with_capacity(nodes.len());
         let mut bounds = Rect::NOTHING;
-        for (index, node) in nodes.iter().enumerate() {
-            let position = result.positions[index];
-            let size = result.sizes[index];
-            let rect = Rect::from_min_size(pos2(position.x, position.y), vec2(size.x, size.y));
+        for (node, rect) in nodes.iter().zip(&rects) {
             let depth = node.depth as usize;
             if level_starts.len() <= depth {
                 level_starts.resize(depth + 1, f32::INFINITY);
             }
             level_starts[depth] = level_starts[depth].min(rect.min[depth_axis]);
-            bounds = bounds.union(rect);
-            rects.push(rect);
+            bounds = bounds.union(*rect);
         }
         TreeLayout {
             direction,
@@ -242,8 +253,92 @@ impl LayoutEngine for TidyLayout {
             bounds,
             level_starts,
             level_gap: params.level_gap,
-            node_bus: result.bus_positions,
+            node_bus,
         }
+    }
+}
+
+/// The space (world units) that a placed unconnected node keeps from the
+/// other cards.
+pub const FREE_GAP: f32 = 8.0;
+
+/// Moves the unconnected nodes that have a stored place there (with their
+/// subtrees), then moves each one along the depth axis while one of its
+/// cards is nearer than [`FREE_GAP`] to another card. `bus` is the turn
+/// position of the edges of each node on the depth axis.
+fn place_free_roots(
+    tree: &CanvasTree,
+    direction: LayoutDirection,
+    rects: &mut [Rect],
+    bus: &mut [f32],
+) {
+    let nodes = tree.nodes();
+    let count = nodes.len().min(rects.len());
+    let free: Vec<(usize, Pos2)> = nodes[..count]
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| node.parent.is_none() && node.detached)
+        .filter_map(|(index, node)| Some((index, Pos2::from(node.free_position?))))
+        .collect();
+    if free.is_empty() {
+        return;
+    }
+    let root_of: Vec<usize> = (0..count)
+        .map(|index| {
+            let mut current = index;
+            while let Some(parent) = nodes[current].parent {
+                current = parent.index();
+            }
+            current
+        })
+        .collect();
+    let is_free = |root: usize| free.iter().any(|(r, _)| *r == root);
+    let axis = direction.depth_axis();
+    let shift = |list: &[usize], rects: &mut [Rect], bus: &mut [f32], delta: Vec2| {
+        for &index in list {
+            rects[index] = rects[index].translate(delta);
+            if let Some(b) = bus.get_mut(index) {
+                *b += delta[axis];
+            }
+        }
+    };
+    // The cards that do not move: the tree and the other unconnected nodes.
+    let mut fixed: Vec<Rect> = (0..count)
+        .filter(|index| !is_free(root_of[*index]))
+        .map(|index| rects[index])
+        .collect();
+    for (root, position) in free {
+        let members: Vec<usize> = (0..count).filter(|i| root_of[*i] == root).collect();
+        let delta = position - rects[root].min;
+        shift(&members, rects, bus, delta);
+        // Each step moves the subtree below the cards that it covers.
+        for _ in 0..64 {
+            let bbox = members
+                .iter()
+                .fold(Rect::NOTHING, |b, &i| b.union(rects[i]))
+                .expand(FREE_GAP);
+            let near: Vec<Rect> = fixed
+                .iter()
+                .copied()
+                .filter(|f| f.intersects(bbox))
+                .collect();
+            let mut push = 0.0_f32;
+            for &index in &members {
+                let card = rects[index].expand(FREE_GAP);
+                for obstacle in &near {
+                    if card.intersects(*obstacle) {
+                        push = push.max(obstacle.max[axis] - card.min[axis]);
+                    }
+                }
+            }
+            if push <= 0.0 {
+                break;
+            }
+            let mut step = Vec2::ZERO;
+            step[axis] = push + 1.0;
+            shift(&members, rects, bus, step);
+        }
+        fixed.extend(members.iter().map(|&i| rects[i]));
     }
 }
 
@@ -621,5 +716,54 @@ mod tests {
         assert_eq!(edges.max.y, result.level_starts[1]);
         assert_eq!(edges.min.x, result.rects[1].center().x);
         assert_eq!(edges.max.x, result.rects[7].center().x);
+    }
+
+    #[test]
+    fn unconnected_nodes_with_a_place_stay_there_or_move_down_a_little() {
+        // A tree (0, 1, 2), a placed unconnected node with a child (3, 4)
+        // and an unconnected node without a place (5).
+        let mut t = tree(&[
+            (None, 100.0, 40.0),
+            (Some(0), 80.0, 30.0),
+            (Some(0), 80.0, 30.0),
+            (None, 60.0, 30.0),
+            (Some(3), 70.0, 30.0),
+            (None, 90.0, 30.0),
+        ]);
+        for id in [3, 5] {
+            t.get_mut(CanvasNodeId(id)).unwrap().detached = true;
+        }
+        let auto = layout(&t, LayoutDirection::TopDown);
+
+        // A free place: the node and its child go there.
+        t.get_mut(CanvasNodeId(3)).unwrap().free_position = Some([500.0, 300.0]);
+        let placed = layout(&t, LayoutDirection::TopDown);
+        assert_eq!(placed.rects[3].min, pos2(500.0, 300.0));
+        let child_offset = auto.rects[4].min - auto.rects[3].min;
+        assert_eq!(placed.rects[4].min, pos2(500.0, 300.0) + child_offset);
+        // The edges of the moved node turn below it.
+        assert!(placed.node_bus[3] > placed.rects[3].max.y);
+        // The tree and the node without a place do not move.
+        for id in [0, 1, 2, 5] {
+            assert_eq!(placed.rects[id], auto.rects[id], "node {id}");
+        }
+
+        // A place on the tree: the node moves down until it is free, and
+        // stays at its x.
+        let on_tree = auto.rects[1].min;
+        t.get_mut(CanvasNodeId(3)).unwrap().free_position = Some([on_tree.x, on_tree.y]);
+        let pushed = layout(&t, LayoutDirection::TopDown);
+        no_overlaps(&pushed);
+        assert_eq!(pushed.rects[3].min.x, on_tree.x);
+        assert!(pushed.rects[3].min.y >= auto.rects[1].max.y + FREE_GAP);
+        assert!(
+            pushed.rects[3].min.y < auto.bounds.max.y + 2.0 * FREE_GAP + 1.0,
+            "it stays near: {:?}",
+            pushed.rects[3]
+        );
+
+        // In the left-right layout, the node moves right.
+        let auto_lr = layout(&t, LayoutDirection::LeftRight);
+        no_overlaps(&auto_lr);
     }
 }
