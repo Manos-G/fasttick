@@ -252,7 +252,7 @@ pub fn shell_quote(text: &str) -> String {
 /// Encodes one part of a path for a local file name: `%`, path separators,
 /// characters that Windows does not allow, and control characters become
 /// `%XX`.
-fn encode_component(text: &str) -> String {
+pub fn encode_component(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
         if c.is_control()
@@ -326,8 +326,8 @@ impl RemoteCache {
         &self.root
     }
 
-    /// The folder of one computer.
-    fn host_dir(&self, host: &RemoteHost) -> PathBuf {
+    /// The folder of one computer: it stands for `/` of the computer.
+    pub fn host_dir(&self, host: &RemoteHost) -> PathBuf {
         let mut key = host.clone();
         key.port.get_or_insert(DEFAULT_SSH_PORT);
         self.root.join(encode_component(&key.to_string()))

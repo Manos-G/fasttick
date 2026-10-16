@@ -21,7 +21,8 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: System packages
-        run: sudo apt-get update && sudo apt-get install -y libzmq3-dev cppzmq-dev libsqlite3-dev cmake g++
+        # openssh: the tests of remote files run a private SSH server.
+        run: sudo apt-get update && sudo apt-get install -y libzmq3-dev cppzmq-dev libsqlite3-dev cmake g++ openssh-client openssh-server
       - name: Cache BT.CPP
         id: btcpp-cache
         uses: actions/cache@v4
@@ -39,8 +40,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: cargo test
-        # The real-executor tests must run, not skip.
-        run: FASTTICK_BTCPP_PREFIX="$HOME/btcpp-install" FASTTICK_REQUIRE_HARNESS=1 cargo test --workspace
+        # The real-executor and SSH tests must run, not skip.
+        run: FASTTICK_BTCPP_PREFIX="$HOME/btcpp-install" FASTTICK_REQUIRE_HARNESS=1 FASTTICK_REQUIRE_SSHD=1 cargo test --workspace
 
   deny:
     name: cargo deny

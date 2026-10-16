@@ -538,9 +538,13 @@ impl FastTickApp {
         }
         let title = self.remote.title(path).unwrap_or_else(|| file_name(path));
         let main = loaded.main_instance();
+        let mut editor = loaded.editor;
+        if let Some(mirror) = self.remote.mirror_root(path) {
+            editor.set_mirror_root(Some(mirror));
+        }
         let doc = self
             .workspace
-            .add_editor_doc(path.to_owned(), title, *loaded.editor);
+            .add_editor_doc(path.to_owned(), title, *editor);
         let view = self.workspace.open_view(doc, main, self.view_options())?;
         dock::add_document(&mut self.docks[Mode::Edit.index()], Tab::Document(view));
         self.add_recent(path);

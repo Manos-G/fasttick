@@ -30,6 +30,10 @@ demo notes [M1](docs/demo/M1.md), [M2](docs/demo/M2.md),
 - Fast authoring: drag from the dot under a node, or push Shift+A, and
   find the node type with fuzzy search. Fold large subtrees. Find the
   nodes that use a blackboard key.
+- Open, edit and save the files of a robot over SSH (File > Open from
+  robot). FastTick uses the `ssh` program of the system and warns if a file
+  changed on the robot. A command can restart the robot program after a
+  save.
 - Command search (Ctrl+Shift+P) for commands, trees, recent files and
   themes; Ctrl+P goes to a tree.
 - Export of a tree as an SVG image, with the statuses in live and replay
@@ -61,6 +65,11 @@ Run `cargo test`. The integration tests need BT.CPP 4.x and CMake (see
 install prefix of BT.CPP (for ROS 2 Jazzy: `/opt/ros/jazzy`). If the tests
 cannot find BT.CPP, they skip; set `FASTTICK_REQUIRE_HARNESS=1` to make them
 fail instead.
+
+The tests of remote files (`remote_ssh`, `ui_remote`) start a private
+OpenSSH server on 127.0.0.1 (the packages `openssh-server` and
+`openssh-client`). Without OpenSSH they skip; set `FASTTICK_REQUIRE_SSHD=1`
+to make them fail instead.
 
 The performance tests use trees of 5,000 nodes. To see the times, run
 `cargo test --release -p fasttick-app --test canvas_perf --test edit_perf

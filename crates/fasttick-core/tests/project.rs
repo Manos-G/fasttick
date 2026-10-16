@@ -852,3 +852,51 @@ fn a_missing_file_can_come_back() {
         Some(main)
     );
 }
+
+#[test]
+fn absolute_includes_resolve_below_a_mirror_root() {
+    use fasttick_core::project::MirrorRoot;
+    let dir = tempfile::tempdir().unwrap();
+    // The copy of a remote computer: /home/pi/trees/main.xml includes the
+    // absolute path /opt/lib/my lib.xml (encoded as "my%20lib.xml").
+    let root = dir.path().join("pi@robot");
+    let main = write(
+        &root,
+        "home/pi/trees/main.xml",
+        &tree_xml("Main", &["/opt/lib/my lib.xml", "sub/b.xml"]),
+    );
+    write(&root, "opt/lib/my%20lib.xml", &tree_xml("Lib", &[]));
+    write(&root, "home/pi/trees/sub/b.xml", &tree_xml("B", &[]));
+    fn encode(part: &str) -> String {
+        part.replace(' ', "%20")
+    }
+    let mut project = Project::open_xml(&main).unwrap();
+    let main_id = project.file_id_by_path(&main).unwrap();
+    // Without the mirror root, the absolute path is a path of this computer.
+    assert!(matches!(
+        problems(&project, main_id)[0],
+        Some(IncludeProblem::Load { .. })
+    ));
+    assert_eq!(problems(&project, main_id)[1], None);
+    project.set_mirror_root(Some(MirrorRoot {
+        root: root.clone(),
+        encode,
+    }));
+    assert_eq!(problems(&project, main_id), [None, None]);
+    let target = project.includes(main_id)[0].path.clone().unwrap();
+    assert_eq!(target, root.join("opt/lib/my%20lib.xml"));
+    assert!(project.find_tree("Lib").is_some());
+    // A file outside the mirror root keeps the normal rule.
+    let outside = write(
+        dir.path(),
+        "local/main.xml",
+        &tree_xml("M", &["/opt/lib/x.xml"]),
+    );
+    let mut local = Project::open_xml(&outside).unwrap();
+    local.set_mirror_root(Some(MirrorRoot { root, encode }));
+    let id = local.file_id_by_path(&outside).unwrap();
+    assert_eq!(
+        local.includes(id)[0].path.as_deref(),
+        Some(Path::new("/opt/lib/x.xml"))
+    );
+}

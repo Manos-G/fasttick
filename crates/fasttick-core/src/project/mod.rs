@@ -232,6 +232,46 @@ struct Entry {
     includes: Vec<IncludeLink>,
 }
 
+/// A local folder with copies of the files of another computer, in the
+/// folder structure of that computer (for example the remote file cache of
+/// the app). An absolute `<include>` path in a file of this folder names a
+/// file of the other computer, so it resolves below the folder: each part
+/// of the path, encoded with `encode`, is a folder below `root`.
+#[derive(Debug, Clone)]
+pub struct MirrorRoot {
+    /// The local folder that stands for `/` of the other computer.
+    pub root: PathBuf,
+    /// The local file name of one part of a remote path.
+    pub encode: fn(&str) -> String,
+}
+
+impl MirrorRoot {
+    /// The local path of an absolute include path of a file in `base_dir`,
+    /// or `None` if the rule does not apply (a relative path, or a file
+    /// outside the folder).
+    fn map(&self, base_dir: &Path, include: &crate::bt::IncludeEntry) -> Option<PathBuf> {
+        let path = include.path.as_deref()?;
+        if !path.starts_with('/') || !base_dir.starts_with(&self.root) {
+            return None;
+        }
+        let mut out = self.root.clone();
+        let mut parts: Vec<&str> = Vec::new();
+        for part in path.split('/') {
+            match part {
+                "" | "." => {}
+                ".." => {
+                    parts.pop();
+                }
+                part => parts.push(part),
+            }
+        }
+        for part in parts {
+            out.push((self.encode)(part));
+        }
+        Some(out)
+    }
+}
+
 /// A FastTick project. See the [module documentation](self).
 #[derive(Debug, Clone)]
 pub struct Project {
@@ -244,6 +284,7 @@ pub struct Project {
     unconnected: BTreeMap<(FileId, String), Vec<UnconnectedNode>>,
     warnings: Vec<ProjectWarning>,
     ament_prefix_path: Option<OsString>,
+    mirror: Option<MirrorRoot>,
     dirty: bool,
 }
 
@@ -276,6 +317,7 @@ impl Project {
             unconnected: BTreeMap::new(),
             warnings: Vec::new(),
             ament_prefix_path: ament_prefix_path_from_env(),
+            mirror: None,
             dirty: false,
         }
     }
@@ -623,7 +665,14 @@ impl Project {
                     target: None,
                     problem: None,
                 };
-                match resolve_include_path(&base_dir, include, self.ament_prefix_path.as_deref()) {
+                let mirrored = self.mirror.as_ref().and_then(|m| m.map(&base_dir, include));
+                let resolved = match mirrored {
+                    Some(path) => Ok(clean_path(&path)),
+                    None => {
+                        resolve_include_path(&base_dir, include, self.ament_prefix_path.as_deref())
+                    }
+                };
+                match resolved {
                     Err(problem) => link.problem = Some(problem),
                     Ok(path) => {
                         match self.file_id_by_path(&path) {
@@ -807,6 +856,13 @@ impl Project {
     /// [`Project::refresh`].
     pub fn set_ament_prefix_path(&mut self, value: Option<OsString>) {
         self.ament_prefix_path = value;
+        self.refresh();
+    }
+
+    /// Sets the folder with copies of the files of another computer (see
+    /// [`MirrorRoot`]), then calls [`Project::refresh`].
+    pub fn set_mirror_root(&mut self, mirror: Option<MirrorRoot>) {
+        self.mirror = mirror;
         self.refresh();
     }
 

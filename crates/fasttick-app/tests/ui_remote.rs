@@ -124,8 +124,25 @@ fn open_edit_save_and_conflict_on_a_robot() {
     };
     let robot = server.files().join("trees");
     std::fs::create_dir_all(&robot).unwrap();
+    // The main file includes a file of another folder by its absolute
+    // path on the robot.
+    let lib = server.files().join("lib/lib.xml");
+    std::fs::create_dir_all(lib.parent().unwrap()).unwrap();
+    std::fs::write(
+        &lib,
+        r#"<root BTCPP_format="4"><BehaviorTree ID="Lib"><AlwaysSuccess/></BehaviorTree></root>"#,
+    )
+    .unwrap();
+    let main_text = MAIN.replace(
+        "  <BehaviorTree ID=\"Main\">",
+        &format!(
+            "  <include path=\"{}\"/>\n  <BehaviorTree ID=\"Main\">",
+            lib.display()
+        ),
+    );
+    assert!(main_text.contains("<include"));
     let main = robot.join("main.xml");
-    std::fs::write(&main, MAIN).unwrap();
+    std::fs::write(&main, &main_text).unwrap();
     std::fs::write(robot.join("notes.txt"), "not a tree").unwrap();
     let marker = server.files().join("restarted");
 
@@ -173,6 +190,33 @@ fn open_edit_save_and_conflict_on_a_robot() {
         assert_eq!(
             app.settings().recent.first().map(|r| r.path.clone()),
             Some(PathBuf::from(&url))
+        );
+        // The absolute include resolves to the copy of the robot's file.
+        let view = app.workspace().active().unwrap();
+        let editor = app
+            .workspace()
+            .doc(view.doc)
+            .unwrap()
+            .editor
+            .as_ref()
+            .unwrap();
+        assert!(editor.project().find_tree("Lib").is_some());
+        let include = editor.project().includes(editor.file_id())[0]
+            .path
+            .clone()
+            .unwrap();
+        assert!(
+            include.starts_with(cache.path()),
+            "the include must be the copy in the cache: {}",
+            include.display()
+        );
+        assert!(
+            editor
+                .problems()
+                .iter()
+                .all(|p| !p.message.contains("include")),
+            "{:?}",
+            editor.problems()
         );
         let saved = &app.settings().remote_hosts[0];
         assert_eq!(saved.address, HOST);

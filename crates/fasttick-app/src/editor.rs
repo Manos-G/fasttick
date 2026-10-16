@@ -444,6 +444,14 @@ impl EditorDoc {
             || (self.project.path().is_some() && self.project.is_project_dirty())
     }
 
+    /// Sets the folder with the copies of the files of another computer
+    /// (see [`fasttick_core::project::MirrorRoot`]); the includes and the
+    /// problems are computed again.
+    pub fn set_mirror_root(&mut self, mirror: Option<fasttick_core::project::MirrorRoot>) {
+        self.project.set_mirror_root(mirror);
+        self.changed();
+    }
+
     /// The files that [`EditorDoc::save`] writes: the XML files with
     /// changes, and the project file if it has changes.
     pub fn unsaved_paths(&self) -> Vec<PathBuf> {

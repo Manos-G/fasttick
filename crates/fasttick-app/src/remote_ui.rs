@@ -146,6 +146,16 @@ impl RemoteState {
         self.cache.url_of(local)
     }
 
+    /// For a local copy: the folder of its computer, so that absolute
+    /// `<include>` paths resolve to the copies of the remote files.
+    pub fn mirror_root(&self, local: &Path) -> Option<fasttick_core::project::MirrorRoot> {
+        let url = self.url_of(local)?;
+        Some(fasttick_core::project::MirrorRoot {
+            root: self.cache.host_dir(&url.host),
+            encode: crate::remote::encode_component,
+        })
+    }
+
     /// The tab title of a local copy: `host: file`.
     pub fn title(&self, local: &Path) -> Option<String> {
         self.url_of(local)

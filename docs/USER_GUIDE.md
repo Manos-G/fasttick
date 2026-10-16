@@ -26,6 +26,7 @@ You can give files on the command line:
 fasttick tree.xml                    # a tree file (edit mode)
 fasttick project.ftproj              # a project (edit mode)
 fasttick run.btlog                   # a log (replay mode)
+fasttick ssh://pi@robot.local/home/pi/trees/main.xml   # a file on a robot (see 3.8)
 fasttick --mode live --connect localhost:1667
 ```
 
@@ -327,6 +328,87 @@ as…**. You can also copy the `<TreeNodesModel>` into a tree file.
   value or condition script. Use **Aa** for match case, **Word** for whole
   words and **\* ?** for wildcards. The canvas marks the matching nodes.
 
+### 3.8 Files on a robot (SSH)
+
+You can open, change and save the tree files of another computer, for
+example a robot without a monitor. The robot must have an SSH server (on
+a Raspberry Pi, turn on SSH). You install nothing else on the robot.
+
+FastTick uses the `ssh` program of your computer (OpenSSH). Your SSH
+keys, your `~/.ssh/config` file and your known hosts work as in a
+terminal. Linux, macOS and Windows 10 or later have OpenSSH.
+
+To open a file:
+
+1. Select **File** > **Open from robot…**, or click **Open from robot
+   (SSH)…** on the Start tab.
+2. Type the address of the robot, for example `pi@robot.local`. Add the
+   port if it is not 22: `pi@robot.local:2222`. Type a folder, or leave
+   the folder empty for the home folder.
+3. Click **Connect**. The list shows the folders, the tree files (`.xml`),
+   the projects (`.ftproj`) and the logs (`.btlog`, `.db3`, `.btdb`) of
+   the folder. Click a folder to open it. Click **Up** to go to the parent
+   folder.
+4. Double-click a file, or select it and click **Open**.
+
+A log opens in replay mode. A tree file or a project opens in edit mode.
+The tab shows the name of the robot, for example `robot.local: main.xml`.
+The status bar shows the address of the file, for example
+`ssh://pi@robot.local/home/pi/trees/main.xml`.
+
+FastTick copies the file to your computer, with:
+
+- the other tree files of its folder (FastTick can offer them for missing
+  SubTrees, see 3.2);
+- the files that it includes, also the files in other folders and the
+  files that use an absolute path;
+- all files of a project.
+
+The copies are in the folder `remote` of the FastTick settings directory
+(see 6).
+
+To save:
+
+1. Push Ctrl+S. FastTick saves the copy and sends the changed files to
+   the robot. The notice "Saved main.xml to robot.local" tells you that
+   the robot has the file.
+2. If FastTick cannot reach the robot, your changes stay on your computer.
+   The status bar shows "(changes not uploaded)". Use **File** > **Upload
+   to robot** to send them later.
+3. If the file changed on the robot after FastTick copied it, FastTick does
+   not overwrite it. It asks:
+   - **Overwrite the robot's file**: send your version. The change on the
+     robot is lost.
+   - **Reload from robot**: open the version of the robot. Your changes are
+     lost.
+   - **Not now**: keep your changes on your computer.
+
+FastTick writes a new file on the robot through a temporary file in the
+same folder, so the robot never reads a half-written file. The file keeps
+its permissions.
+
+To restart the robot program after a save: your program reads the XML
+file when it starts. In the **Open from robot** dialog, open **After a
+save** and type a command, for example `systemctl --user restart
+my-robot`. FastTick runs this command on the robot after each upload, and
+shows its output in a notice.
+
+**File** > **Reload from robot** copies the files of the active tab again
+(for example after a change on the robot).
+
+If the robot asks for a password, or for the passphrase of your key,
+FastTick shows a dialog. Select **Remember until FastTick closes** to type
+it one time. FastTick keeps it in memory only. The first time that you
+connect, `ssh` asks if you trust the key of the robot: click **Yes** only
+if it is your robot. To connect without a password, set up a key one time
+in a terminal: `ssh-copy-id pi@robot.local`.
+
+You can also open a file of a robot from the command line or from the
+recent files: `fasttick ssh://pi@robot.local/home/pi/trees/main.xml`.
+
+To debug the running tree of the robot, use live mode (see 4). After you
+open a file from a robot, the live bar uses the name of the robot.
+
 ## 4. Live mode
 
 The executor must run the BT.CPP publisher:
@@ -401,7 +483,16 @@ Open a log with **File** > **Open log…** (Ctrl+Shift+O): a `.btlog` file
 
 FastTick keeps the window layout, the theme, the recent files and the poll
 interval in the settings directory of your system (for example
-`~/.local/share/fasttick` on Linux).
+`~/.local/share/fasttick` on Linux). The copies of the files of robots
+(see 3.8) are in its folder `remote`.
+
+Environment variables for files on robots (optional):
+
+| Variable | Meaning |
+|---|---|
+| `FASTTICK_SSH` | The `ssh` program to use (the default is `ssh`). |
+| `FASTTICK_SSH_CONFIG` | An `ssh` configuration file to use instead of `~/.ssh/config`. |
+| `FASTTICK_REMOTE_CACHE` | The folder for the copies of the files of robots. |
 
 ## 7. Troubleshooting
 
@@ -410,3 +501,5 @@ interval in the settings directory of your system (for example
 | "Node not recognized" errors for your own nodes | FastTick has no model of the node types. Add the models (see 3.6). |
 | Live mode does not connect | Make sure that the executor runs the publisher and that the port is correct. The publisher also uses the next port (port + 1). |
 | The last transitions of a log are not there | `BT::FileLogger2` can lose them when the executor stops. |
+| "FastTick cannot connect to the computer" | Make sure that `ssh pi@robot.local` works in a terminal. The message of `ssh` follows the text. |
+| "FastTick cannot start the ssh program" | Install OpenSSH (the package `openssh-client` on Debian and Ubuntu). |
