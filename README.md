@@ -5,7 +5,7 @@ FastTick is a fast tree editor and debugger for
 It is a desktop application. Use it to write behavior trees, to debug a running
 executor, and to replay log files. All features are free.
 
-Status: version 0.1.0. See the [user guide](docs/USER_GUIDE.md) and the
+Status: version 0.1.1. See the [user guide](docs/USER_GUIDE.md) and the
 demo notes [M1](docs/demo/M1.md), [M2](docs/demo/M2.md),
 [M3](docs/demo/M3.md) and [M4](docs/demo/M4.md).
 
