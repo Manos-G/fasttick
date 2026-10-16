@@ -111,12 +111,22 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
                     .desired_width(ui.available_width()),
             )
             .labelled_by(label);
-        if ui.memory(|m| m.focused().is_none())
-            && ui
-                .data(|d| d.get_temp::<bool>(state_id.with("focus")))
-                .unwrap_or(false)
+        // Ctrl+F: take the focus from any widget (for example the
+        // canvas), and select the old text so that typing replaces it.
+        if ui
+            .data(|d| d.get_temp::<bool>(state_id.with("focus")))
+            .unwrap_or(false)
         {
             response.request_focus();
+            let mut text_state =
+                egui::text_edit::TextEditState::load(ui.ctx(), response.id).unwrap_or_default();
+            text_state
+                .cursor
+                .set_char_range(Some(egui::text_selection::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(state.query.text.chars().count()),
+                )));
+            text_state.store(ui.ctx(), response.id);
             focus = true;
         }
     });

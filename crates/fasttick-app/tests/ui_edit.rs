@@ -587,6 +587,30 @@ fn xml_panel_follows_the_document() {
 }
 
 #[test]
+fn ctrl_f_focuses_the_find_field_also_when_the_search_tab_is_open() {
+    let mut harness = harness();
+    // The canvas has the keyboard focus after a click on a node.
+    select(&mut harness, "say_text");
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::F);
+    harness.run();
+    assert!(input(&harness, "Find").is_focused());
+    input(&harness, "Find").type_text("count");
+    harness.run();
+    assert_eq!(input(&harness, "Find").value().as_deref(), Some("count"));
+
+    // The Search tab is open; the canvas takes the focus again.
+    select(&mut harness, "say_text");
+    assert!(!input(&harness, "Find").is_focused());
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::F);
+    harness.run();
+    assert!(input(&harness, "Find").is_focused());
+    // The old text is selected: typing replaces it.
+    harness.event(egui::Event::Text("say".into()));
+    harness.run();
+    assert_eq!(input(&harness, "Find").value().as_deref(), Some("say"));
+}
+
+#[test]
 fn search_finds_nodes_and_reveals_them() {
     let mut harness = harness();
     command(&mut harness, Command::Find);

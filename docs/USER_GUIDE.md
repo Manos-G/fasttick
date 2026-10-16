@@ -421,6 +421,8 @@ as…**. You can also copy the `<TreeNodesModel>` into a tree file.
 - The **Search** panel (Ctrl+F) finds nodes by name, type, port name, port
   value or condition script. Use **Aa** for match case, **Word** for whole
   words and **\* ?** for wildcards. The canvas marks the matching nodes.
+  Ctrl+F opens the panel and puts the cursor in the **Find** field, with
+  the old text selected: type to start a new search.
 
 ### 3.8 Files on a robot (SSH)
 
