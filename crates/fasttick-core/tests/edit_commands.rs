@@ -6,7 +6,8 @@ use edit_support::{check, check_error, named, project, tag, text};
 use fasttick_core::bt::{PostCondition, PreCondition, StructureHash};
 use fasttick_core::builtin::ChildRule;
 use fasttick_core::edit::{
-    CommandError, Condition, NameKind, NodePlace, StructurePolicy, copy, node_place, parent_rule,
+    CommandError, Condition, History, NameKind, NodePlace, StructurePolicy, copy, node_place,
+    parent_rule,
 };
 use fasttick_core::models::{NodeKind, NodeModel, PortDirection, PortModel};
 use fasttick_core::project::{LayoutDirection, LayoutState};
@@ -258,6 +259,85 @@ fn delete_nodes_errors() {
     assert_eq!(
         check_error(&mut p, |ed| ed.delete_nodes(f, &[say])),
         CommandError::NotATreeNode(say)
+    );
+}
+
+#[test]
+fn delete_keep_children_makes_the_children_unconnected() {
+    let (mut p, f) = project(BASE);
+    let sequence = named(&p, f, "root");
+    let fallback = named(&p, f, "door");
+    let door = tag(&p, f, "IsDoorOpen");
+    let open = tag(&p, f, "OpenDoor");
+    let kept = check(&mut p, |ed| ed.delete_keep_children(f, &[fallback]));
+    assert_eq!(kept, vec![door, open]);
+    assert!(!text(&p, f).contains("Fallback"));
+    assert!(!text(&p, f).contains("<IsDoorOpen/>"));
+    let list: Vec<_> = p.unconnected(f, "Main").iter().map(|n| n.node).collect();
+    assert_eq!(list, vec![door, open]);
+    for node in [door, open] {
+        assert!(matches!(
+            node_place(&p, f, node).unwrap(),
+            NodePlace::Unconnected { root, .. } if root == node
+        ));
+    }
+    // The children can connect again, also at the old parent.
+    check(&mut p, |ed| ed.connect(f, door, sequence, 1));
+    assert!(text(&p, f).contains("<IsDoorOpen/>"));
+
+    // The tree root: the tree becomes empty and its children unconnected.
+    let (mut p, f) = project(BASE);
+    let sequence = named(&p, f, "root");
+    let fallback = named(&p, f, "door");
+    let door = tag(&p, f, "IsDoorOpen");
+    let kept = check(&mut p, |ed| ed.delete_keep_children(f, &[sequence]));
+    assert_eq!(kept.len(), 3);
+    assert_eq!(p.unconnected(f, "Main").len(), 3);
+    assert!(!text(&p, f).contains("<Sequence"));
+    // The grandchildren stay with their parent.
+    assert!(matches!(
+        node_place(&p, f, door).unwrap(),
+        NodePlace::Unconnected { root, .. } if root == fallback
+    ));
+}
+
+#[test]
+fn delete_keep_children_with_a_parent_and_a_child_selected() {
+    // The Sequence and the Fallback: the Fallback goes too, its children
+    // and the other children of the Sequence stay.
+    let (mut p, f) = project(BASE);
+    let sequence = named(&p, f, "root");
+    let fallback = named(&p, f, "door");
+    let kept = check(&mut p, |ed| {
+        ed.delete_keep_children(f, &[sequence, fallback])
+    });
+    let names: Vec<String> = kept
+        .iter()
+        .map(|n| p.file(f).unwrap().doc().name(*n).unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["SaySomething", "SubTree", "IsDoorOpen", "OpenDoor"]);
+    assert!(!text(&p, f).contains("Fallback"));
+
+    // One undo step brings all back.
+    let (mut p, f) = project(BASE);
+    let fallback = named(&p, f, "door");
+    let mut history = History::new();
+    history
+        .run(&mut p, |ed| ed.delete_keep_children(f, &[fallback]))
+        .unwrap();
+    assert_eq!(history.undo_label(), Some("Delete, keep children"));
+    history.undo(&mut p).unwrap();
+    assert_eq!(text(&p, f), BASE);
+    assert!(p.unconnected(f, "Main").is_empty());
+
+    // A leaf: as a normal delete.
+    let say = tag(&p, f, "SaySomething");
+    let kept = check(&mut p, |ed| ed.delete_keep_children(f, &[say]));
+    assert!(kept.is_empty());
+    assert!(!text(&p, f).contains("SaySomething message"));
+    assert_eq!(
+        check_error(&mut p, |ed| ed.delete_keep_children(f, &[])),
+        CommandError::EmptySelection
     );
 }
 

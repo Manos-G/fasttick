@@ -26,6 +26,11 @@ pub const WHATS_NEW: &[(&str, &str)] = &[
          the types that you used last come first.",
     ),
     (
+        "Delete a node, keep its children",
+        "Ctrl+Delete deletes a node but keeps its children as unconnected nodes. \
+         Drag the dot on top of an unconnected node to a new parent.",
+    ),
+    (
         "Restore after a crash",
         "FastTick keeps a copy of unsaved changes. If FastTick or the computer \
          stops before you save, the next start offers to restore the changes.",

@@ -302,6 +302,11 @@ pub struct CanvasNode {
     /// an editable tree. Such nodes belong to another tree and are
     /// read-only in this view.
     pub inline: bool,
+    /// True for the root of a part of an editable tree that is not under
+    /// the tree root: an unconnected node, or a second root in the
+    /// `<BehaviorTree>` element. Such a node shows a dot on its parent side
+    /// (see [`super::connect`]).
+    pub detached: bool,
     /// The decorations.
     pub deco: Decorations,
     /// Display text and size. Empty until the canvas measures the tree.
@@ -328,6 +333,7 @@ impl CanvasNode {
             subtree: None,
             path: String::new(),
             inline: false,
+            detached: false,
             deco: Decorations::default(),
             card: CardText::default(),
         }

@@ -523,7 +523,8 @@ fn disabled_reason(command: Command) -> &'static str {
         | Command::Copy
         | Command::Paste
         | Command::Duplicate
-        | Command::Delete => "This comes with the tree editor.",
+        | Command::Delete
+        | Command::DeleteKeepChildren => "This comes with the tree editor.",
         Command::Disconnect => "No connection.",
         Command::SaveAs => "Open a tree file first.",
         _ => "Open a document first.",

@@ -175,18 +175,21 @@ impl FastTickApp {
                 if let (Some(file), false) = (file, outcome.select.is_empty())
                     && let Some(view_ref) = self.workspace.view_mut(view)
                 {
-                    let tree = view_ref.canvas.tree_mut();
-                    tree.clear_selection();
+                    let tree = view_ref.canvas.tree();
                     let ids: Vec<_> = outcome
                         .select
                         .iter()
                         .filter_map(|n| tree.find_source(NodeSource::Xml(file, *n)))
                         .collect();
-                    for id in &ids {
-                        tree.set_selected(*id, true);
-                    }
+                    // The view moves to the first node (and selects only
+                    // it), then all nodes of the outcome are selected.
                     if let Some(first) = ids.first() {
                         view_ref.canvas.focus_on(*first, true);
+                    }
+                    let tree = view_ref.canvas.tree_mut();
+                    tree.clear_selection();
+                    for id in &ids {
+                        tree.set_selected(*id, true);
                     }
                 }
                 if let Some(message) = outcome.message {

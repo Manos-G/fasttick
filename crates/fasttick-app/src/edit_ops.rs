@@ -48,6 +48,9 @@ pub enum EditOp {
     },
     /// Deletes the selected nodes (with their subtrees).
     Delete,
+    /// Deletes the selected nodes, but keeps their children: the children
+    /// become unconnected nodes and are selected.
+    DeleteKeepChildren,
     /// Copies the selected nodes to the clipboard.
     Copy,
     /// Copies the selected nodes, then deletes them.
@@ -409,6 +412,12 @@ pub fn run(
                 return Err("Select the nodes to delete.".into());
             }
             editor.edit(|ed| ed.delete_nodes(file, &selected))?;
+        }
+        EditOp::DeleteKeepChildren => {
+            if selected.is_empty() {
+                return Err("Select the nodes to delete.".into());
+            }
+            outcome.select = editor.edit(|ed| ed.delete_keep_children(file, &selected))?;
         }
         EditOp::Copy | EditOp::Cut => {
             if selected.is_empty() {

@@ -28,7 +28,9 @@ demo notes [M1](docs/demo/M1.md), [M2](docs/demo/M2.md),
   (`BT::SqliteLogger`): timeline, transitions table, statistics, JSON and CSV
   export.
 - Fast authoring: drag from the dot under a node, or push Shift+A, and
-  find the node type with fuzzy search. Fold large subtrees. Find the
+  find the node type with fuzzy search. Delete a node and keep its
+  children (Ctrl+Delete), then connect them again from the dot on top of
+  each unconnected node. Fold large subtrees. Find the
   nodes that use a blackboard key.
 - Open, edit and save the files of a robot over SSH (File > Open from
   robot). FastTick uses the `ssh` program of the system and warns if a file

@@ -93,6 +93,7 @@ impl CanvasTree {
             return CanvasTree::default();
         };
         let title = entry.id.clone();
+        let main_root = entry.root;
         let mut roots: Vec<NodeId> = entry.root.iter().copied().collect();
         roots.extend(entry.extra_roots.iter().copied());
         roots.extend(project.unconnected(file, &title).iter().map(|u| u.node));
@@ -135,6 +136,7 @@ impl CanvasTree {
             let label = view.instance_name().unwrap_or(type_id);
             let mut canvas_node = CanvasNode::new(source, label, type_id);
             canvas_node.inline = inline;
+            canvas_node.detached = parent.is_none() && Some(node_id) != main_root;
             canvas_node.ports = view
                 .ports()
                 .map(|(name, value)| PortLine {
@@ -432,6 +434,10 @@ mod tests {
         let last = tree.nodes().last().unwrap();
         assert_eq!(last.type_id, "Sleep");
         assert!(last.parent.is_none());
+        // Only the unconnected node is detached, not the tree root.
+        assert!(last.detached);
+        assert!(tree.nodes().iter().filter(|n| n.detached).count() == 1);
+        assert!(!tree.nodes()[0].detached);
     }
 
     #[test]

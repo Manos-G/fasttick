@@ -286,8 +286,8 @@ Other ways to add nodes:
 - Right-click a node to see the edit actions: **Add child…**, **Add sibling
   before…**, **Add sibling after…** (these open the search window),
   **Cut**, **Copy**, **Duplicate**,
-  **Delete**, **Paste as child**, **Move up**, **Move down**, **Disconnect**
-  and **Create SubTree from selection…**.
+  **Delete**, **Delete, keep children**, **Paste as child**, **Move up**,
+  **Move down**, **Disconnect** and **Create SubTree from selection…**.
 - Right-click an empty place to add or paste an unconnected node.
 - Alt+Left or Alt+Up moves the selected node before its previous sibling.
   Alt+Right or Alt+Down moves it after its next sibling.
@@ -298,6 +298,30 @@ Other ways to add nodes:
   unconnected nodes. FastTick puts the XML of the copied nodes on the
   system clipboard. You can also paste the XML of nodes that you copied
   in another program, for example `<Sleep msec="100"/>`.
+
+**Delete a node and keep its children.** Select a node and push
+Ctrl+Delete (or select **Edit** > **Delete, keep children**, or
+right-click the node). FastTick deletes the node, but not its children:
+each child (with its own children) becomes an unconnected node. The
+children stay selected. Push Ctrl+Z to undo it in one step. Delete
+(without Ctrl) deletes the node with all its children.
+
+**Connect an unconnected node.** An unconnected node has a dot with a
+point at the middle of its top edge (left edge in the left-to-right
+layout). Drag from this dot. A line follows the pointer. Release it:
+
+- on a node that can have one more child (a control node, or a decorator
+  without a child), or on its plus dot: the unconnected node becomes its
+  last child;
+- on a node that cannot have a child (for example an action), in a parent
+  that can have one more child: the unconnected node goes before that
+  node (left half of the card) or after it (right half);
+- anywhere else: nothing changes.
+
+The label next to the pointer tells where the node goes. An orange frame
+shows a node that cannot take one more child. Push Escape during the drag
+to cancel. You can also drag the unconnected node itself onto a node, or
+drag from the plus dot of a parent to the unconnected node.
 
 Unconnected nodes stay in the project file. BT.CPP does not see them.
 

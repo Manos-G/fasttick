@@ -36,7 +36,7 @@ use egui::{
 use fasttick_core::status::NodeStatus;
 
 use super::card::{self, CardGeometry, TextKind, TextMeasure};
-use super::connect::{self, ConnectEnd};
+use super::connect::{self, AttachEnd, ConnectEnd};
 use super::drop::{self, DropPlacement, DropSpot, NewNodePayload};
 use super::hit;
 use super::layout::{self, LayoutDirection, TreeLayout};
@@ -194,6 +194,11 @@ enum DragMode {
     Connect {
         from: CanvasNodeId,
     },
+    /// A connection from the parent dot of an unconnected node to a new
+    /// parent (see [`connect`]).
+    Attach {
+        child: CanvasNodeId,
+    },
 }
 
 /// Cached text layouts of the visible cards.
@@ -274,6 +279,8 @@ pub struct CanvasState {
     edge_since: Option<f64>,
     hovered_dot: Option<CanvasNodeId>,
     connect_end: Option<ConnectEnd>,
+    hovered_parent_dot: Option<CanvasNodeId>,
+    attach_end: Option<AttachEnd>,
     text_bucket: Option<i32>,
     last_zoom: f32,
     zoom_changed_at: f64,
@@ -329,6 +336,8 @@ impl CanvasState {
             edge_since: None,
             hovered_dot: None,
             connect_end: None,
+            hovered_parent_dot: None,
+            attach_end: None,
             text_bucket: None,
             last_zoom: 0.0,
             zoom_changed_at: 0.0,
@@ -1041,12 +1050,31 @@ fn handle_input(
             connect::grab_px(zoom) / zoom,
         )
     };
+    let parent_dot_under = |state: &CanvasState, p: Option<Pos2>| {
+        let zoom = state.viewport.zoom;
+        if !state.editable || Detail::for_zoom(zoom) == Detail::Boxes {
+            return None;
+        }
+        connect::parent_dot_at(
+            &state.tree,
+            &state.layout.rects,
+            state.direction,
+            p?,
+            connect::grab_px(zoom) / zoom,
+        )
+    };
     state.hovered_dot = if response.hovered() && state.drag == DragMode::None {
         dot_under(state, world_pointer)
     } else {
         None
     };
-    if state.hovered_dot.is_some() {
+    state.hovered_parent_dot =
+        if response.hovered() && state.drag == DragMode::None && state.hovered_dot.is_none() {
+            parent_dot_under(state, world_pointer)
+        } else {
+            None
+        };
+    if state.hovered_dot.is_some() || state.hovered_parent_dot.is_some() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
     }
 
@@ -1057,6 +1085,8 @@ fn handle_input(
         let on_node = press_world.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
         let on_dot = dot_under(state, press_world)
             .filter(|_| !space && response.dragged_by(PointerButton::Primary));
+        let on_parent_dot = parent_dot_under(state, press_world)
+            .filter(|_| !space && response.dragged_by(PointerButton::Primary));
         let moving = match on_node {
             Some(id) if state.editable && !space && response.dragged_by(PointerButton::Primary) => {
                 drop::moving_nodes(&state.tree, id)
@@ -1065,6 +1095,8 @@ fn handle_input(
         };
         state.drag = if let Some(from) = on_dot {
             DragMode::Connect { from }
+        } else if let Some(child) = on_parent_dot {
+            DragMode::Attach { child }
         } else if let (Some(id), false) = (on_node, moving.is_empty()) {
             // Grabbing a node that is not selected selects it.
             if !state.tree.is_selected(id) && click_select(state, Some(id), SelectMode::Replace) {
@@ -1088,14 +1120,17 @@ fn handle_input(
         };
         state.animation = None;
     }
-    if matches!(state.drag, DragMode::Move { .. } | DragMode::Connect { .. })
-        && ui.input(|i| i.key_pressed(Key::Escape))
+    if matches!(
+        state.drag,
+        DragMode::Move { .. } | DragMode::Connect { .. } | DragMode::Attach { .. }
+    ) && ui.input(|i| i.key_pressed(Key::Escape))
     {
         // Escape cancels a move or a connection.
         state.drag = DragMode::None;
         state.moving.clear();
         state.drop = None;
         state.connect_end = None;
+        state.attach_end = None;
         state.edge_since = None;
         state.band_end = None;
     }
@@ -1131,6 +1166,23 @@ fn handle_input(
                 edge_pan(state, ui, rect, p);
             }
         }
+        DragMode::Attach { child } if response.dragged() => {
+            state.band_end = world_pointer;
+            let grab = connect::grab_px(state.viewport.zoom) / state.viewport.zoom;
+            state.attach_end = world_pointer.map(|p| {
+                connect::attach_end(
+                    &state.tree,
+                    &state.layout.rects,
+                    state.direction,
+                    child,
+                    p,
+                    grab,
+                )
+            });
+            if let Some(p) = pointer {
+                edge_pan(state, ui, rect, p);
+            }
+        }
         _ => {}
     }
     if response.drag_stopped() {
@@ -1160,9 +1212,18 @@ fn handle_input(
                 None => {}
             }
         }
+        if let DragMode::Attach { child } = state.drag
+            && let Some(AttachEnd::Attach(spot)) = state.attach_end.take()
+        {
+            events.push(CanvasEvent::MoveNodes {
+                nodes: vec![child],
+                spot,
+            });
+        }
         state.moving.clear();
         state.drop = None;
         state.connect_end = None;
+        state.attach_end = None;
         state.edge_since = None;
         if let DragMode::Band { start, additive } = state.drag
             && let Some(end) = state.band_end.or(world_pointer)
@@ -1816,6 +1877,7 @@ fn paint_canvas(
 
     paint_drop(state, ui, &mut shapes, origin, palette);
     paint_connection(state, ui, &mut shapes, origin, palette);
+    paint_attach(state, ui, &mut shapes, origin, palette);
 
     // Rubber band.
     if let (DragMode::Band { start, .. }, Some(end)) = (state.drag, state.band_end) {
@@ -2027,6 +2089,35 @@ fn paint_dots(
             plus,
         ));
     }
+    // The parent dots of the unconnected nodes: a ring with a point,
+    // "connect me to a parent".
+    let active = match state.drag {
+        DragMode::Attach { child } => Some(child),
+        _ => state.hovered_parent_dot,
+    };
+    for &index in visible {
+        let id = CanvasNodeId(index);
+        let (Some(node), Some(rect)) = (state.tree.get(id), state.layout.rect(id)) else {
+            continue;
+        };
+        if !connect::has_parent_dot(node) {
+            continue;
+        }
+        let center = state
+            .viewport
+            .to_screen(origin, connect::parent_dot_center(rect, state.direction));
+        let hot = active == Some(id);
+        let r = connect::dot_radius_px(zoom) * if hot { 1.3 } else { 1.0 };
+        let color = palette.category(node.category);
+        let (fill, stroke, mark) = if hot {
+            (palette.accent, palette.accent, palette.on_color)
+        } else {
+            (palette.card, color, color)
+        };
+        shapes.push(Shape::circle_filled(center, r, fill));
+        shapes.push(Shape::circle_stroke(center, r, Stroke::new(1.5, stroke)));
+        shapes.push(Shape::circle_filled(center, r * 0.35, mark));
+    }
 }
 
 /// The connection from a dot to the pointer during a drag, the place of
@@ -2114,6 +2205,117 @@ fn paint_connection(
         end_screen + vec2(14.0, 14.0),
         hint,
         palette.accent,
+        palette,
+    );
+}
+
+/// The connection from the parent dot of an unconnected node to the
+/// pointer during a drag, the place of the node and a hint.
+fn paint_attach(
+    state: &CanvasState,
+    ui: &Ui,
+    shapes: &mut Vec<Shape>,
+    origin: Pos2,
+    palette: &CanvasPalette,
+) {
+    let (DragMode::Attach { child }, Some(end)) = (state.drag, state.band_end) else {
+        return;
+    };
+    let Some(rect) = state.layout.rect(child) else {
+        return;
+    };
+    let zoom = state.viewport.zoom;
+    let start = state
+        .viewport
+        .to_screen(origin, connect::parent_dot_center(rect, state.direction));
+    let end_screen = state.viewport.to_screen(origin, end);
+    // A curve that leaves the dot towards the parent side.
+    let bend = match state.direction {
+        LayoutDirection::TopDown => vec2(0.0, -((end_screen.y - start.y).abs() * 0.5).max(30.0)),
+        LayoutDirection::LeftRight => vec2(-((end_screen.x - start.x).abs() * 0.5).max(30.0), 0.0),
+    };
+    let label = |id: CanvasNodeId| {
+        state
+            .tree
+            .get(id)
+            .map(|n| n.label.clone())
+            .unwrap_or_default()
+    };
+    let name = label(child);
+    let (hint, color) = match state.attach_end {
+        Some(AttachEnd::Attach(DropSpot::Node { target, placement })) => {
+            let target_rect = state
+                .layout
+                .rect(target)
+                .map(|r| state.viewport.rect_to_screen(origin, r));
+            match placement {
+                DropPlacement::Inside => {
+                    if let Some(screen) = target_rect {
+                        shapes.push(Shape::rect_stroke(
+                            screen.expand(2.0),
+                            radius(6.0 * zoom),
+                            Stroke::new(2.5, palette.accent),
+                            StrokeKind::Outside,
+                        ));
+                    }
+                    (
+                        format!("Connect {name} to {}", label(target)),
+                        palette.accent,
+                    )
+                }
+                _ => {
+                    if let Some(bar) = target_rect
+                        .and_then(|screen| drop_bar(screen, placement, state.direction, zoom))
+                    {
+                        shapes.push(Shape::rect_filled(
+                            bar,
+                            CornerRadius::same(2),
+                            palette.accent,
+                        ));
+                    }
+                    let word = if placement == DropPlacement::Before {
+                        "before"
+                    } else {
+                        "after"
+                    };
+                    (
+                        format!("Connect {name} {word} {}", label(target)),
+                        palette.accent,
+                    )
+                }
+            }
+        }
+        Some(AttachEnd::Full(target)) => {
+            if let Some(r) = state.layout.rect(target) {
+                shapes.push(Shape::rect_stroke(
+                    state.viewport.rect_to_screen(origin, r).expand(2.0),
+                    radius(6.0 * zoom),
+                    Stroke::new(2.0, palette.warning),
+                    StrokeKind::Outside,
+                ));
+            }
+            (
+                format!("{} cannot take one more child", label(target)),
+                palette.warning,
+            )
+        }
+        _ => (format!("Connect {name} to a parent"), palette.accent),
+    };
+    shapes.push(Shape::CubicBezier(
+        egui::epaint::CubicBezierShape::from_points_stroke(
+            [start, start + bend, end_screen - bend, end_screen],
+            false,
+            Color32::TRANSPARENT,
+            Stroke::new(2.0, color),
+        ),
+    ));
+    shapes.push(Shape::circle_filled(end_screen, 4.0, color));
+    hint_bubble(
+        shapes,
+        ui,
+        end_screen + vec2(14.0, 14.0),
+        hint,
+        color,
         palette,
     );
 }

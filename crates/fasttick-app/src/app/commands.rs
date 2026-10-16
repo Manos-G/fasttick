@@ -15,7 +15,11 @@ impl FastTickApp {
             Command::MoveUp | Command::MoveDown => self
                 .active_edit_view()
                 .is_some_and(|v| crate::edit_ops::primary_node(&self.workspace, v).is_some()),
-            Command::Cut | Command::Copy | Command::Duplicate | Command::Delete => self
+            Command::Cut
+            | Command::Copy
+            | Command::Duplicate
+            | Command::Delete
+            | Command::DeleteKeepChildren => self
                 .active_edit_view()
                 .is_some_and(|v| !crate::edit_ops::selected_nodes(&self.workspace, v).is_empty()),
             Command::Paste => self.active_edit_view().is_some() && self.clipboard.is_some(),
@@ -303,7 +307,8 @@ impl FastTickApp {
             | Command::Copy
             | Command::Paste
             | Command::Duplicate
-            | Command::Delete => {
+            | Command::Delete
+            | Command::DeleteKeepChildren => {
                 if let Some(view) = self.active_edit_view() {
                     let op = match command {
                         Command::Undo => EditOp::Undo,
@@ -312,6 +317,7 @@ impl FastTickApp {
                         Command::Copy => EditOp::Copy,
                         Command::Paste => EditOp::Paste,
                         Command::Duplicate => EditOp::Duplicate,
+                        Command::DeleteKeepChildren => EditOp::DeleteKeepChildren,
                         _ => EditOp::Delete,
                     };
                     self.run_edit(ctx, view, op);

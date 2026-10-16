@@ -173,6 +173,18 @@ pub fn edit_menu(
     }
     if container
         && ui
+            .button("Delete, keep children")
+            .on_hover_text(
+                "Delete the node. Its children stay as unconnected nodes; drag the dot on \
+                 top of a node to connect it again.",
+            )
+            .clicked()
+    {
+        edit(EditOp::DeleteKeepChildren);
+        ui.close();
+    }
+    if container
+        && ui
             .add_enabled(context.has_clipboard, egui::Button::new("Paste as child"))
             .clicked()
     {

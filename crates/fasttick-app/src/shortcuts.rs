@@ -37,6 +37,9 @@ pub enum Command {
     Duplicate,
     /// Delete the selection.
     Delete,
+    /// Delete the selected nodes, but keep their children as unconnected
+    /// nodes.
+    DeleteKeepChildren,
     /// Select all nodes.
     SelectAll,
     /// Add a node to the selected node (a search window asks for the type).
@@ -135,7 +138,7 @@ pub enum Command {
 
 impl Command {
     /// All commands, in help-dialog order.
-    pub const ALL: [Command; 60] = [
+    pub const ALL: [Command; 61] = [
         Command::NewProject,
         Command::OpenFile,
         Command::OpenLog,
@@ -153,6 +156,7 @@ impl Command {
         Command::Paste,
         Command::Duplicate,
         Command::Delete,
+        Command::DeleteKeepChildren,
         Command::SelectAll,
         Command::AddNode,
         Command::MoveUp,
@@ -214,6 +218,7 @@ impl Command {
             Command::Paste => "Paste",
             Command::Duplicate => "Duplicate",
             Command::Delete => "Delete",
+            Command::DeleteKeepChildren => "Delete, keep children",
             Command::SelectAll => "Select all",
             Command::AddNode => "Add node\u{2026}",
             Command::Find => "Find\u{2026}",
@@ -284,6 +289,7 @@ impl Command {
             | Command::Paste
             | Command::Duplicate
             | Command::Delete
+            | Command::DeleteKeepChildren
             | Command::SelectAll
             | Command::AddNode
             | Command::MoveUp
@@ -392,6 +398,7 @@ impl Default for KeyMap {
                 bind(Command::Paste, cmd, Key::V),
                 bind(Command::Duplicate, cmd, Key::D),
                 bind(Command::Delete, none, Key::Delete),
+                bind(Command::DeleteKeepChildren, cmd, Key::Delete),
                 bind(Command::SelectAll, cmd, Key::A),
                 bind(Command::AddNode, Modifiers::SHIFT, Key::A),
                 bind(Command::MoveUp, Modifiers::ALT, Key::ArrowUp),
@@ -481,7 +488,8 @@ impl KeyMap {
                     && !binding.shortcut.modifiers.ctrl
                     && !binding.shortcut.modifiers.alt
                     && !is_function_key(binding.shortcut.logical_key);
-                // Alt+arrow moves the cursor by words in a text field.
+                // Alt+arrow moves the cursor by words in a text field, and
+                // Ctrl+Delete deletes a word.
                 let text_command = matches!(
                     binding.command,
                     Command::SelectAll
@@ -490,6 +498,7 @@ impl KeyMap {
                         | Command::Paste
                         | Command::MoveUp
                         | Command::MoveDown
+                        | Command::DeleteKeepChildren
                 );
                 if ((plain || text_command) && typing) || !enabled(binding.command) {
                     continue;

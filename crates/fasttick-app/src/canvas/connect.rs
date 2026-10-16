@@ -13,6 +13,17 @@
 //!
 //! A click on the dot also asks for a type; the new node is the last
 //! child.
+//!
+//! An unconnected node (see [`CanvasNode::detached`]) also shows a dot on
+//! its parent side (the top edge in the top-down layout). A drag from that
+//! dot draws a connection to a new parent. Where the user releases it:
+//!
+//! - on a node that can take one more child (or on its dot): the
+//!   unconnected node (with its subtree) becomes its last child;
+//! - on a node that takes no child, whose parent can take one more child:
+//!   the unconnected node goes before or after that node (the half of the
+//!   card selects it);
+//! - elsewhere: nothing.
 
 use egui::{Pos2, Rect, pos2};
 
@@ -76,14 +87,59 @@ pub fn dot_at(
     p: Pos2,
     grab: f32,
 ) -> Option<CanvasNodeId> {
+    nearest_dot(tree, rects, p, grab, |r| dot_center(r, direction), has_dot)
+}
+
+/// True if the node shows a dot on its parent side: it is an unconnected
+/// node (see [`CanvasNode::detached`]).
+pub fn has_parent_dot(node: &CanvasNode) -> bool {
+    node.detached && node.parent.is_none() && !node.inline
+}
+
+/// The centre of the parent dot of a card, in world units: a little
+/// outside the middle of the parent side.
+pub fn parent_dot_center(rect: Rect, direction: LayoutDirection) -> Pos2 {
+    match direction {
+        LayoutDirection::TopDown => pos2(rect.center().x, rect.min.y - DOT_OFFSET),
+        LayoutDirection::LeftRight => pos2(rect.min.x - DOT_OFFSET, rect.center().y),
+    }
+}
+
+/// The unconnected node whose parent dot is nearest to `p` (world units),
+/// not further than `grab` (world units).
+pub fn parent_dot_at(
+    tree: &CanvasTree,
+    rects: &[Rect],
+    direction: LayoutDirection,
+    p: Pos2,
+    grab: f32,
+) -> Option<CanvasNodeId> {
+    nearest_dot(
+        tree,
+        rects,
+        p,
+        grab,
+        |r| parent_dot_center(r, direction),
+        has_parent_dot,
+    )
+}
+
+fn nearest_dot(
+    tree: &CanvasTree,
+    rects: &[Rect],
+    p: Pos2,
+    grab: f32,
+    center: impl Fn(Rect) -> Pos2,
+    shows_dot: impl Fn(&CanvasNode) -> bool,
+) -> Option<CanvasNodeId> {
     let mut best: Option<(f32, CanvasNodeId)> = None;
     for (index, rect) in rects.iter().enumerate() {
-        let distance = dot_center(*rect, direction).distance(p);
+        let distance = center(*rect).distance(p);
         if distance > grab || best.is_some_and(|(d, _)| d <= distance) {
             continue;
         }
         let id = CanvasNodeId(index as u32);
-        if tree.get(id).is_some_and(has_dot) {
+        if tree.get(id).is_some_and(&shows_dot) {
             best = Some((distance, id));
         }
     }
@@ -118,6 +174,69 @@ pub fn connect_end(
         return ConnectEnd::Connect(target);
     }
     ConnectEnd::Add(add_spot(tree, rects, direction, parent, p))
+}
+
+/// The result of a connection from the parent dot of an unconnected node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachEnd {
+    /// Connect the node at this place (a [`DropSpot::Node`]).
+    Attach(DropSpot),
+    /// The node under the pointer cannot take one more child.
+    Full(CanvasNodeId),
+    /// No node that can be the parent: an empty place, the node itself, a
+    /// node of its own subtree or a read-only node.
+    Nothing,
+}
+
+/// What a connection from the parent dot of the unconnected node `child`
+/// does when it ends at `p` (world units). The parent is the card under
+/// the pointer, or the card whose child dot is nearer than `grab` (world
+/// units).
+pub fn attach_end(
+    tree: &CanvasTree,
+    rects: &[Rect],
+    direction: LayoutDirection,
+    child: CanvasNodeId,
+    p: Pos2,
+    grab: f32,
+) -> AttachEnd {
+    let target =
+        super::hit::hit_node(rects, p, 0.0).or_else(|| dot_at(tree, rects, direction, p, grab));
+    let Some(target) = target else {
+        return AttachEnd::Nothing;
+    };
+    let Some(node) = tree.get(target) else {
+        return AttachEnd::Nothing;
+    };
+    if node.inline || is_ancestor(tree, child, target) {
+        return AttachEnd::Nothing;
+    }
+    if has_dot(node) {
+        return AttachEnd::Attach(DropSpot::Node {
+            target,
+            placement: DropPlacement::Inside,
+        });
+    }
+    // A node that takes no child: a sibling, if its parent has room.
+    let parent_has_room = node
+        .parent
+        .and_then(|parent| tree.get(parent))
+        .is_some_and(|parent| has_dot(parent) && !parent.inline);
+    let Some(rect) = rects.get(target.0 as usize).filter(|_| parent_has_room) else {
+        return AttachEnd::Full(target);
+    };
+    let first_half = match direction {
+        LayoutDirection::TopDown => p.x < rect.center().x,
+        LayoutDirection::LeftRight => p.y < rect.center().y,
+    };
+    AttachEnd::Attach(DropSpot::Node {
+        target,
+        placement: if first_half {
+            DropPlacement::Before
+        } else {
+            DropPlacement::After
+        },
+    })
 }
 
 /// The place of a new child of `parent` for a pointer at `p`: before the
@@ -234,6 +353,130 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn unconnected_nodes_have_a_parent_dot() {
+        let (mut tree, rects) = sample();
+        tree.get_mut(CanvasNodeId(4)).unwrap().detached = true;
+        let shown: Vec<bool> = (0..5)
+            .map(|i| has_parent_dot(tree.get(CanvasNodeId(i)).unwrap()))
+            .collect();
+        assert_eq!(shown, [false, false, false, false, true]);
+        // The dot is at the middle of the top edge, a little outside.
+        assert_eq!(
+            parent_dot_center(rects[4], LayoutDirection::TopDown),
+            pos2(650.0, -DOT_OFFSET)
+        );
+        assert_eq!(
+            parent_dot_center(rects[4], LayoutDirection::LeftRight),
+            pos2(600.0 - DOT_OFFSET, 20.0)
+        );
+        let at = |p| parent_dot_at(&tree, &rects, LayoutDirection::TopDown, p, 10.0);
+        assert_eq!(at(pos2(652.0, -5.0)), Some(CanvasNodeId(4)));
+        assert_eq!(at(pos2(650.0, 40.0)), None, "the bottom edge");
+        assert_eq!(
+            at(pos2(200.0, -3.0)),
+            None,
+            "the tree root has no parent dot"
+        );
+    }
+
+    #[test]
+    fn the_release_point_selects_the_parent_and_the_place() {
+        let (mut tree, rects) = sample();
+        let unconnected = CanvasNodeId(4);
+        tree.get_mut(unconnected).unwrap().detached = true;
+        let end = |p| {
+            attach_end(
+                &tree,
+                &rects,
+                LayoutDirection::TopDown,
+                unconnected,
+                p,
+                10.0,
+            )
+        };
+        let inside = |target| {
+            AttachEnd::Attach(DropSpot::Node {
+                target,
+                placement: DropPlacement::Inside,
+            })
+        };
+        // On the Sequence or on its dot: the last child.
+        assert_eq!(end(pos2(160.0, 20.0)), inside(CanvasNodeId(0)));
+        assert_eq!(end(pos2(200.0, 40.0 + DOT_OFFSET)), inside(CanvasNodeId(0)));
+        // On the empty Inverter: its child.
+        assert_eq!(end(pos2(350.0, 120.0)), inside(CanvasNodeId(3)));
+        // On an action of the Sequence: before or after it.
+        assert_eq!(
+            end(pos2(10.0, 120.0)),
+            AttachEnd::Attach(DropSpot::Node {
+                target: CanvasNodeId(1),
+                placement: DropPlacement::Before
+            })
+        );
+        assert_eq!(
+            end(pos2(240.0, 120.0)),
+            AttachEnd::Attach(DropSpot::Node {
+                target: CanvasNodeId(2),
+                placement: DropPlacement::After
+            })
+        );
+        // The node itself, and an empty place.
+        assert_eq!(end(pos2(620.0, 20.0)), AttachEnd::Nothing);
+        assert_eq!(end(pos2(500.0, 300.0)), AttachEnd::Nothing);
+        // A full Inverter: no child, and its own child goes nowhere else.
+        let mut b = CanvasTreeBuilder::new();
+        let inverter = b.push(None, node(0, NodeCategory::Decorator));
+        let leaf = b.push(Some(inverter), node(1, NodeCategory::Action));
+        let loose = b.push(None, node(2, NodeCategory::Action));
+        let mut full = b.finish("T");
+        full.get_mut(loose).unwrap().detached = true;
+        let size = vec2(100.0, 40.0);
+        let full_rects = vec![
+            Rect::from_min_size(pos2(0.0, 0.0), size),
+            Rect::from_min_size(pos2(0.0, 100.0), size),
+            Rect::from_min_size(pos2(300.0, 0.0), size),
+        ];
+        let full_end = |p| attach_end(&full, &full_rects, LayoutDirection::TopDown, loose, p, 10.0);
+        assert_eq!(full_end(pos2(50.0, 20.0)), AttachEnd::Full(inverter));
+        assert_eq!(full_end(pos2(50.0, 120.0)), AttachEnd::Full(leaf));
+        // A node of another tree (read-only).
+        tree.get_mut(CanvasNodeId(3)).unwrap().inline = true;
+        let inline = attach_end(
+            &tree,
+            &rects,
+            LayoutDirection::TopDown,
+            unconnected,
+            pos2(350.0, 120.0),
+            10.0,
+        );
+        assert_eq!(inline, AttachEnd::Nothing);
+    }
+
+    #[test]
+    fn an_unconnected_node_cannot_go_into_its_own_subtree() {
+        let mut b = CanvasTreeBuilder::new();
+        let top = b.push(None, node(0, NodeCategory::Control));
+        let inner = b.push(Some(top), node(1, NodeCategory::Control));
+        let mut tree = b.finish("T");
+        tree.get_mut(top).unwrap().detached = true;
+        let size = vec2(100.0, 40.0);
+        let rects = vec![
+            Rect::from_min_size(pos2(0.0, 0.0), size),
+            Rect::from_min_size(pos2(0.0, 100.0), size),
+        ];
+        let end = attach_end(
+            &tree,
+            &rects,
+            LayoutDirection::TopDown,
+            top,
+            pos2(50.0, 120.0),
+            10.0,
+        );
+        assert_eq!(end, AttachEnd::Nothing);
+        assert!(has_dot(tree.get(inner).unwrap()));
     }
 
     #[test]

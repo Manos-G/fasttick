@@ -223,6 +223,42 @@ impl Editor<'_> {
         })
     }
 
+    /// Deletes nodes but keeps their children: each element child of a
+    /// deleted node that is not deleted too becomes an unconnected node
+    /// (with its subtree) of the same tree. Returns the new unconnected
+    /// nodes, in the order of the deleted nodes and their children.
+    ///
+    /// A node without children is deleted as with
+    /// [`Editor::delete_nodes`]. The whole change is one undo step.
+    pub fn delete_keep_children(
+        &mut self,
+        file: FileId,
+        nodes: &[NodeId],
+    ) -> Result<Vec<NodeId>, CommandError> {
+        self.atomic("Delete, keep children", |ed| {
+            if nodes.is_empty() {
+                return Err(CommandError::EmptySelection);
+            }
+            for &node in nodes {
+                node_place(ed.project(), file, node)?;
+            }
+            let doc = ed.doc(file)?;
+            let mut keep = Vec::new();
+            for &node in nodes {
+                for child in doc.element_children(node) {
+                    if !nodes.contains(&child) && !keep.contains(&child) {
+                        keep.push(child);
+                    }
+                }
+            }
+            for &child in &keep {
+                ed.disconnect(file, child, [0.0, 0.0])?;
+            }
+            ed.delete_nodes(file, nodes)?;
+            Ok(keep)
+        })
+    }
+
     /// Moves a node (with its subtree) to element child number `index` of
     /// `new_parent`. This re-parents or re-orders a node. `index` counts the
     /// element children of `new_parent` after the node is removed from its
