@@ -171,6 +171,33 @@ pub enum CommandError {
         /// The tree ID.
         tree: String,
     },
+    /// The node is not a node of this tree.
+    #[error("node {node} is not a node of the tree \"{tree}\"")]
+    NotInTree {
+        /// The node.
+        node: NodeId,
+        /// The tree ID.
+        tree: String,
+    },
+    /// The tree has no group with this ID.
+    #[error("the tree \"{tree}\" has no group {id}")]
+    UnknownGroup {
+        /// The tree ID.
+        tree: String,
+        /// The group ID.
+        id: u32,
+    },
+    /// The tree has no canvas note with this ID.
+    #[error("the tree \"{tree}\" has no note {id}")]
+    UnknownNote {
+        /// The tree ID.
+        tree: String,
+        /// The note ID.
+        id: u32,
+    },
+    /// A group needs at least one node.
+    #[error("a group needs at least one node")]
+    EmptyGroup,
     /// A change of the model section failed.
     #[error(transparent)]
     Model(#[from] ModelWriteError),

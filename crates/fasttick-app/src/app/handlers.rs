@@ -192,6 +192,13 @@ impl FastTickApp {
                         view_ref.canvas.reveal(*first);
                     }
                 }
+                // A new group or note: its text opens for editing.
+                if let Some(target) = outcome.edit_text
+                    && let Some(view_ref) = self.workspace.view_mut(view)
+                {
+                    view_ref.canvas.start_edit(target);
+                    self.workspace.active_view = Some(view);
+                }
                 if let Some(message) = outcome.message {
                     self.notify(ctx, NoticeLevel::Info, message);
                 }

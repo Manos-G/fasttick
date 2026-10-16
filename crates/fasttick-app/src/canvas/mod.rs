@@ -38,6 +38,8 @@
 //! // Each frame: show(ui, &mut state, &runtime);
 //! ```
 
+pub mod annotate;
+pub mod annotate_paint;
 pub mod card;
 pub mod categories;
 pub mod connect;
@@ -63,7 +65,7 @@ pub use model::{
 pub use paint::EdgeStyle;
 pub use viewport::Viewport;
 pub use widget::{
-    CanvasEvent, CanvasOutput, CanvasState, CanvasStats, Detail, NodeMenu, TreeCanvas,
+    CanvasEvent, CanvasOutput, CanvasState, CanvasStats, Detail, EditTarget, NodeMenu, TreeCanvas,
     condition_frame,
 };
 pub use xml_build::{ProjectCategories, category_of_kind};

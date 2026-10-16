@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 
 use fasttick_core::bt::NodeView;
+use fasttick_core::bt::annotations::{node_group, node_note, tree_groups, tree_notes};
 use fasttick_core::models::NodeKind;
 use fasttick_core::project::{FileId, Project};
 use fasttick_core::validate::{Problem, Severity};
@@ -107,6 +108,11 @@ impl CanvasTree {
                 .filter(|p| *p != [0.0, 0.0])
         };
 
+        let tree_doc = bt_file.doc();
+        let groups = tree_groups(tree_doc, entry.element);
+        let notes = tree_notes(tree_doc, entry.element);
+        let defined = |id: u32| groups.iter().any(|g| g.id == id);
+
         let mut builder = CanvasTreeBuilder::new();
         // The trees of the expanded SubTrees on the current path, to stop
         // cycles: (file, tree ID).
@@ -145,6 +151,10 @@ impl CanvasTree {
             let label = view.instance_name().unwrap_or(type_id);
             let mut canvas_node = CanvasNode::new(source, label, type_id);
             canvas_node.inline = inline;
+            canvas_node.note = node_note(doc, node_id).map(str::to_owned);
+            if !inline {
+                canvas_node.group = node_group(doc, node_id).filter(|id| defined(*id));
+            }
             canvas_node.detached = parent.is_none() && Some(node_id) != main_root;
             if canvas_node.detached {
                 canvas_node.free_position = free_position(node_id);
@@ -237,6 +247,17 @@ impl CanvasTree {
                     .count()
                     .saturating_sub(1);
                 canvas_node.folded = Some(hidden);
+                if !inline {
+                    let mut hidden_groups: Vec<u32> = doc
+                        .descendants(view.id())
+                        .skip(1)
+                        .filter_map(|n| node_group(doc, n))
+                        .filter(|id| defined(*id) && canvas_node.group != Some(*id))
+                        .collect();
+                    hidden_groups.sort_unstable();
+                    hidden_groups.dedup();
+                    canvas_node.hidden_groups = hidden_groups;
+                }
                 builder.push(parent, canvas_node);
             } else {
                 let id = builder.push(parent, canvas_node);
@@ -250,7 +271,10 @@ impl CanvasTree {
                 }
             }
         }
-        builder.finish(title)
+        let mut tree = builder.finish(title);
+        tree.groups = groups;
+        tree.notes = notes;
+        tree
     }
 
     /// Marks the nodes that have problems. A node keeps its most severe

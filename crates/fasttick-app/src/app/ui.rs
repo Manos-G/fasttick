@@ -273,6 +273,7 @@ impl FastTickApp {
             self.menu_item(ui, Command::Duplicate);
             self.menu_item(ui, Command::Delete);
             self.menu_item(ui, Command::DeleteWithChildren);
+            self.menu_item(ui, Command::NewGroup);
             ui.separator();
             self.menu_item(ui, Command::SelectAll);
             self.menu_item(ui, Command::AddNode);

@@ -18,10 +18,15 @@ impl FastTickApp {
             Command::Cut
             | Command::Copy
             | Command::Duplicate
-            | Command::Delete
-            | Command::DeleteWithChildren => self
+            | Command::DeleteWithChildren
+            | Command::NewGroup => self
                 .active_edit_view()
                 .is_some_and(|v| !crate::edit_ops::selected_nodes(&self.workspace, v).is_empty()),
+            // Delete also deletes a selected group or note.
+            Command::Delete => self.active_edit_view().is_some_and(|v| {
+                !crate::edit_ops::selected_nodes(&self.workspace, v).is_empty()
+                    || self.selected_annotation(v).is_some()
+            }),
             Command::Paste => self.active_edit_view().is_some() && self.clipboard.is_some(),
             Command::AddNode => self.active_edit_view().is_some() && self.add_popup.is_none(),
             Command::SearchCommands => self.command_search.is_none(),
@@ -308,9 +313,16 @@ impl FastTickApp {
             | Command::Paste
             | Command::Duplicate
             | Command::Delete
-            | Command::DeleteWithChildren => {
+            | Command::DeleteWithChildren
+            | Command::NewGroup => {
                 if let Some(view) = self.active_edit_view() {
+                    let nodes = !crate::edit_ops::selected_nodes(&self.workspace, view).is_empty();
                     let op = match command {
+                        Command::Delete if !nodes => match self.selected_annotation(view) {
+                            Some(op) => op,
+                            None => return,
+                        },
+                        Command::NewGroup => EditOp::NewGroup,
                         Command::Undo => EditOp::Undo,
                         Command::Redo => EditOp::Redo,
                         Command::Cut => EditOp::Cut,
@@ -326,6 +338,16 @@ impl FastTickApp {
                 }
             }
         }
+    }
+
+    /// The delete operation for the group or the note that is selected in
+    /// a view.
+    fn selected_annotation(&self, view: crate::documents::ViewId) -> Option<EditOp> {
+        let canvas = &self.workspace.view(view)?.canvas;
+        if let Some(note) = canvas.selected_note() {
+            return Some(EditOp::DeleteCanvasNote(note));
+        }
+        canvas.selected_group().map(EditOp::DeleteGroup)
     }
 
     pub(super) fn with_replay(&mut self, f: impl FnOnce(&mut ReplayModel)) {

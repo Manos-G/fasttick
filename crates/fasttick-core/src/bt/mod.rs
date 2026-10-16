@@ -52,6 +52,7 @@
 //! assert_eq!(file.node_index_path(sub.id()), Some((0, vec![0, 1])));
 //! ```
 
+pub mod annotations;
 mod attr;
 mod file;
 mod index;

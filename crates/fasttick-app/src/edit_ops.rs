@@ -6,14 +6,17 @@
 //! [`EditorDoc`](crate::editor::EditorDoc) of the view. The result says
 //! which nodes to select. All XML logic stays in the core crate.
 
+use std::collections::HashSet;
+
 use fasttick_core::bt::NodeView;
+use fasttick_core::bt::annotations::{DEFAULT_NOTE_SIZE, NOTE_ATTRIBUTE, TreeAnnotation};
 use fasttick_core::edit::{CoalesceKey, Condition, copy};
 use fasttick_core::models::{ModelSource, NodeModel};
 use fasttick_core::project::FileId;
 use fasttick_core::runtime::InstanceIndex;
 use fasttick_core::xml::NodeId;
 
-use crate::canvas::NodeSource;
+use crate::canvas::{EditTarget, NodeSource};
 use crate::documents::{ViewId, Workspace};
 use crate::editor::EditorDoc;
 
@@ -128,6 +131,78 @@ pub enum EditOp {
         /// The value.
         value: Option<bool>,
     },
+    /// Sets the note of a node (the `_note` attribute); `None` or a blank
+    /// text removes it.
+    SetNote {
+        /// The node.
+        node: NodeId,
+        /// The note.
+        note: Option<String>,
+    },
+    /// Makes a new group of the selected nodes. Its title opens for
+    /// editing.
+    NewGroup,
+    /// Removes the selected nodes from their groups.
+    RemoveFromGroup,
+    /// Sets the members of a group of the tree of the view.
+    SetGroupMembers {
+        /// The group ID.
+        group: u32,
+        /// The new members.
+        nodes: Vec<NodeId>,
+    },
+    /// Sets the title of a group.
+    SetGroupTitle {
+        /// The group ID.
+        group: u32,
+        /// The title.
+        title: String,
+    },
+    /// Sets the description of a group.
+    SetGroupDescription {
+        /// The group ID.
+        group: u32,
+        /// The description.
+        description: String,
+    },
+    /// Sets the color of a group (`None`: the default).
+    SetGroupColor {
+        /// The group ID.
+        group: u32,
+        /// The color name.
+        color: Option<String>,
+    },
+    /// Deletes a group (the nodes stay).
+    DeleteGroup(u32),
+    /// Adds an empty canvas note with its top-left corner at `at` (world
+    /// units). Its text opens for editing.
+    AddCanvasNote {
+        /// The top-left corner.
+        at: [f32; 2],
+    },
+    /// Sets the text of a canvas note.
+    SetCanvasNoteText {
+        /// The note ID.
+        note: u32,
+        /// The text.
+        text: String,
+    },
+    /// Moves or resizes a canvas note.
+    SetCanvasNoteBox {
+        /// The note ID.
+        note: u32,
+        /// Left, top, width, height (world units).
+        rect: [f32; 4],
+    },
+    /// Sets the color of a canvas note (`None`: the default).
+    SetCanvasNoteColor {
+        /// The note ID.
+        note: u32,
+        /// The color name.
+        color: Option<String>,
+    },
+    /// Deletes a canvas note.
+    DeleteCanvasNote(u32),
     /// Changes the type of a node and keeps its attributes.
     ChangeType {
         /// The node.
@@ -190,6 +265,9 @@ pub struct EditOutcome {
     pub show_tree: Option<InstanceIndex>,
     /// A short message for the status line or a notice.
     pub message: Option<String>,
+    /// A text to open in the in-place editor of the canvas (a new group
+    /// or note).
+    pub edit_text: Option<EditTarget>,
 }
 
 /// The file of the tree that an edit view shows.
@@ -363,11 +441,19 @@ fn paste(
                 .file(file)
                 .map(|f| f.doc().element_children(parent).count())
                 .unwrap_or(0);
-            editor.edit(|ed| ed.paste(file, text, parent, index))
+            editor.edit(|ed| {
+                let pasted = ed.paste(file, text, parent, index)?;
+                ed.keep_groups_in_place(file, &pasted)?;
+                Ok(pasted)
+            })
         }
         None => {
             let tree_id = tree_id.ok_or("the view shows no tree")?;
-            editor.edit(|ed| ed.paste_unconnected(file, &tree_id, text, [0.0, 0.0]))
+            editor.edit(|ed| {
+                let pasted = ed.paste_unconnected(file, &tree_id, text, [0.0, 0.0])?;
+                ed.keep_groups_in_place(file, &pasted)?;
+                Ok(pasted)
+            })
         }
     }
 }
@@ -401,6 +487,47 @@ fn card_positions(
         .collect()
 }
 
+/// The nodes of a drop on an empty place whose card centre lands in the
+/// box of their own group: they stay in the group.
+fn dropped_in_their_group(
+    workspace: &Workspace,
+    view: ViewId,
+    nodes: &[NodeId],
+    positions: &[[f32; 2]],
+) -> HashSet<NodeId> {
+    let (Some(file), Some(view)) = (view_file(workspace, view), workspace.view(view)) else {
+        return HashSet::new();
+    };
+    let canvas = &view.canvas;
+    nodes
+        .iter()
+        .zip(positions)
+        .filter(|(node, position)| {
+            let Some(id) = canvas.tree().find_source(NodeSource::Xml(file, **node)) else {
+                return false;
+            };
+            let (Some(canvas_node), Some(rect)) = (canvas.tree().get(id), canvas.layout().rect(id))
+            else {
+                return false;
+            };
+            let Some(group) = canvas_node.group else {
+                return false;
+            };
+            let centre = egui::pos2(position[0], position[1]) + rect.size() * 0.5;
+            canvas
+                .group_boxes()
+                .iter()
+                .any(|g| g.id == group && g.rect.contains(centre))
+        })
+        .map(|(node, _)| *node)
+        .collect()
+}
+
+/// The `<BehaviorTree>` element of a tree.
+fn tree_element(editor: &EditorDoc, file: FileId, tree: &str) -> Option<NodeId> {
+    editor.project().file(file)?.tree(tree).map(|t| t.element)
+}
+
 /// The tree ID that a view shows.
 fn view_tree_id(workspace: &Workspace, view: ViewId) -> Option<String> {
     let view_ref = workspace.view(view)?;
@@ -424,6 +551,13 @@ pub fn run(
         _ => Default::default(),
     };
     let place_of = |node: &NodeId| positions.get(node).copied().unwrap_or(AUTO_POSITION);
+    // Unconnected nodes that the user drops inside their group stay in it.
+    let stay_in_group = match &op {
+        EditOp::DisconnectNodes { nodes, positions } => {
+            dropped_in_their_group(workspace, view, nodes, positions)
+        }
+        _ => HashSet::new(),
+    };
     let takes_children = primary_takes_children(workspace, view);
     let tree_id = view_tree_id(workspace, view);
     let file = view_file(workspace, view).ok_or("the view is closed")?;
@@ -470,7 +604,10 @@ pub fn run(
             if selected.is_empty() {
                 return Err("Select the nodes to delete.".into());
             }
-            editor.edit(|ed| ed.delete_nodes(file, &selected))?;
+            editor.edit(|ed| {
+                ed.delete_nodes(file, &selected)?;
+                ed.remove_empty_groups(file)
+            })?;
         }
         EditOp::DeleteKeepChildren => {
             if selected.is_empty() {
@@ -481,6 +618,7 @@ pub fn run(
                 for node in &kept {
                     ed.set_unconnected_position(file, *node, place_of(node))?;
                 }
+                ed.remove_empty_groups(file)?;
                 Ok(kept)
             })?;
         }
@@ -491,7 +629,10 @@ pub fn run(
             let text = copy(editor.project(), file, &selected).map_err(|err| err.to_string())?;
             *clipboard = Some(text);
             if matches!(op, EditOp::Cut) {
-                editor.edit(|ed| ed.delete_nodes(file, &selected))?;
+                editor.edit(|ed| {
+                    ed.delete_nodes(file, &selected)?;
+                    ed.remove_empty_groups(file)
+                })?;
             }
         }
         EditOp::Paste => {
@@ -504,9 +645,11 @@ pub fn run(
                     match position_of(editor, file, node)
                         .filter(|_| !is_tree_root(editor, file, node))
                     {
-                        Some((parent, index)) => {
-                            editor.edit(|ed| ed.paste(file, &text, parent, index + 1))?
-                        }
+                        Some((parent, index)) => editor.edit(|ed| {
+                            let pasted = ed.paste(file, &text, parent, index + 1)?;
+                            ed.keep_groups_in_place(file, &pasted)?;
+                            Ok(pasted)
+                        })?,
                         None => paste(editor, file, tree_id, &text, None)?,
                     }
                 }
@@ -521,7 +664,11 @@ pub fn run(
             if selected.is_empty() {
                 return Err("Select the nodes to duplicate.".into());
             }
-            outcome.select = editor.edit(|ed| ed.duplicate(file, &selected))?;
+            outcome.select = editor.edit(|ed| {
+                let copies = ed.duplicate(file, &selected)?;
+                ed.keep_groups_in_place(file, &copies)?;
+                Ok(copies)
+            })?;
         }
         EditOp::Disconnect => {
             if selected.is_empty() {
@@ -565,7 +712,7 @@ pub fn run(
                     }
                     ed.move_node(file, *node, parent, index)?;
                 }
-                Ok(())
+                ed.keep_groups_in_place(file, &nodes)
             })?;
             outcome.select = nodes;
         }
@@ -583,7 +730,12 @@ pub fn run(
                         ed.disconnect(file, *node, position)?;
                     }
                 }
-                Ok(())
+                let leave: Vec<NodeId> = nodes
+                    .iter()
+                    .copied()
+                    .filter(|n| !stay_in_group.contains(n))
+                    .collect();
+                ed.keep_groups_in_place(file, &leave)
             })?;
             outcome.select = nodes;
         }
@@ -607,8 +759,20 @@ pub fn run(
             if selected.is_empty() {
                 return Err("Select the nodes for the new tree.".into());
             }
-            let created =
-                editor.edit(|ed| ed.create_subtree_from_selection(file, &selected, &new_id))?;
+            let created = editor.edit(|ed| {
+                let created = ed.create_subtree_from_selection(file, &selected, &new_id)?;
+                // The moved nodes leave the groups of the old tree.
+                let root = ed
+                    .project()
+                    .file(file)
+                    .and_then(|f| f.tree(&new_id))
+                    .and_then(|t| t.root);
+                if let Some(root) = root {
+                    ed.keep_groups_in_place(file, &[root])?;
+                }
+                ed.remove_empty_groups(file)?;
+                Ok(created)
+            })?;
             outcome.select = vec![created.subtree_node];
             outcome.message = Some(format!("Created the tree {new_id}."));
         }
@@ -642,6 +806,80 @@ pub fn run(
                 ),
                 None => ed.remove_attribute(file, node, "_autoremap"),
             })?;
+        }
+        EditOp::SetNote { node, note } => {
+            let key = CoalesceKey::attribute(file, node, NOTE_ATTRIBUTE);
+            editor.edit_coalesced(key, |ed| ed.set_node_note(file, node, note.as_deref()))?;
+        }
+        EditOp::NewGroup => {
+            if selected.is_empty() {
+                return Err("Select the nodes for the group.".into());
+            }
+            let tree = tree_id.ok_or("the view shows no tree")?;
+            let id = editor.edit(|ed| ed.create_group(file, &tree, &selected, "Group"))?;
+            outcome.edit_text = Some(EditTarget::GroupTitle(id));
+        }
+        EditOp::RemoveFromGroup => {
+            if selected.is_empty() {
+                return Err("Select the nodes to remove from their group.".into());
+            }
+            editor.edit(|ed| ed.remove_from_group(file, &selected))?;
+            outcome.select = selected;
+        }
+        EditOp::SetGroupMembers { group, nodes } => {
+            let tree = tree_id.ok_or("the view shows no tree")?;
+            editor.edit(|ed| ed.set_group_members(file, &tree, group, &nodes))?;
+        }
+        EditOp::SetGroupTitle { group, title } => {
+            let tree = tree_id.ok_or("the view shows no tree")?;
+            let element = tree_element(editor, file, &tree).ok_or("the tree is gone")?;
+            let key =
+                CoalesceKey::attribute(file, element, &TreeAnnotation::GroupTitle(group).name());
+            editor.edit_coalesced(key, |ed| ed.set_group_title(file, &tree, group, &title))?;
+        }
+        EditOp::SetGroupDescription { group, description } => {
+            let tree = tree_id.ok_or("the view shows no tree")?;
+            let element = tree_element(editor, file, &tree).ok_or("the tree is gone")?;
+            let key = CoalesceKey::attribute(
+                file,
+                element,
+                &TreeAnnotation::GroupDescription(group).name(),
+            );
+            editor.edit_coalesced(key, |ed| {
+                ed.set_group_description(file, &tree, group, &description)
+            })?;
+        }
+        EditOp::SetGroupColor { group, color } => {
+            let tree = tree_id.ok_or("the view shows no tree")?;
+            editor.edit(|ed| ed.set_group_color(file, &tree, group, color.as_deref()))?;
+        }
+        EditOp::DeleteGroup(group) => {
+            let tree = tree_id.ok_or("the view shows no tree")?;
+            editor.edit(|ed| ed.delete_group(file, &tree, group))?;
+        }
+        EditOp::AddCanvasNote { at } => {
+            let tree = tree_id.ok_or("the view shows no tree")?;
+            let rect = [at[0], at[1], DEFAULT_NOTE_SIZE[0], DEFAULT_NOTE_SIZE[1]];
+            let id = editor.edit(|ed| ed.add_canvas_note(file, &tree, rect, ""))?;
+            outcome.edit_text = Some(EditTarget::Note(id));
+        }
+        EditOp::SetCanvasNoteText { note, text } => {
+            let tree = tree_id.ok_or("the view shows no tree")?;
+            let element = tree_element(editor, file, &tree).ok_or("the tree is gone")?;
+            let key = CoalesceKey::attribute(file, element, &TreeAnnotation::NoteText(note).name());
+            editor.edit_coalesced(key, |ed| ed.set_canvas_note_text(file, &tree, note, &text))?;
+        }
+        EditOp::SetCanvasNoteBox { note, rect } => {
+            let tree = tree_id.ok_or("the view shows no tree")?;
+            editor.edit(|ed| ed.set_canvas_note_box(file, &tree, note, rect))?;
+        }
+        EditOp::SetCanvasNoteColor { note, color } => {
+            let tree = tree_id.ok_or("the view shows no tree")?;
+            editor.edit(|ed| ed.set_canvas_note_color(file, &tree, note, color.as_deref()))?;
+        }
+        EditOp::DeleteCanvasNote(note) => {
+            let tree = tree_id.ok_or("the view shows no tree")?;
+            editor.edit(|ed| ed.delete_canvas_note(file, &tree, note))?;
         }
         EditOp::ChangeType { node, type_id } => {
             let model = editor

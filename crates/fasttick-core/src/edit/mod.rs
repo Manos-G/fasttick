@@ -64,6 +64,7 @@
 //! assert_eq!(doc.attribute(sleep, "msec"), Some("100"));
 //! ```
 
+mod annotations;
 mod clipboard;
 mod editor;
 mod error;
@@ -75,6 +76,7 @@ mod transaction;
 mod trees;
 mod unconnected;
 
+pub use annotations::{group_members, tree_annotations, tree_nodes};
 pub use clipboard::{DUPLICATE_OFFSET, copy};
 pub use editor::{
     Applied, Editor, NodePlace, StructurePolicy, node_place, parent_rule, run, top_most,

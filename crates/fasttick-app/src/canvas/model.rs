@@ -19,6 +19,7 @@
 //! its only child) or collapsed. The builder takes the set of expanded
 //! SubTree nodes ([`Expansion`]).
 
+use fasttick_core::bt::annotations::{CanvasNoteInfo, GroupInfo};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
@@ -311,6 +312,14 @@ pub struct CanvasNode {
     /// its card (world units). The layout puts the node (with its subtree)
     /// there. `None`: the layout chooses the place.
     pub free_position: Option<[f32; 2]>,
+    /// The note of the node (the `_note` attribute), if it is not blank.
+    pub note: Option<String>,
+    /// The group of the node (the `_group` attribute), if the tree
+    /// defines that group. Always `None` for inline nodes.
+    pub group: Option<u32>,
+    /// The groups of the hidden descendants of a folded node: the canvas
+    /// draws these groups around the folded node.
+    pub hidden_groups: Vec<u32>,
     /// The decorations.
     pub deco: Decorations,
     /// Display text and size. Empty until the canvas measures the tree.
@@ -339,6 +348,9 @@ impl CanvasNode {
             inline: false,
             detached: false,
             free_position: None,
+            note: None,
+            group: None,
+            hidden_groups: Vec::new(),
             deco: Decorations::default(),
             card: CardText::default(),
         }
@@ -539,6 +551,10 @@ impl CanvasTreeBuilder {
 pub struct CanvasTree {
     /// The tree ID of the root tree.
     pub title: String,
+    /// The groups of the tree (edit mode), by ID.
+    pub groups: Vec<GroupInfo>,
+    /// The canvas notes of the tree (edit mode), by ID.
+    pub notes: Vec<CanvasNoteInfo>,
     nodes: Vec<CanvasNode>,
     by_uid: HashMap<Uid, CanvasNodeId>,
     by_source: HashMap<NodeSource, CanvasNodeId>,
@@ -563,6 +579,8 @@ impl CanvasTree {
         }
         CanvasTree {
             title,
+            groups: Vec::new(),
+            notes: Vec::new(),
             nodes,
             by_uid,
             by_source,

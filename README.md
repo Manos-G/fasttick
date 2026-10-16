@@ -5,7 +5,7 @@ FastTick is a fast tree editor and debugger for
 It is a desktop application. Use it to write behavior trees, to debug a running
 executor, and to replay log files. All features are free.
 
-Status: version 0.1.2. See the [user guide](docs/USER_GUIDE.md) and the
+Status: version 0.1.3. See the [user guide](docs/USER_GUIDE.md) and the
 demo notes [M1](docs/demo/M1.md), [M2](docs/demo/M2.md),
 [M3](docs/demo/M3.md) and [M4](docs/demo/M4.md).
 
@@ -32,6 +32,10 @@ demo notes [M1](docs/demo/M1.md), [M2](docs/demo/M2.md),
   stay where they are, as unconnected nodes; connect them again from the
   dot on top of each one. Fold large subtrees. Find the
   nodes that use a blackboard key.
+- Notes and groups, saved in the XML file: a note on a node, groups with a
+  title and a description around some nodes (drag a side of the box to
+  change the nodes in it; the box snaps around them), and text notes at
+  free places on the canvas. BT.CPP ignores these attributes.
 - Open, edit and save the files of a robot over SSH (File > Open from
   robot). FastTick uses the `ssh` program of the system and warns if a file
   changed on the robot. A command can restart the robot program after a

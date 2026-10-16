@@ -1,5 +1,6 @@
 //! Side panels. One function for each panel; [`show_panel`] picks it.
 
+pub mod annotation_editor;
 pub mod blackboard;
 pub mod breakpoints;
 pub mod inspector;

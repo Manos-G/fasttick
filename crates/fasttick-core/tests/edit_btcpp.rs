@@ -169,3 +169,60 @@ fn moved_pasted_and_unconnected_nodes_run() {
     p.save_file(f).unwrap();
     assert_eq!(run(&path).unwrap(), "SUCCESS");
 }
+
+#[test]
+fn notes_and_groups_do_not_change_the_run() {
+    let _harness = require_harness!();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tree.xml");
+    fs::write(&path, TREE).unwrap();
+    let mut p = Project::open_xml(&path).unwrap();
+    let f = p.file_id_by_path(&path).unwrap();
+    let main = named(&p, f, "main");
+    let seven = named(&p, f, "seven");
+    let mut history = History::new();
+    history
+        .run(&mut p, |ed| {
+            ed.create_subtree_from_selection(
+                f,
+                &[
+                    named(ed.project(), f, "two"),
+                    named(ed.project(), f, "three"),
+                ],
+                "Inc",
+            )
+        })
+        .unwrap();
+    let sub = tag(&p, f, "SubTree");
+    let inner = named(&p, f, "two");
+    history
+        .run(&mut p, |ed| {
+            // Notes on a control node, an action and a SubTree node.
+            ed.set_node_note(f, main, Some("The main sequence.\nIt counts."))?;
+            ed.set_node_note(f, seven, Some("Adds \"7\" & <more>"))?;
+            ed.set_node_note(f, sub, Some("Two counters"))?;
+            // Groups in both trees; a SubTree node is a member.
+            let group = ed.create_group(f, "Main", &[sub, seven], "Counters")?;
+            ed.set_group_description(f, "Main", group, "Two and three, then seven.")?;
+            ed.set_group_color(f, "Main", group, Some("green"))?;
+            ed.create_group(f, "Inc", &[inner], "Inner")?;
+            // Canvas notes on both <BehaviorTree> elements.
+            ed.add_canvas_note(f, "Main", [300.0, -40.0, 200.0, 80.0], "Read me")?;
+            ed.add_canvas_note(f, "Inc", [0.0, 200.0, 150.0, 60.0], "Inner\nnote")?;
+            Ok(())
+        })
+        .unwrap();
+    p.save_file(f).unwrap();
+    let text = fs::read_to_string(&path).unwrap();
+    for part in [
+        r#"_note="The main sequence.&#10;It counts.""#,
+        r#"_note="Adds &quot;7&quot; &amp; &lt;more&gt;""#,
+        r#"_group="1""#,
+        r#"_group_1="Counters""#,
+        r#"_note_1="Read me" _note_1_box="300 -40 200 80""#,
+    ] {
+        assert!(text.contains(part), "{part} is not in\n{text}");
+    }
+    // BT.CPP 4.9 loads the file and the result is the same.
+    assert_eq!(run(&path).unwrap(), "SUCCESS", "{text}");
+}

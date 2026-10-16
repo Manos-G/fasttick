@@ -210,6 +210,26 @@ pub fn edit_menu(
             ui.close();
         }
     }
+    ui.separator();
+    if ui
+        .button("New group")
+        .on_hover_text(
+            "Put a box with a title and a description around the selected nodes (Ctrl+G).",
+        )
+        .clicked()
+    {
+        edit(EditOp::NewGroup);
+        ui.close();
+    }
+    if node.group.is_some()
+        && ui
+            .button("Remove from group")
+            .on_hover_text("Take the selected nodes out of their group.")
+            .clicked()
+    {
+        edit(EditOp::RemoveFromGroup);
+        ui.close();
+    }
     if ui
         .button("Create SubTree from selection…")
         .on_hover_text("Move the selected sibling nodes to a new tree.")

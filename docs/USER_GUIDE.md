@@ -288,8 +288,10 @@ Other ways to add nodes:
   before…**, **Add sibling after…** (these open the search window),
   **Cut**, **Copy**, **Duplicate**,
   **Delete**, **Delete with children**, **Paste as child**, **Move up**,
-  **Move down**, **Disconnect** and **Create SubTree from selection…**.
-- Right-click an empty place to add or paste an unconnected node.
+  **Move down**, **Disconnect**, **New group** and **Create SubTree from
+  selection…**.
+- Right-click an empty place to add or paste an unconnected node, or to
+  add a note (see 3.9).
 - Alt+Left or Alt+Up moves the selected node before its previous sibling.
   Alt+Right or Alt+Down moves it after its next sibling.
 - Ctrl+C copies the selected nodes, Ctrl+X cuts them and Ctrl+V pastes
@@ -516,6 +518,77 @@ is active. FastTick goes to live mode and connects to the robot, on the
 port of the live bar (see 4.1). If the address is a name from your
 `~/.ssh/config` file (for example `Host robot` with `HostName
 192.168.1.20`), FastTick uses the `HostName`.
+
+### 3.9 Notes and groups
+
+You can add three kinds of notes to a tree. FastTick saves all of them in
+the XML file, as attributes that start with `_`. BT.CPP 4 ignores these
+attributes, so the tree runs the same. The notes go with the file: into
+version control, to the robot over SSH, and to other people.
+
+**Node notes.** Select a node. Type the note in the **Note** field of the
+**Inspector**. A small note mark shows on the top side of the card. Put
+the pointer on the card to read the note in the tooltip. To remove the
+note, delete its text. FastTick saves the note as `_note="…"` on the node.
+
+**Groups.** A group is a box around some nodes, with a title and a
+description:
+
+1. Select the nodes (Shift+click adds a node to the selection).
+2. Right-click one of them and select **New group** (or push Ctrl+G, or
+   select **Edit** > **New group**).
+3. Type the title and push Enter.
+
+To change the nodes in a group, drag a side or a corner of its box. A
+dashed line shows the area, and a blue box shows where the group snaps.
+When you release the mouse button, FastTick puts into the group the nodes
+whose cards have their middle in the area. Then it makes the box go
+around these cards with the correct margin. If a card of another node is
+then in the box and the layout cannot move it out (for example, it is
+between two nodes of the group), it goes into the group too. Push Escape
+during the drag to cancel it. A group must have one node or more: a box
+with no card in it changes nothing.
+
+- Click the title of a group to select the group. The **Inspector** shows
+  its title, description and color, and **Delete group**.
+- Double-click the title (or the description) to change it on the canvas.
+  Push Enter (title) or click outside the field to end the edit.
+- Right-click the title for **Edit title**, **Edit description**,
+  **Color**, **Select the nodes** and **Delete group**. Delete removes a
+  selected group too. The nodes stay.
+- Right-click a node in a group and select **Remove from group**.
+- A node can be in one group only. A new group takes the selected nodes
+  from their old groups.
+- The layout keeps the cards of other nodes out of a group box, and keeps
+  two boxes apart. A box goes around a folded node that hides members of
+  the group.
+- If you move a node of a group to a new place (a drag, a paste), it stays
+  in the group only if it lands next to another node of the group, or if
+  the whole group moves with it. A group without nodes goes away.
+
+FastTick saves a group as `_group="1"` on each node, and `_group_1="title"`,
+`_group_1_description="…"` and `_group_1_color="green"` on the
+`<BehaviorTree>` element.
+
+**Canvas notes.** A canvas note is a text box at a free place on the
+canvas, for example a to-do or an explanation of a part of the tree.
+
+1. Right-click an empty place of the canvas and select **New note**.
+2. Type the text. Push Escape or click outside the note to end the edit.
+
+- Drag the note to move it. Drag a side or a corner to change its size.
+  The note gets higher if the text needs more lines.
+- Double-click the note to change the text. Select the note to change the
+  text and the color in the **Inspector**.
+- Right-click the note for **Edit text**, **Color** and **Delete note**,
+  or select it and push Delete.
+
+FastTick saves a canvas note as `_note_1="text"` and
+`_note_1_box="x y width height"` on the `<BehaviorTree>` element.
+
+All changes to notes and groups are undo steps (Ctrl+Z). The image export
+(see 2.3) shows the groups, the canvas notes and the note marks. Live and
+replay mode do not show notes and groups: the executor does not send them.
 
 ## 4. Live mode
 

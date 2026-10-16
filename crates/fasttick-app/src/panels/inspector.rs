@@ -5,7 +5,7 @@
 use egui::{RichText, Ui};
 use fasttick_core::status::NodeStatus;
 
-use super::{PanelContext, node_editor};
+use super::{PanelContext, annotation_editor, node_editor};
 use crate::canvas::NodeSource;
 
 /// Draws the inspector.
@@ -20,6 +20,37 @@ pub fn show(ui: &mut Ui, cx: &mut PanelContext<'_>) {
         .is_none_or(|d| d.mode() != cx.mode)
     {
         empty(ui, "No document in this mode.");
+        return;
+    }
+    // A selected group or canvas note.
+    let editable = cx
+        .workspace
+        .doc(view.doc)
+        .is_some_and(|d| d.editor.is_some());
+    let annotation = (view.canvas.selected_group(), view.canvas.selected_note());
+    if annotation != (None, None) {
+        let view_id = view.id;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| match annotation {
+                (Some(group), _) => annotation_editor::show_group(
+                    ui,
+                    view_id,
+                    &view.canvas,
+                    group,
+                    editable,
+                    cx.actions,
+                ),
+                (_, Some(note)) => annotation_editor::show_note(
+                    ui,
+                    view_id,
+                    &view.canvas,
+                    note,
+                    editable,
+                    cx.actions,
+                ),
+                _ => {}
+            });
         return;
     }
     let tree = view.canvas.tree();

@@ -4,7 +4,7 @@ members = ["crates/*"]
 default-members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/Manos-G/fasttick"
@@ -13,10 +13,10 @@ authors = ["The FastTick contributors"]
 
 [workspace.dependencies]
 # Internal crates
-fasttick-core = { path = "crates/fasttick-core", version = "0.1.2" }
-fasttick-protocol = { path = "crates/fasttick-protocol", version = "0.1.2" }
-fasttick-log = { path = "crates/fasttick-log", version = "0.1.2" }
-fasttick-testkit = { path = "crates/fasttick-testkit", version = "0.1.2" }
+fasttick-core = { path = "crates/fasttick-core", version = "0.1.3" }
+fasttick-protocol = { path = "crates/fasttick-protocol", version = "0.1.3" }
+fasttick-log = { path = "crates/fasttick-log", version = "0.1.3" }
+fasttick-testkit = { path = "crates/fasttick-testkit", version = "0.1.3" }
 
 # Libraries
 quick-xml = "0.42"

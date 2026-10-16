@@ -57,6 +57,18 @@ data. It gives:
   - all other attributes: ports (or SubTree remappings).
 - Port values: a literal, a blackboard reference `{key}`, or `{=}` (same name
   as the port). `PortValue::parse` gives the kind.
+- Annotations (`bt::annotations`): notes and groups are attributes that
+  BT.CPP ignores, so they stay in the XML file. A node note is `_note` on a
+  tree node. A group is `_group="<id>"` on each member, with `_group_<id>`
+  (title), `_group_<id>_description` and `_group_<id>_color` on the
+  `<BehaviorTree>` element. A canvas note is `_note_<id>` (text) and
+  `_note_<id>_box` (`"x y width height"`) on the `<BehaviorTree>` element.
+  BT.CPP 4.9 puts a node attribute that starts with `_` and is not
+  reserved into `other_attributes` (a `<SubTree>` skips it), and reads
+  only `ID` from a `<BehaviorTree>` element. The edit commands
+  (`edit::annotations`) keep groups tidy: a moved node stays in its group
+  only next to another member (or with the whole group), and a group
+  without members goes away.
 
 ### 2.3 Project (`project`)
 
@@ -130,6 +142,13 @@ in `docs/PLAN.md` section 4.
 Input: a tree of node sizes (the GUI measures the text). Output: a position for
 each node. Algorithm: tidy tree with variable node sizes, linear or
 `O(n log n)` time. Directions: top-down and left-right.
+
+Groups: the GUI gives each card extra space (`canvas::annotate::padding`):
+the margin around the members and the header above them (on the depth
+axis for whole levels, because the layout is layered). Then it runs up to
+four more passes: the header heights for the new box widths, and more
+space where a card of another node is still in a box
+(`canvas::annotate::push_out`).
 
 ## 3. GUI
 

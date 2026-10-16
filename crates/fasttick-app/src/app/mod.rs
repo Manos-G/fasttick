@@ -687,6 +687,54 @@ impl Viewer<'_> {
                         });
                     }
                 }
+                CanvasEvent::SetGroupMembers { group, nodes } => {
+                    let nodes = self.group_member_nodes(view_id, group, &nodes);
+                    if !nodes.is_empty() {
+                        self.actions.push(AppAction::Edit(
+                            view_id,
+                            EditOp::SetGroupMembers { group, nodes },
+                        ));
+                    }
+                }
+                CanvasEvent::SetGroupTitle { group, title } => self.actions.push(AppAction::Edit(
+                    view_id,
+                    EditOp::SetGroupTitle { group, title },
+                )),
+                CanvasEvent::SetGroupDescription { group, description } => {
+                    self.actions.push(AppAction::Edit(
+                        view_id,
+                        EditOp::SetGroupDescription { group, description },
+                    ));
+                }
+                CanvasEvent::SetGroupColor { group, color } => self.actions.push(AppAction::Edit(
+                    view_id,
+                    EditOp::SetGroupColor { group, color },
+                )),
+                CanvasEvent::DeleteGroup(group) => self
+                    .actions
+                    .push(AppAction::Edit(view_id, EditOp::DeleteGroup(group))),
+                CanvasEvent::AddNote { at } => {
+                    self.workspace.active_view = Some(view_id);
+                    self.actions.push(AppAction::Edit(
+                        view_id,
+                        EditOp::AddCanvasNote { at: [at.x, at.y] },
+                    ));
+                }
+                CanvasEvent::SetNoteBox { note, rect } => self.actions.push(AppAction::Edit(
+                    view_id,
+                    EditOp::SetCanvasNoteBox { note, rect },
+                )),
+                CanvasEvent::SetNoteText { note, text } => self.actions.push(AppAction::Edit(
+                    view_id,
+                    EditOp::SetCanvasNoteText { note, text },
+                )),
+                CanvasEvent::SetNoteColor { note, color } => self.actions.push(AppAction::Edit(
+                    view_id,
+                    EditOp::SetCanvasNoteColor { note, color },
+                )),
+                CanvasEvent::DeleteNote(note) => self
+                    .actions
+                    .push(AppAction::Edit(view_id, EditOp::DeleteCanvasNote(note))),
                 CanvasEvent::DropNew { type_id, spot, at } => {
                     self.workspace.active_view = Some(view_id);
                     let op = match spot {
@@ -720,6 +768,42 @@ impl Viewer<'_> {
             NodeSource::Xml(_, xml) if !node.inline => Some(xml),
             _ => None,
         }
+    }
+
+    /// The XML nodes of new group members. A folded member keeps its hidden
+    /// descendants that are in the group.
+    fn group_member_nodes(
+        &self,
+        view: ViewId,
+        group: u32,
+        nodes: &[CanvasNodeId],
+    ) -> Vec<fasttick_core::xml::NodeId> {
+        let Some(view_ref) = self.workspace.view(view) else {
+            return Vec::new();
+        };
+        let editor = self
+            .workspace
+            .doc(view_ref.doc)
+            .and_then(|d| d.editor.as_deref());
+        let tree = view_ref.canvas.tree();
+        let mut out = Vec::new();
+        for id in nodes {
+            let Some(node) = tree.get(*id).filter(|n| !n.inline) else {
+                continue;
+            };
+            let NodeSource::Xml(file, xml) = node.source else {
+                continue;
+            };
+            out.push(xml);
+            if node.folded.is_some()
+                && let Some(doc) = editor.and_then(|e| e.project().file(file)).map(|f| f.doc())
+            {
+                out.extend(doc.descendants(xml).skip(1).filter(|n| {
+                    fasttick_core::bt::annotations::node_group(doc, *n) == Some(group)
+                }));
+            }
+        }
+        out
     }
 
     /// The edit operation for a move gesture. A drop on an empty place

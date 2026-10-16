@@ -40,6 +40,8 @@ pub enum Command {
     Delete,
     /// Delete the selected nodes with all their children.
     DeleteWithChildren,
+    /// Put a group box around the selected nodes.
+    NewGroup,
     /// Select all nodes.
     SelectAll,
     /// Add a node to the selected node (a search window asks for the type).
@@ -138,7 +140,7 @@ pub enum Command {
 
 impl Command {
     /// All commands, in help-dialog order.
-    pub const ALL: [Command; 61] = [
+    pub const ALL: [Command; 62] = [
         Command::NewProject,
         Command::OpenFile,
         Command::OpenLog,
@@ -157,6 +159,7 @@ impl Command {
         Command::Duplicate,
         Command::Delete,
         Command::DeleteWithChildren,
+        Command::NewGroup,
         Command::SelectAll,
         Command::AddNode,
         Command::MoveUp,
@@ -219,6 +222,7 @@ impl Command {
             Command::Duplicate => "Duplicate",
             Command::Delete => "Delete",
             Command::DeleteWithChildren => "Delete with children",
+            Command::NewGroup => "New group",
             Command::SelectAll => "Select all",
             Command::AddNode => "Add node\u{2026}",
             Command::Find => "Find\u{2026}",
@@ -290,6 +294,7 @@ impl Command {
             | Command::Duplicate
             | Command::Delete
             | Command::DeleteWithChildren
+            | Command::NewGroup
             | Command::SelectAll
             | Command::AddNode
             | Command::MoveUp
@@ -361,6 +366,23 @@ pub const CANVAS_HELP: &[(&str, &str)] = &[
         "Move it: onto a node, or onto an empty place to disconnect it",
     ),
     ("Escape during a drag", "Cancel the move"),
+    (
+        "Drag a side of a group (edit mode)",
+        "Change the nodes in the group; it snaps around them",
+    ),
+    (
+        "Double-click a group title",
+        "Edit the title or the description",
+    ),
+    (
+        "Right-click an empty place (edit mode)",
+        "Add a node or a note",
+    ),
+    (
+        "Drag a note (edit mode)",
+        "Move it; drag a side to resize it",
+    ),
+    ("Double-click a note", "Edit its text"),
     ("Drag a node (live, replay)", "Pan"),
     ("Double-click a SubTree", "Expand or collapse it"),
     ("Middle drag, Space + drag", "Pan"),
@@ -399,6 +421,7 @@ impl Default for KeyMap {
                 bind(Command::Duplicate, cmd, Key::D),
                 bind(Command::Delete, none, Key::Delete),
                 bind(Command::DeleteWithChildren, cmd, Key::Delete),
+                bind(Command::NewGroup, cmd, Key::G),
                 bind(Command::SelectAll, cmd, Key::A),
                 bind(Command::AddNode, Modifiers::SHIFT, Key::A),
                 bind(Command::MoveUp, Modifiers::ALT, Key::ArrowUp),

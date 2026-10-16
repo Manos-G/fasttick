@@ -182,6 +182,24 @@ pub fn layout(tree: &CanvasTree, direction: LayoutDirection) -> TreeLayout {
     TidyLayout.layout(tree, direction, &LayoutParams::for_direction(direction))
 }
 
+/// Like [`layout`], with extra space around each card: `padding[i]` is
+/// `[left, top, right, bottom]` for node `i` (world units; missing entries
+/// count as zero). The layout keeps the cards and their padding apart; the
+/// result has the card rectangles. The groups use it (see
+/// [`super::annotate::padding`]).
+pub fn layout_padded(
+    tree: &CanvasTree,
+    direction: LayoutDirection,
+    padding: &[[f32; 4]],
+) -> TreeLayout {
+    TidyLayout.layout_padded(
+        tree,
+        direction,
+        &LayoutParams::for_direction(direction),
+        padding,
+    )
+}
+
 /// The tidy-tree layout of `fasttick_core::layout`. The roots of the
 /// canvas tree (the tree and its unconnected nodes) form a forest; each
 /// root starts a new tree to the right (top-down) or below (left-right).
@@ -195,14 +213,34 @@ impl LayoutEngine for TidyLayout {
         direction: LayoutDirection,
         params: &LayoutParams,
     ) -> TreeLayout {
+        self.layout_padded(tree, direction, params, &[])
+    }
+}
+
+impl TidyLayout {
+    /// The layout with extra space around the cards (see
+    /// [`layout_padded`]).
+    pub fn layout_padded(
+        &self,
+        tree: &CanvasTree,
+        direction: LayoutDirection,
+        params: &LayoutParams,
+        padding: &[[f32; 4]],
+    ) -> TreeLayout {
         use fasttick_core::layout as core;
 
         let nodes = tree.nodes();
+        let pad_of =
+            |index: usize| -> [f32; 4] { padding.get(index).map_or([0.0; 4], |p| p.map(sanitize)) };
         let mut input = core::LayoutTree::with_capacity(nodes.len());
-        for node in nodes {
+        for (index, node) in nodes.iter().enumerate() {
             let size = node.card.size;
+            let [left, top, right, bottom] = pad_of(index);
             input.nodes.push(core::LayoutNode::with_children(
-                (sanitize(size.x), sanitize(size.y)),
+                (
+                    sanitize(size.x) + left + right,
+                    sanitize(size.y) + top + bottom,
+                ),
                 node.children.iter().map(|c| c.index()).collect(),
             ));
         }
@@ -232,7 +270,14 @@ impl LayoutEngine for TidyLayout {
             .map(|index| {
                 let position = result.positions[index];
                 let size = result.sizes[index];
-                Rect::from_min_size(pos2(position.x, position.y), vec2(size.x, size.y))
+                let [left, top, right, bottom] = pad_of(index);
+                Rect::from_min_size(
+                    pos2(position.x + left, position.y + top),
+                    vec2(
+                        (size.x - left - right).max(0.0),
+                        (size.y - top - bottom).max(0.0),
+                    ),
+                )
             })
             .collect();
         let mut node_bus = result.bus_positions;

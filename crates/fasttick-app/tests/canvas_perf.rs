@@ -140,3 +140,65 @@ fn frame_time_with_5000_nodes() {
     );
     assert!(m.ui < Duration::from_millis(400));
 }
+
+#[test]
+fn layout_with_groups_and_5000_nodes() {
+    use fasttick_app::canvas::card::FixedMeasure;
+    use fasttick_core::bt::annotations::GroupInfo;
+
+    let mut plain = CanvasState::new(synthetic_tree(5000, 6));
+    let start = Instant::now();
+    plain.prepare_with(&mut FixedMeasure(7.0));
+    let without = start.elapsed();
+
+    // 40 groups: the subtrees of the first 40 nodes of depth 3.
+    let mut tree = synthetic_tree(5000, 6);
+    let tops: Vec<_> = tree
+        .ids()
+        .filter(|id| tree.get(*id).unwrap().depth == 3)
+        .take(40)
+        .collect();
+    assert_eq!(tops.len(), 40);
+    for (group, top) in tops.iter().enumerate() {
+        let mut stack = vec![*top];
+        while let Some(id) = stack.pop() {
+            let node = tree.get_mut(id).unwrap();
+            node.group = Some(group as u32 + 1);
+            stack.extend(node.children.clone());
+        }
+    }
+    tree.groups = (1..=40)
+        .map(|id| GroupInfo {
+            id,
+            title: format!("Group {id}"),
+            description: "A description that is long enough for two lines in a box.".into(),
+            color: None,
+        })
+        .collect();
+    let mut state = CanvasState::new(tree);
+    let start = Instant::now();
+    state.prepare_with(&mut FixedMeasure(7.0));
+    let with = start.elapsed();
+    println!("layout of 5000 nodes: {without:?} without groups, {with:?} with 40 groups");
+    assert_eq!(state.group_boxes().len(), 40);
+    // The extra passes cost a few layouts, not more.
+    assert!(
+        with < without * 12 + Duration::from_millis(200),
+        "{with:?} with groups, {without:?} without"
+    );
+    // No card of another node is in a box (the layout pushed them out),
+    // except cards between members of their level.
+    for group in state.group_boxes() {
+        for (index, rect) in state.layout().rects.iter().enumerate() {
+            let node = &state.tree().nodes()[index];
+            if node.group.is_some() {
+                continue;
+            }
+            assert!(
+                !rect.intersects(group.rect),
+                "node {index} is in the box of group {}",
+                group.id
+            );
+        }
+    }
+}

@@ -20,6 +20,12 @@ const TWO_COLUMNS: f32 = 820.0;
 /// What is new in this version: a title and a short text.
 pub const WHATS_NEW: &[(&str, &str)] = &[
     (
+        "Notes and groups",
+        "Type a note for a node in the Inspector. Select nodes and push Ctrl+G for a \
+         group with a title and a description; drag its sides to change its nodes. \
+         Right-click an empty place for a note on the canvas. All are saved in the XML.",
+    ),
+    (
         "Add nodes from the dot",
         "Drag from the dot under a node and release where the new node must go, \
          or push Shift+A. A search window with fuzzy matching asks for the type; \

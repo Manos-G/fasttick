@@ -3,9 +3,10 @@
 //! The image shows the cards and edges as the canvas draws them at zoom 1:
 //! the category band and glyph, the label, the type line, the ports, the
 //! condition box, the statuses (live and replay) and the chips of collapsed
-//! SubTrees and folded nodes. It does not show the selection, the search
-//! matches, breakpoints or problem markers: they are editor state, not part
-//! of the tree.
+//! SubTrees and folded nodes, the groups, the canvas notes and the marks of
+//! node notes. It does not show the selection, the search matches,
+//! breakpoints or problem markers: they are editor state, not part of the
+//! tree.
 //!
 //! The glyphs and badges come from [`super::paint`], as egui shapes; this
 //! module writes those shapes as SVG elements. The text uses the font
@@ -18,6 +19,8 @@ use egui::epaint::{ColorMode, PathStroke};
 use egui::{Color32, CornerRadius, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2, pos2, vec2};
 use fasttick_core::status::NodeStatus;
 
+use super::annotate::{GroupBox, NoteBox, TEXT_LINE, TEXT_PAD, TITLE_LINE};
+use super::annotate_paint;
 use super::card::{self, CardGeometry, TextKind, TextMeasure};
 use super::layout::{LayoutDirection, TreeLayout};
 use super::model::{CanvasNodeId, CanvasTree, CardEntry, NodeCategory};
@@ -34,6 +37,15 @@ const TEXT_FONT: &str = "Roboto, 'Helvetica Neue', Arial, sans-serif";
 /// The font of port values.
 const MONO_FONT: &str = "'DejaVu Sans Mono', 'Liberation Mono', Consolas, monospace";
 
+/// The groups and the canvas notes of an SVG image.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Annotations<'a> {
+    /// The group boxes, the largest first.
+    pub groups: &'a [GroupBox],
+    /// The canvas notes.
+    pub notes: &'a [NoteBox],
+}
+
 /// Writes the tree as an SVG document. `measure` must measure text as the
 /// canvas did when it measured the cards (the continuation lines of a value
 /// start below its first character).
@@ -43,6 +55,7 @@ pub fn tree_svg(
     edge_style: EdgeStyle,
     palette: &CanvasPalette,
     measure: &mut dyn TextMeasure,
+    annotations: Annotations<'_>,
 ) -> String {
     let bounds = if layout.bounds.is_positive() {
         layout.bounds
@@ -64,7 +77,14 @@ pub fn tree_svg(
         h = num(view.height()),
     );
     let _ = writeln!(out, "<title>{}</title>", escape(&tree.title));
-    let mut shapes = vec![Shape::rect_filled(view, 0.0, palette.background)];
+    write_shapes(
+        &mut out,
+        &[Shape::rect_filled(view, 0.0, palette.background)],
+    );
+    for group in annotations.groups {
+        group_svg(&mut out, group, palette);
+    }
+    let mut shapes = Vec::new();
     edges(tree, layout, edge_style, palette, &mut shapes);
     write_shapes(&mut out, &shapes);
     for index in 0..tree.nodes().len() {
@@ -80,9 +100,106 @@ pub fn tree_svg(
             palette,
             measure,
         );
+        if tree.nodes()[index].note.is_some() {
+            note_mark_svg(&mut out, rect, palette);
+        }
+    }
+    for note in annotations.notes {
+        note_svg(&mut out, note, palette);
     }
     out.push_str("</svg>\n");
     out
+}
+
+/// A group box with its header.
+fn group_svg(out: &mut String, group: &GroupBox, palette: &CanvasPalette) {
+    let colors = annotate_paint::group_colors(group.color.as_deref(), palette);
+    let header = CornerRadius {
+        nw: 10,
+        ne: 10,
+        sw: 0,
+        se: 0,
+    };
+    write_shapes(
+        out,
+        &[
+            Shape::rect_filled(group.rect, 10.0, colors.fill),
+            Shape::rect_filled(group.header, header, colors.header),
+            Shape::rect_stroke(
+                group.rect,
+                10.0,
+                Stroke::new(1.0, colors.border),
+                StrokeKind::Inside,
+            ),
+        ],
+    );
+    let left = group.rect.min.x + TEXT_PAD;
+    let mut middle = group.rect.min.y + TEXT_PAD + TITLE_LINE * 0.5;
+    text_line(
+        out,
+        pos2(left, middle),
+        &[Span::new(&group.title, TextKind::Label, palette.text)],
+    );
+    middle += TITLE_LINE * 0.5 + 2.0 + TEXT_LINE * 0.5;
+    for line in &group.lines {
+        text_line(
+            out,
+            pos2(left, middle),
+            &[Span::new(line, TextKind::Type, palette.text_weak)],
+        );
+        middle += TEXT_LINE;
+    }
+}
+
+/// A canvas note.
+fn note_svg(out: &mut String, note: &NoteBox, palette: &CanvasPalette) {
+    let (fill, border) = annotate_paint::note_colors(note.color.as_deref(), palette);
+    let rect = note.rect;
+    let fold = 12.0_f32.min(rect.width() * 0.3).min(rect.height() * 0.3);
+    let corner = rect.right_top();
+    write_shapes(
+        out,
+        &[
+            Shape::rect_filled(rect, 4.0, fill),
+            Shape::convex_polygon(
+                vec![
+                    corner + vec2(-fold, 0.0),
+                    corner + vec2(0.0, fold),
+                    corner + vec2(-fold, fold),
+                ],
+                border,
+                Stroke::NONE,
+            ),
+            Shape::rect_stroke(rect, 4.0, Stroke::new(1.0, border), StrokeKind::Inside),
+        ],
+    );
+    let left = rect.min.x + TEXT_PAD;
+    let mut middle = rect.min.y + TEXT_PAD + TEXT_LINE * 0.5;
+    for line in &note.lines {
+        text_line(
+            out,
+            pos2(left, middle),
+            &[Span::new(line, TextKind::Type, palette.text)],
+        );
+        middle += TEXT_LINE;
+    }
+}
+
+/// The mark of a node with a note, on the top side of its card.
+fn note_mark_svg(out: &mut String, card: Rect, palette: &CanvasPalette) {
+    let (fill, border) = annotate_paint::note_colors(None, palette);
+    let mark = Rect::from_center_size(pos2(card.max.x - 20.0, card.min.y + 1.0), vec2(10.0, 11.0));
+    let line = Stroke::new(1.0, palette.text_weak);
+    let lines = (1..=2).map(|i| {
+        let y = mark.min.y + mark.height() * (i as f32) / 3.0;
+        Shape::line_segment([pos2(mark.min.x + 2.0, y), pos2(mark.max.x - 2.0, y)], line)
+    });
+    let mut shapes = vec![
+        Shape::rect_filled(mark, 1.0, fill),
+        Shape::rect_stroke(mark, 1.0, Stroke::new(1.0, border), StrokeKind::Inside),
+    ];
+    shapes.extend(lines);
+    write_shapes(out, &shapes);
 }
 
 /// The edges, as the canvas draws them at zoom 1.
@@ -716,6 +833,7 @@ mod tests {
             EdgeStyle::Orthogonal,
             &CanvasPalette::light(),
             &mut FixedMeasure(7.0),
+            Annotations::default(),
         );
         assert!(svg.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""));
         assert!(svg.trim_end().ends_with("</svg>"));

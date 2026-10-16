@@ -150,6 +150,27 @@ pub fn show(
     }
     let mut edit = |op: EditOp| actions.push(AppAction::Edit(view, op));
 
+    // Note.
+    ui.add_space(8.0);
+    let note_label = ui.label(RichText::new("Note").strong()).id;
+    let current_note = fasttick_core::bt::annotations::node_note(file.doc(), node).unwrap_or("");
+    let mut note_text = current_note.to_owned();
+    let response = ui
+        .add(
+            egui::TextEdit::multiline(&mut note_text)
+                .id_salt(("note", node))
+                .hint_text("A note for people. It is saved as _note; BT.CPP ignores it.")
+                .desired_rows(2)
+                .desired_width(ui.available_width()),
+        )
+        .labelled_by(note_label);
+    if response.changed() && note_text != current_note {
+        edit(EditOp::SetNote {
+            node,
+            note: Some(note_text),
+        });
+    }
+
     // Ports.
     ui.add_space(8.0);
     ui.label(

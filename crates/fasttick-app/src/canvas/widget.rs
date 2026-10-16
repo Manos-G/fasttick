@@ -23,6 +23,13 @@
 //! to disconnect it. A drag of a [`NewNodePayload`] (from the palette) adds
 //! a node. Escape cancels a move. The canvas only reports the gesture as a
 //! [`CanvasEvent`]; the owner changes the document.
+//!
+//! The canvas also draws the groups and the canvas notes of the tree (see
+//! [`super::annotate`]). In an editable canvas: click the header of a group
+//! or a note to select it; drag a side or a corner of a group to change
+//! the nodes in it (on release the group takes the cards inside and snaps
+//! around them); drag a note to move it, its sides to resize it; double-click
+//! a title, a description or a note to edit the text in place.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,6 +42,8 @@ use egui::{
 };
 use fasttick_core::status::NodeStatus;
 
+use super::annotate::{self, AnnotationText, GroupBox, GroupPart, NoteBox, NotePart, Sides};
+use super::annotate_paint::{self, AnnotationFonts};
 use super::card::{self, CardGeometry, TextKind, TextMeasure};
 use super::connect::{self, AttachEnd, ConnectEnd};
 use super::drop::{self, DropPlacement, DropSpot, NewNodePayload};
@@ -138,6 +147,86 @@ pub enum CanvasEvent {
         /// The screen position of the pointer, for the question.
         at: Pos2,
     },
+    /// The user resized a group: these are its new members (editable
+    /// canvas only; never empty).
+    SetGroupMembers {
+        /// The group ID.
+        group: u32,
+        /// The members, in tree order.
+        nodes: Vec<CanvasNodeId>,
+    },
+    /// The user edited the title of a group in place.
+    SetGroupTitle {
+        /// The group ID.
+        group: u32,
+        /// The title.
+        title: String,
+    },
+    /// The user edited the description of a group in place.
+    SetGroupDescription {
+        /// The group ID.
+        group: u32,
+        /// The description.
+        description: String,
+    },
+    /// The user picked a color for a group (`None`: the default).
+    SetGroupColor {
+        /// The group ID.
+        group: u32,
+        /// The color name.
+        color: Option<String>,
+    },
+    /// The user asked to delete a group (the nodes stay).
+    DeleteGroup(u32),
+    /// The user asked for a new canvas note at a world position.
+    AddNote {
+        /// The top-left corner of the note (world units).
+        at: Pos2,
+    },
+    /// The user moved or resized a canvas note.
+    SetNoteBox {
+        /// The note ID.
+        note: u32,
+        /// Left, top, width, height (world units).
+        rect: [f32; 4],
+    },
+    /// The user edited the text of a note in place.
+    SetNoteText {
+        /// The note ID.
+        note: u32,
+        /// The text.
+        text: String,
+    },
+    /// The user picked a color for a note (`None`: the default).
+    SetNoteColor {
+        /// The note ID.
+        note: u32,
+        /// The color name.
+        color: Option<String>,
+    },
+    /// The user asked to delete a note.
+    DeleteNote(u32),
+}
+
+/// The text that an in-place editor changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EditTarget {
+    /// The title of a group.
+    GroupTitle(u32),
+    /// The description of a group.
+    GroupDescription(u32),
+    /// The text of a canvas note.
+    Note(u32),
+}
+
+/// An in-place text editor on the canvas.
+#[derive(Debug, Clone, PartialEq)]
+struct InlineEdit {
+    target: EditTarget,
+    text: String,
+    /// The number of frames that the editor was shown (it asks for the
+    /// keyboard focus in the first one).
+    age: u8,
 }
 
 /// The result of [`TreeCanvas::show`].
@@ -205,6 +294,21 @@ enum DragMode {
     Attach {
         child: CanvasNodeId,
     },
+    /// A resize of a group box. `start` is the world position of the
+    /// press, `original` the box before the drag.
+    ResizeGroup {
+        group: u32,
+        sides: Sides,
+        start: Pos2,
+        original: Rect,
+    },
+    /// A move of a canvas note (`sides` empty) or a resize.
+    Note {
+        note: u32,
+        sides: Sides,
+        start: Pos2,
+        original: Rect,
+    },
 }
 
 /// Cached text layouts of the visible cards.
@@ -263,7 +367,19 @@ impl GalleyCache {
 pub struct CanvasState {
     tree: CanvasTree,
     layout: TreeLayout,
-    groups: Vec<(CanvasNodeId, Rect)>,
+    subtree_frames: Vec<(CanvasNodeId, Rect)>,
+    group_texts: HashMap<u32, AnnotationText>,
+    note_texts: HashMap<u32, AnnotationText>,
+    group_boxes: Vec<GroupBox>,
+    note_boxes: Vec<NoteBox>,
+    selected_group: Option<u32>,
+    selected_note: Option<u32>,
+    hovered_group: Option<(u32, GroupPart)>,
+    hovered_note: Option<(u32, NotePart)>,
+    context_group: Option<u32>,
+    context_note: Option<u32>,
+    context_point: Option<Pos2>,
+    editing: Option<InlineEdit>,
     edge_bounds: Vec<Option<Rect>>,
     direction: LayoutDirection,
     edge_style: EdgeStyle,
@@ -300,6 +416,28 @@ pub struct CanvasState {
     minimap_cache: Option<(u64, Arc<Mesh>)>,
 }
 
+/// How near (screen points) the pointer must be to the side of a group or
+/// a note to resize it.
+const ANNOTATION_GRAB_PX: f32 = 6.0;
+
+/// The box of a note during a drag: moved by `delta` (no sides) or
+/// resized. A move keeps the stored size.
+fn note_drag_rect(
+    state: &CanvasState,
+    note: u32,
+    sides: Sides,
+    original: Rect,
+    delta: Vec2,
+) -> Option<Rect> {
+    let stored = state.note_boxes.iter().find(|n| n.id == note)?.stored;
+    Some(if sides.is_empty() {
+        Rect::from_min_size(original.min + delta, stored.size())
+    } else {
+        let min = fasttick_core::bt::annotations::MIN_NOTE_SIZE;
+        sides.apply(original, delta, vec2(min[0], min[1]))
+    })
+}
+
 /// The duration of view animations, in seconds.
 const ANIMATION_SECONDS: f32 = 0.35;
 /// The duration of short animations (keyboard navigation), in seconds.
@@ -320,7 +458,19 @@ impl CanvasState {
             },
             tree,
             layout: TreeLayout::default(),
-            groups: Vec::new(),
+            subtree_frames: Vec::new(),
+            group_texts: HashMap::new(),
+            note_texts: HashMap::new(),
+            group_boxes: Vec::new(),
+            note_boxes: Vec::new(),
+            selected_group: None,
+            selected_note: None,
+            hovered_group: None,
+            hovered_note: None,
+            context_group: None,
+            context_note: None,
+            context_point: None,
+            editing: None,
             edge_bounds: Vec::new(),
             direction: LayoutDirection::default(),
             edge_style: EdgeStyle::default(),
@@ -393,9 +543,37 @@ impl CanvasState {
         self.primary = primary_source.and_then(|source| tree.find_source(source));
         self.hovered = None;
         self.context_target = None;
-        if matches!(self.drag, DragMode::Move { .. }) {
+        if matches!(
+            self.drag,
+            DragMode::Move { .. } | DragMode::ResizeGroup { .. } | DragMode::Note { .. }
+        ) {
             self.drag = DragMode::None;
         }
+        // A group or a note that is gone is not selected or edited any
+        // more.
+        if self
+            .selected_group
+            .is_some_and(|id| !tree.groups.iter().any(|g| g.id == id))
+        {
+            self.selected_group = None;
+        }
+        if self
+            .selected_note
+            .is_some_and(|id| !tree.notes.iter().any(|n| n.id == id))
+        {
+            self.selected_note = None;
+        }
+        let editing_gone = self.editing.as_ref().is_some_and(|edit| match edit.target {
+            EditTarget::GroupTitle(id) | EditTarget::GroupDescription(id) => {
+                !tree.groups.iter().any(|g| g.id == id)
+            }
+            EditTarget::Note(id) => !tree.notes.iter().any(|n| n.id == id),
+        });
+        if editing_gone {
+            self.editing = None;
+        }
+        self.hovered_group = None;
+        self.hovered_note = None;
         self.moving.clear();
         self.drop = None;
         self.stats.total_nodes = tree.len();
@@ -467,6 +645,7 @@ impl CanvasState {
             let mut measure = EguiMeasure { fonts, ids };
             if self.needs_layout {
                 card::measure_missing(&mut self.tree, &mut measure);
+                self.measure_annotations(&mut measure);
                 self.relayout();
             }
             super::svg::tree_svg(
@@ -475,6 +654,10 @@ impl CanvasState {
                 self.edge_style,
                 palette,
                 &mut measure,
+                super::svg::Annotations {
+                    groups: &self.group_boxes,
+                    notes: &self.note_boxes,
+                },
             )
         })
     }
@@ -584,10 +767,90 @@ impl CanvasState {
         self.tree.select_all()
     }
 
-    /// Clears the selection.
+    /// Clears the selection (also of a group or a note).
     pub fn clear_selection(&mut self) -> bool {
         self.primary = None;
-        self.tree.clear_selection()
+        let had_annotation =
+            self.selected_group.take().is_some() | self.selected_note.take().is_some();
+        self.tree.clear_selection() | had_annotation
+    }
+
+    /// The selected group, if a group is selected.
+    pub fn selected_group(&self) -> Option<u32> {
+        self.selected_group
+    }
+
+    /// The selected canvas note, if a note is selected.
+    pub fn selected_note(&self) -> Option<u32> {
+        self.selected_note
+    }
+
+    /// Selects a group (and no node or note).
+    pub fn select_group(&mut self, id: u32) {
+        self.primary = None;
+        self.tree.clear_selection();
+        self.selected_note = None;
+        self.selected_group = Some(id);
+    }
+
+    /// Selects a canvas note (and no node or group).
+    pub fn select_note(&mut self, id: u32) {
+        self.primary = None;
+        self.tree.clear_selection();
+        self.selected_group = None;
+        self.selected_note = Some(id);
+    }
+
+    /// The group boxes of the last layout, the largest first.
+    pub fn group_boxes(&self) -> &[GroupBox] {
+        &self.group_boxes
+    }
+
+    /// The canvas note boxes of the last layout.
+    pub fn note_boxes(&self) -> &[NoteBox] {
+        &self.note_boxes
+    }
+
+    /// Opens the in-place editor of a text (for example after a new group
+    /// or note). The target is selected.
+    pub fn start_edit(&mut self, target: EditTarget) {
+        let text = match target {
+            EditTarget::GroupTitle(id) => self
+                .tree
+                .groups
+                .iter()
+                .find(|g| g.id == id)
+                .map(|g| g.title.clone()),
+            EditTarget::GroupDescription(id) => self
+                .tree
+                .groups
+                .iter()
+                .find(|g| g.id == id)
+                .map(|g| g.description.clone()),
+            EditTarget::Note(id) => self
+                .tree
+                .notes
+                .iter()
+                .find(|n| n.id == id)
+                .map(|n| n.text.clone()),
+        };
+        let Some(text) = text else {
+            return;
+        };
+        match target {
+            EditTarget::GroupTitle(id) | EditTarget::GroupDescription(id) => self.select_group(id),
+            EditTarget::Note(id) => self.select_note(id),
+        }
+        self.editing = Some(InlineEdit {
+            target,
+            text,
+            age: 0,
+        });
+    }
+
+    /// The text that the in-place editor changes, if one is open.
+    pub fn editing(&self) -> Option<EditTarget> {
+        self.editing.as_ref().map(|e| e.target)
     }
 
     /// Measures and lays out the tree with a given text measure. The
@@ -595,14 +858,98 @@ impl CanvasState {
     /// a [`card::FixedMeasure`].
     pub fn prepare_with(&mut self, measure: &mut dyn TextMeasure) {
         card::measure_tree(&mut self.tree, measure);
+        self.measure_annotations(measure);
         self.relayout();
+    }
+
+    /// Measures the text of the groups and of the canvas notes.
+    fn measure_annotations(&mut self, measure: &mut dyn TextMeasure) {
+        self.group_texts = annotate::measure_groups(&self.tree, measure);
+        self.note_texts = annotate::measure_notes(&self.tree, measure);
     }
 
     fn relayout(&mut self) {
         self.minimap_cache = None;
-        self.layout = layout::layout(&self.tree, self.direction);
+        let members = annotate::group_members(&self.tree);
+        self.layout = if members.is_empty() {
+            layout::layout(&self.tree, self.direction)
+        } else {
+            // First pass: a header for the narrowest box (the widest
+            // member card), so that the header has enough room. Second
+            // pass: the headers for the widths of the first pass.
+            let mut header: HashMap<u32, f32> = members
+                .iter()
+                .map(|(id, list)| {
+                    let width = list
+                        .iter()
+                        .filter_map(|m| self.tree.get(*m))
+                        .map(|n| n.card.size.x)
+                        .fold(0.0_f32, f32::max)
+                        + 2.0 * annotate::MARGIN;
+                    let lines = self.group_texts.get(id).map_or(0, |t| {
+                        t.body_lines(
+                            width - 2.0 * annotate::TEXT_PAD,
+                            annotate::MAX_DESCRIPTION_LINES,
+                        )
+                        .len()
+                    });
+                    (*id, annotate::header_height(lines))
+                })
+                .collect();
+            // Then up to four passes: the headers for the box widths of the
+            // last pass, and more space where other cards are in a box.
+            let mut extra: HashMap<(usize, usize), f32> = HashMap::new();
+            let padded = |header: &HashMap<u32, f32>, extra: &HashMap<(usize, usize), f32>| {
+                let mut padding = annotate::padding(&self.tree, self.direction, header);
+                for ((index, side), space) in extra {
+                    if let Some(p) = padding.get_mut(*index) {
+                        p[*side] += space;
+                    }
+                }
+                padding
+            };
+            let mut result =
+                layout::layout_padded(&self.tree, self.direction, &padded(&header, &extra));
+            for _ in 0..4 {
+                let boxes = annotate::group_boxes(&self.tree, &result.rects, &self.group_texts);
+                let mut changed = false;
+                for group in &boxes {
+                    let height = group.header.height();
+                    if header
+                        .insert(group.id, height)
+                        .is_none_or(|old| (old - height).abs() > 0.5)
+                    {
+                        changed = true;
+                    }
+                }
+                changed |= annotate::push_out(
+                    &self.tree,
+                    self.direction,
+                    &result.rects,
+                    &boxes,
+                    &mut extra,
+                );
+                if !changed {
+                    break;
+                }
+                result =
+                    layout::layout_padded(&self.tree, self.direction, &padded(&header, &extra));
+            }
+            result
+        };
+        self.group_boxes = annotate::group_boxes(&self.tree, &self.layout.rects, &self.group_texts);
+        self.note_boxes = annotate::note_boxes(&self.tree, &self.note_texts);
+        // Fit and the minimap show the groups and the notes too.
+        for rect in self
+            .group_boxes
+            .iter()
+            .map(|g| g.rect)
+            .chain(self.note_boxes.iter().map(|n| n.rect))
+        {
+            self.layout.bounds = self.layout.bounds.union(rect);
+        }
         let bounds = layout::subtree_bounds(&self.tree, &self.layout);
-        self.groups = self
+        self.subtree_frames = self
             .tree
             .ids()
             .filter(|id| {
@@ -943,6 +1290,7 @@ impl<'a> TreeCanvas<'a> {
             ui.ctx().fonts_mut(|fonts| {
                 let mut measure = EguiMeasure { fonts, ids };
                 card::measure_missing(&mut state.tree, &mut measure);
+                state.measure_annotations(&mut measure);
             });
             state.relayout();
         }
@@ -974,6 +1322,7 @@ impl<'a> TreeCanvas<'a> {
             minimap(state, ui, rect, palette, id);
         }
         describe_for_accesskit(state, ui, rect, id);
+        inline_editor(state, ui, rect, &mut events);
         show_tooltip(state, ui, &response, id, now, palette);
 
         // Context menu, for the node under the pointer at the right-click.
@@ -1042,16 +1391,43 @@ fn handle_input(
         }
     }
 
-    // Hover.
+    // Hover. The notes are on top of the cards; the groups are below them.
     let world_pointer = pointer.map(|p| state.viewport.to_world(origin, p));
-    let hovered = if response.hovered() && state.drag == DragMode::None {
+    let grab = ANNOTATION_GRAB_PX / state.viewport.zoom;
+    let free = response.hovered() && state.drag == DragMode::None;
+    let note_hover = if free {
+        world_pointer.and_then(|p| annotate::hit_note(&state.note_boxes, p, grab))
+    } else {
+        None
+    };
+    let hovered = if free && note_hover.is_none() {
         world_pointer.and_then(|p| hit::hit_node(&state.layout.rects, p, 2.0 / state.viewport.zoom))
     } else {
         None
     };
-    if hovered != state.hovered {
-        state.hovered = hovered;
+    let group_hover = if free && note_hover.is_none() && hovered.is_none() {
+        world_pointer.and_then(|p| annotate::hit_group(&state.group_boxes, p, grab))
+    } else {
+        None
+    };
+    let group_changed = group_hover.map(|(id, _)| id) != state.hovered_group.map(|(id, _)| id);
+    if hovered != state.hovered || group_changed {
         state.hover_start = ui.input(|i| i.time);
+    }
+    state.hovered = hovered;
+    state.hovered_note = note_hover;
+    state.hovered_group = group_hover;
+    if state.editable {
+        let sides = match (note_hover, group_hover) {
+            (Some((_, NotePart::Border(sides))), _)
+            | (None, Some((_, GroupPart::Border(sides)))) => Some(sides),
+            _ => None,
+        };
+        if let Some(sides) = sides {
+            ui.ctx().set_cursor_icon(sides.cursor());
+        } else if matches!(note_hover, Some((_, NotePart::Body))) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
     }
     let dot_under = |state: &CanvasState, p: Option<Pos2>| {
         let zoom = state.viewport.zoom;
@@ -1098,7 +1474,21 @@ fn handle_input(
     if response.drag_started() {
         let press = ui.input(|i| i.pointer.press_origin()).or(pointer);
         let press_world = press.map(|p| state.viewport.to_world(origin, p));
-        let on_node = press_world.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
+        let primary_drag = !space && response.dragged_by(PointerButton::Primary);
+        let grab = ANNOTATION_GRAB_PX / state.viewport.zoom;
+        let on_note = press_world
+            .and_then(|p| annotate::hit_note(&state.note_boxes, p, grab))
+            .filter(|_| state.editable && primary_drag);
+        let on_node = press_world
+            .and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0))
+            .filter(|_| on_note.is_none());
+        let on_group_border = press_world
+            .and_then(|p| annotate::hit_group(&state.group_boxes, p, grab))
+            .and_then(|(id, part)| match part {
+                GroupPart::Border(sides) => Some((id, sides)),
+                GroupPart::Header => None,
+            })
+            .filter(|_| state.editable && primary_drag && on_node.is_none() && on_note.is_none());
         let on_dot = dot_under(state, press_world)
             .filter(|_| !space && response.dragged_by(PointerButton::Primary));
         let on_parent_dot = parent_dot_under(state, press_world)
@@ -1113,6 +1503,43 @@ fn handle_input(
             DragMode::Connect { from }
         } else if let Some(child) = on_parent_dot {
             DragMode::Attach { child }
+        } else if let Some((note, part)) = on_note
+            && let Some(original) = state
+                .note_boxes
+                .iter()
+                .find(|n| n.id == note)
+                .map(|n| n.rect)
+        {
+            if state.selected_note != Some(note) {
+                state.select_note(note);
+                events.push(CanvasEvent::SelectionChanged);
+            }
+            DragMode::Note {
+                note,
+                sides: match part {
+                    NotePart::Body => Sides::default(),
+                    NotePart::Border(sides) => sides,
+                },
+                start: press_world.unwrap_or(Pos2::ZERO),
+                original,
+            }
+        } else if let Some((group, sides)) = on_group_border
+            && let Some(original) = state
+                .group_boxes
+                .iter()
+                .find(|g| g.id == group)
+                .map(|g| g.rect)
+        {
+            if state.selected_group != Some(group) {
+                state.select_group(group);
+                events.push(CanvasEvent::SelectionChanged);
+            }
+            DragMode::ResizeGroup {
+                group,
+                sides,
+                start: press_world.unwrap_or(Pos2::ZERO),
+                original,
+            }
         } else if let (Some(id), false) = (on_node, moving.is_empty()) {
             // Grabbing a node that is not selected selects it.
             if !state.tree.is_selected(id) && click_select(state, Some(id), SelectMode::Replace) {
@@ -1138,7 +1565,11 @@ fn handle_input(
     }
     if matches!(
         state.drag,
-        DragMode::Move { .. } | DragMode::Connect { .. } | DragMode::Attach { .. }
+        DragMode::Move { .. }
+            | DragMode::Connect { .. }
+            | DragMode::Attach { .. }
+            | DragMode::ResizeGroup { .. }
+            | DragMode::Note { .. }
     ) && ui.input(|i| i.key_pressed(Key::Escape))
     {
         // Escape cancels a move or a connection.
@@ -1182,6 +1613,12 @@ fn handle_input(
                 edge_pan(state, ui, rect, p);
             }
         }
+        DragMode::ResizeGroup { .. } | DragMode::Note { .. } if response.dragged() => {
+            state.band_end = world_pointer;
+            if let Some(p) = pointer {
+                edge_pan(state, ui, rect, p);
+            }
+        }
         DragMode::Attach { child } if response.dragged() => {
             state.band_end = world_pointer;
             let grab = connect::grab_px(state.viewport.zoom) / state.viewport.zoom;
@@ -1202,6 +1639,49 @@ fn handle_input(
         _ => {}
     }
     if response.drag_stopped() {
+        if let DragMode::ResizeGroup {
+            group,
+            sides,
+            start,
+            original,
+        } = state.drag
+            && let Some(end) = state.band_end.or(world_pointer)
+        {
+            let area = sides.apply(original, end - start, annotate::MIN_DRAG_SIZE);
+            let members = annotate::snap_members(
+                &state.tree,
+                &state.layout.rects,
+                group,
+                area,
+                state.group_texts.get(&group),
+            );
+            let current: Vec<CanvasNodeId> = state
+                .tree
+                .ids()
+                .filter(|id| state.tree.get(*id).is_some_and(|n| n.group == Some(group)))
+                .collect();
+            if !members.is_empty() && members != current {
+                events.push(CanvasEvent::SetGroupMembers {
+                    group,
+                    nodes: members,
+                });
+            }
+        }
+        if let DragMode::Note {
+            note,
+            sides,
+            start,
+            original,
+        } = state.drag
+            && let Some(end) = state.band_end.or(world_pointer)
+            && end != start
+            && let Some(rect) = note_drag_rect(state, note, sides, original, end - start)
+        {
+            events.push(CanvasEvent::SetNoteBox {
+                note,
+                rect: [rect.min.x, rect.min.y, rect.width(), rect.height()],
+            });
+        }
         if let DragMode::Move { start } = state.drag
             && let Some(spot) = state.drop
             && spot != DropSpot::Invalid
@@ -1284,17 +1764,56 @@ fn handle_input(
             at: pointer.unwrap_or(rect.center()),
         });
     } else if clicked {
-        let target = world_pointer.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
-        if click_select(state, target, select_mode(modifiers)) {
+        let grab = ANNOTATION_GRAB_PX / state.viewport.zoom;
+        let note = world_pointer.and_then(|p| annotate::hit_note(&state.note_boxes, p, grab));
+        let target = world_pointer
+            .and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0))
+            .filter(|_| note.is_none());
+        let group = world_pointer
+            .and_then(|p| annotate::hit_group(&state.group_boxes, p, grab))
+            .filter(|_| note.is_none() && target.is_none());
+        if let Some((note, _)) = note {
+            if state.selected_note != Some(note) {
+                state.select_note(note);
+                events.push(CanvasEvent::SelectionChanged);
+            }
+        } else if let Some((group, _)) = group {
+            if state.selected_group != Some(group) {
+                state.select_group(group);
+                events.push(CanvasEvent::SelectionChanged);
+            }
+        } else if click_select(state, target, select_mode(modifiers)) {
             events.push(CanvasEvent::SelectionChanged);
         }
     }
     if response.secondary_clicked() {
-        // Right-click selects the node under the pointer (if it is not
-        // selected), so that the context menu acts on it.
-        let target = world_pointer.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0));
+        // Right-click selects the note, the node or the group under the
+        // pointer (if it is not selected), so that the context menu acts
+        // on it.
+        let grab = ANNOTATION_GRAB_PX / state.viewport.zoom;
+        state.context_point = world_pointer;
+        state.context_note = world_pointer
+            .and_then(|p| annotate::hit_note(&state.note_boxes, p, grab))
+            .map(|(id, _)| id);
+        let target = world_pointer
+            .and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0))
+            .filter(|_| state.context_note.is_none());
         state.context_target = target;
-        if let Some(id) = target
+        state.context_group = world_pointer
+            .and_then(|p| annotate::hit_group(&state.group_boxes, p, grab))
+            .map(|(id, _)| id)
+            .filter(|_| state.context_note.is_none() && target.is_none());
+        if let Some(note) = state.context_note {
+            if state.selected_note != Some(note) {
+                state.select_note(note);
+                events.push(CanvasEvent::SelectionChanged);
+            }
+        } else if let Some(group) = state.context_group {
+            if state.selected_group != Some(group) {
+                state.select_group(group);
+                events.push(CanvasEvent::SelectionChanged);
+            }
+        } else if let Some(id) = target
             && !state.tree.is_selected(id)
             && click_select(state, Some(id), SelectMode::Replace)
         {
@@ -1303,8 +1822,32 @@ fn handle_input(
     }
     // egui counts a double click soon after another click as a triple
     // click; both count here.
-    if (response.double_clicked() || response.triple_clicked())
-        && let Some(id) = world_pointer.and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0))
+    let double = response.double_clicked() || response.triple_clicked();
+    let grab = ANNOTATION_GRAB_PX / state.viewport.zoom;
+    let note_under = world_pointer.and_then(|p| annotate::hit_note(&state.note_boxes, p, grab));
+    if double
+        && state.editable
+        && let Some((note, _)) = note_under
+    {
+        state.start_edit(EditTarget::Note(note));
+    } else if double
+        && state.editable
+        && let Some(p) = world_pointer
+        && hit::hit_node(&state.layout.rects, p, 0.0).is_none()
+        && let Some((group, GroupPart::Header)) = annotate::hit_group(&state.group_boxes, p, grab)
+        && let Some(group_box) = state.group_boxes.iter().find(|g| g.id == group)
+    {
+        let title_bottom = group_box.header.min.y + annotate::TEXT_PAD + annotate::TITLE_LINE;
+        let target = if p.y <= title_bottom || group_box.lines.is_empty() {
+            EditTarget::GroupTitle(group)
+        } else {
+            EditTarget::GroupDescription(group)
+        };
+        state.start_edit(target);
+    } else if double
+        && let Some(id) = world_pointer
+            .filter(|_| note_under.is_none())
+            .and_then(|p| hit::hit_node(&state.layout.rects, p, 0.0))
         && let Some(node) = state.tree.get(id)
     {
         if node.subtree.as_ref().is_some_and(|s| s.can_expand) {
@@ -1413,6 +1956,17 @@ fn handle_input(
 /// Changes the selection for a click on `target` (or on the background).
 /// Returns true if the selection changed.
 fn click_select(state: &mut CanvasState, target: Option<CanvasNodeId>, mode: SelectMode) -> bool {
+    // A node selection replaces the selection of a group or a note.
+    let had_annotation = target.is_some()
+        && (state.selected_group.take().is_some() | state.selected_note.take().is_some());
+    had_annotation | click_select_nodes(state, target, mode)
+}
+
+fn click_select_nodes(
+    state: &mut CanvasState,
+    target: Option<CanvasNodeId>,
+    mode: SelectMode,
+) -> bool {
     match (target, mode) {
         (None, SelectMode::Replace) => state.clear_selection(),
         (None, _) => false,
@@ -1539,9 +2093,31 @@ fn context_menu(
     events: &mut Vec<CanvasEvent>,
     node_menu: Option<&mut NodeMenu<'_>>,
 ) {
+    if let Some(note) = state.context_note {
+        note_menu(state, ui, note, events);
+        return;
+    }
+    if let Some(group) = state.context_group {
+        group_menu(state, ui, group, events);
+        return;
+    }
     if let Some(menu) = node_menu
         && menu(ui, target.and_then(|id| state.tree.get(id)))
     {
+        ui.separator();
+    }
+    if target.is_none()
+        && state.editable
+        && let Some(at) = state.context_point
+    {
+        if ui
+            .button("New note")
+            .on_hover_text("Add a text note at this place. The note is saved in the XML file.")
+            .clicked()
+        {
+            events.push(CanvasEvent::AddNote { at });
+            ui.close();
+        }
         ui.separator();
     }
     if let Some(node) = target.and_then(|id| state.tree.get(id)) {
@@ -1600,6 +2176,225 @@ fn context_menu(
     }
     if ui.button("Select all").clicked() && state.select_all() {
         events.push(CanvasEvent::SelectionChanged);
+    }
+}
+
+/// A submenu with the annotation colors. `default` is the name of the
+/// default entry. Returns the picked color (`Some(None)` for the default).
+fn color_menu(ui: &mut Ui, current: Option<&str>, default: &str) -> Option<Option<String>> {
+    let mut picked = None;
+    ui.menu_button("Color", |ui| {
+        if ui.radio(current.is_none(), default).clicked() {
+            picked = Some(None);
+            ui.close();
+        }
+        for name in fasttick_core::bt::annotations::ANNOTATION_COLORS {
+            let mut label = name.to_owned();
+            label[..1].make_ascii_uppercase();
+            if ui.radio(current == Some(name), label).clicked() {
+                picked = Some(Some(name.to_owned()));
+                ui.close();
+            }
+        }
+    });
+    picked
+}
+
+/// The context menu of a group.
+fn group_menu(state: &mut CanvasState, ui: &mut Ui, group: u32, events: &mut Vec<CanvasEvent>) {
+    let color = state
+        .tree
+        .groups
+        .iter()
+        .find(|g| g.id == group)
+        .and_then(|g| g.color.clone());
+    if state.editable {
+        if ui.button("Edit title").clicked() {
+            state.start_edit(EditTarget::GroupTitle(group));
+            ui.close();
+        }
+        if ui.button("Edit description").clicked() {
+            state.start_edit(EditTarget::GroupDescription(group));
+            ui.close();
+        }
+        if let Some(color) = color_menu(ui, color.as_deref(), "Default") {
+            events.push(CanvasEvent::SetGroupColor { group, color });
+        }
+    }
+    if ui
+        .button("Select the nodes")
+        .on_hover_text("Select the nodes in this group.")
+        .clicked()
+    {
+        let members = state
+            .group_boxes
+            .iter()
+            .find(|g| g.id == group)
+            .map(|g| g.members.clone())
+            .unwrap_or_default();
+        state.selected_group = None;
+        state.tree.clear_selection();
+        for id in &members {
+            state.tree.set_selected(*id, true);
+        }
+        state.primary = members.first().copied();
+        events.push(CanvasEvent::SelectionChanged);
+        ui.close();
+    }
+    if state.editable {
+        ui.separator();
+        if ui
+            .button("Delete group")
+            .on_hover_text("Delete the group box. The nodes stay.")
+            .clicked()
+        {
+            events.push(CanvasEvent::DeleteGroup(group));
+            ui.close();
+        }
+    }
+}
+
+/// The context menu of a canvas note.
+fn note_menu(state: &mut CanvasState, ui: &mut Ui, note: u32, events: &mut Vec<CanvasEvent>) {
+    if !state.editable {
+        ui.label(egui::RichText::new("Open the tree in edit mode to change the note.").weak());
+        return;
+    }
+    let color = state
+        .tree
+        .notes
+        .iter()
+        .find(|n| n.id == note)
+        .and_then(|n| n.color.clone());
+    if ui.button("Edit text").clicked() {
+        state.start_edit(EditTarget::Note(note));
+        ui.close();
+    }
+    if let Some(color) = color_menu(ui, color.as_deref(), "Yellow (default)") {
+        events.push(CanvasEvent::SetNoteColor { note, color });
+    }
+    ui.separator();
+    if ui.button("Delete note").clicked() {
+        events.push(CanvasEvent::DeleteNote(note));
+        ui.close();
+    }
+}
+
+/// The world rectangle of the text that an in-place editor changes.
+fn edit_area(state: &CanvasState, target: EditTarget) -> Option<Rect> {
+    let pad = annotate::TEXT_PAD;
+    match target {
+        EditTarget::GroupTitle(id) => {
+            let group = state.group_boxes.iter().find(|g| g.id == id)?;
+            Some(Rect::from_min_size(
+                group.rect.min + vec2(pad * 0.5, pad * 0.5),
+                vec2(group.rect.width() - pad, annotate::TITLE_LINE + pad),
+            ))
+        }
+        EditTarget::GroupDescription(id) => {
+            let group = state.group_boxes.iter().find(|g| g.id == id)?;
+            let top = group.rect.min.y + pad + annotate::TITLE_LINE;
+            let lines = group.lines.len().max(2) as f32;
+            Some(Rect::from_min_size(
+                pos2(group.rect.min.x + pad * 0.5, top),
+                vec2(group.rect.width() - pad, lines * annotate::TEXT_LINE + pad),
+            ))
+        }
+        EditTarget::Note(id) => {
+            let note = state.note_boxes.iter().find(|n| n.id == id)?;
+            Some(note.rect.shrink(pad * 0.25))
+        }
+    }
+}
+
+/// Shows the in-place text editor, if one is open, and reports the
+/// changes. The editor closes when it loses the keyboard focus (a click
+/// elsewhere, Escape, or Enter in a title).
+fn inline_editor(state: &mut CanvasState, ui: &Ui, canvas: Rect, events: &mut Vec<CanvasEvent>) {
+    let Some(target) = state.editing.as_ref().map(|e| e.target) else {
+        return;
+    };
+    let origin = canvas.min;
+    let zoom = state.viewport.zoom;
+    let Some(area) = edit_area(state, target) else {
+        state.editing = None;
+        return;
+    };
+    let screen = state.viewport.rect_to_screen(origin, area);
+    if !canvas.intersects(screen) || !state.editable {
+        state.editing = None;
+        return;
+    }
+    let (kind, size) = match target {
+        EditTarget::GroupTitle(_) => (TextKind::Label, card::LABEL_SIZE),
+        _ => (TextKind::Type, card::TYPE_SIZE),
+    };
+    let font = state.fonts.font(kind, (size * zoom).clamp(11.0, 22.0));
+    let id = Id::new(("fasttick_inline_edit", target));
+    let width = screen.width().max(140.0);
+    let mut done = false;
+    let mut changed = None;
+    if let Some(edit) = state.editing.as_mut() {
+        egui::Area::new(id.with("area"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .show(ui.ctx(), |ui| {
+                let editor = match target {
+                    EditTarget::GroupTitle(_) => egui::TextEdit::singleline(&mut edit.text),
+                    _ => egui::TextEdit::multiline(&mut edit.text)
+                        .desired_rows(((screen.height() / (size * zoom * 1.4)) as usize).max(2)),
+                };
+                let hint = match target {
+                    EditTarget::GroupTitle(_) => "Title",
+                    EditTarget::GroupDescription(_) => "Description",
+                    EditTarget::Note(_) => "Note",
+                };
+                let response = ui.add(
+                    editor
+                        .id(id)
+                        .font(font)
+                        .hint_text(hint)
+                        .desired_width(width),
+                );
+                if edit.age == 0 {
+                    response.request_focus();
+                    // A title is selected (typing replaces it); in other
+                    // text the cursor goes to the end.
+                    let end = edit.text.chars().count();
+                    let start = match target {
+                        EditTarget::GroupTitle(_) => 0,
+                        _ => end,
+                    };
+                    let mut text_state =
+                        egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+                    text_state.cursor.set_char_range(Some(
+                        egui::text_selection::CCursorRange::two(
+                            egui::text::CCursor::new(start),
+                            egui::text::CCursor::new(end),
+                        ),
+                    ));
+                    text_state.store(ui.ctx(), id);
+                } else if response.lost_focus() || (edit.age > 2 && !response.has_focus()) {
+                    done = true;
+                }
+                edit.age = edit.age.saturating_add(1);
+                if response.changed() {
+                    changed = Some(edit.text.clone());
+                }
+            });
+    }
+    if let Some(text) = changed {
+        events.push(match target {
+            EditTarget::GroupTitle(group) => CanvasEvent::SetGroupTitle { group, title: text },
+            EditTarget::GroupDescription(group) => CanvasEvent::SetGroupDescription {
+                group,
+                description: text,
+            },
+            EditTarget::Note(note) => CanvasEvent::SetNoteText { note, text },
+        });
+    }
+    if done {
+        state.editing = None;
     }
 }
 
@@ -1825,7 +2620,7 @@ fn paint_canvas(
 
     // Expanded SubTree regions.
     if detail != Detail::Boxes {
-        for (_, bounds) in &state.groups {
+        for (_, bounds) in &state.subtree_frames {
             let region = bounds.expand(14.0);
             if !region.intersects(view) {
                 continue;
@@ -1841,6 +2636,22 @@ fn paint_canvas(
             ));
         }
     }
+
+    // Groups, below the edges and the cards.
+    let annotation_fonts = AnnotationFonts {
+        title: state.fonts.font(TextKind::Label, card::LABEL_SIZE * zoom),
+        text: state.fonts.font(TextKind::Type, card::TYPE_SIZE * zoom),
+        zoom,
+    };
+    paint_groups(
+        state,
+        &painter,
+        &mut shapes,
+        origin,
+        view,
+        palette,
+        &annotation_fonts,
+    );
 
     paint_edges(state, &mut shapes, origin, view, palette, detail);
 
@@ -1900,6 +2711,37 @@ fn paint_canvas(
     paint_connection(state, ui, &mut shapes, origin, palette);
     paint_attach(state, ui, &mut shapes, origin, palette);
 
+    // Canvas notes, on top of the cards.
+    for note in &state.note_boxes {
+        let world = match state.drag {
+            DragMode::Note {
+                note: id,
+                sides,
+                start,
+                original,
+            } if id == note.id => state
+                .band_end
+                .and_then(|end| note_drag_rect(state, id, sides, original, end - start))
+                .unwrap_or(note.rect),
+            _ => note.rect,
+        };
+        if !world.intersects(view) {
+            continue;
+        }
+        let screen = state.viewport.rect_to_screen(origin, world);
+        let editing = state.editing.as_ref().map(|e| e.target) == Some(EditTarget::Note(note.id));
+        annotate_paint::paint_note(
+            &mut shapes,
+            &painter,
+            note,
+            screen,
+            &annotation_fonts,
+            palette,
+            state.selected_note == Some(note.id),
+            editing,
+        );
+    }
+
     // Rubber band.
     if let (DragMode::Band { start, .. }, Some(end)) = (state.drag, state.band_end) {
         let band = state
@@ -1933,6 +2775,61 @@ fn paint_canvas(
     state.stats.visible_nodes = state.visible.len();
     state.stats.detail = detail;
     state.stats.cached_galleys = state.galleys.map.len();
+}
+
+/// Paints the group boxes, and the box that a resized group snaps to.
+fn paint_groups(
+    state: &CanvasState,
+    painter: &egui::Painter,
+    shapes: &mut Vec<Shape>,
+    origin: Pos2,
+    view: Rect,
+    palette: &CanvasPalette,
+    fonts: &AnnotationFonts,
+) {
+    let resizing = match state.drag {
+        DragMode::ResizeGroup { group, .. } => Some(group),
+        _ => None,
+    };
+    let hovered = state.hovered_group.map(|(id, _)| id);
+    for group in &state.group_boxes {
+        if resizing == Some(group.id) || !group.rect.intersects(view) {
+            continue;
+        }
+        let screen = state.viewport.rect_to_screen(origin, group.rect);
+        annotate_paint::paint_group(
+            shapes,
+            painter,
+            group,
+            screen,
+            fonts,
+            palette,
+            state.selected_group == Some(group.id),
+            hovered == Some(group.id),
+        );
+    }
+    if let DragMode::ResizeGroup {
+        group,
+        sides,
+        start,
+        original,
+    } = state.drag
+    {
+        let end = state.band_end.unwrap_or(start);
+        let area = sides.apply(original, end - start, annotate::MIN_DRAG_SIZE);
+        let text = state.group_texts.get(&group);
+        let members = annotate::snap_members(&state.tree, &state.layout.rects, group, area, text);
+        let snapped = (!members.is_empty())
+            .then(|| annotate::snapped_box(&state.layout.rects, &members, text))
+            .map(|r| state.viewport.rect_to_screen(origin, r));
+        annotate_paint::paint_group_drag(
+            shapes,
+            state.viewport.rect_to_screen(origin, area),
+            snapped,
+            state.viewport.zoom,
+            palette,
+        );
+    }
 }
 
 /// The feedback of a move or a palette drag: ghosts of the moved cards,
@@ -2928,6 +3825,29 @@ fn paint_card(
         paint::breakpoint_marker(shapes, center, radius, marker, palette);
     }
 
+    // Note mark (on the top side, left of the problem marker).
+    if node.note.is_some() {
+        let size = vec2(10.0, 11.0) * zoom.clamp(0.6, 1.6);
+        let center = pos2(screen.max.x - 20.0 * zoom, screen.min.y + 1.0);
+        let mark = Rect::from_center_size(center, size);
+        let (fill, border) = annotate_paint::note_colors(None, palette);
+        shapes.push(Shape::rect_filled(mark, CornerRadius::same(1), fill));
+        shapes.push(Shape::rect_stroke(
+            mark,
+            CornerRadius::same(1),
+            Stroke::new(1.0, border),
+            StrokeKind::Inside,
+        ));
+        let line = Stroke::new(1.0, palette.text_weak);
+        for i in 1..=2 {
+            let y = mark.min.y + mark.height() * (i as f32) / 3.0;
+            shapes.push(Shape::line_segment(
+                [pos2(mark.min.x + 2.0, y), pos2(mark.max.x - 2.0, y)],
+                line,
+            ));
+        }
+    }
+
     // Problem marker (top-right corner).
     if let Some(problem) = deco.problem {
         let radius = (7.0 * zoom).clamp(4.0, 9.0);
@@ -3126,6 +4046,10 @@ fn show_tooltip(
     now: f64,
     palette: &CanvasPalette,
 ) {
+    if state.hovered.is_none() {
+        group_tooltip(state, ui, response, canvas, now);
+        return;
+    }
     let Some(id) = state.hovered else {
         return;
     };
@@ -3158,6 +4082,18 @@ fn show_tooltip(
         );
         if let Some(description) = &node.description {
             ui.label(description);
+        }
+        if let Some(note) = &node.note {
+            ui.add_space(2.0);
+            let (fill, border) = annotate_paint::note_colors(None, palette);
+            egui::Frame::new()
+                .fill(fill)
+                .stroke(Stroke::new(1.0, border))
+                .corner_radius(4.0)
+                .inner_margin(6.0)
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new(note).color(palette.text));
+                });
         }
         if node.category_inferred {
             ui.label(
@@ -3245,6 +4181,52 @@ fn show_tooltip(
                 egui::RichText::new("Double-click to expand or collapse.")
                     .small()
                     .weak(),
+            );
+        }
+    });
+}
+
+/// The tooltip of a group header: the whole title and description.
+fn group_tooltip(state: &CanvasState, ui: &Ui, response: &Response, canvas: Id, now: f64) {
+    let Some((id, GroupPart::Header)) = state.hovered_group else {
+        return;
+    };
+    if state.drag != DragMode::None
+        || state.editing.is_some()
+        || now - state.hover_start < TOOLTIP_DELAY
+        || ui.input(|i| i.pointer.any_down())
+        || response.context_menu_opened()
+    {
+        if now - state.hover_start < TOOLTIP_DELAY {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(TOOLTIP_DELAY));
+        }
+        return;
+    }
+    let Some(group) = state.tree.groups.iter().find(|g| g.id == id) else {
+        return;
+    };
+    egui::Tooltip::always_open(
+        ui.ctx().clone(),
+        response.layer_id,
+        canvas.with("group_tooltip"),
+        egui::PopupAnchor::Pointer,
+    )
+    .gap(14.0)
+    .show(|ui| {
+        ui.set_max_width(360.0);
+        ui.label(egui::RichText::new(&group.title).strong().size(14.0));
+        if !group.description.is_empty() {
+            ui.label(&group.description);
+        }
+        if state.editable {
+            ui.label(
+                egui::RichText::new(
+                    "Drag a side or a corner to change the nodes in the group. \
+                     Double-click to edit the text.",
+                )
+                .small()
+                .weak(),
             );
         }
     });
