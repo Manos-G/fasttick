@@ -72,6 +72,8 @@ pub enum AppAction {
     AddMissingFiles(DocId),
     /// Shows the nodes that use a blackboard key in the search panel.
     FindKey(String),
+    /// Copies the files of a document from the robot again.
+    ReloadRemote(DocId),
     /// Opens the search popup that adds a node (see [`crate::add_popup`]).
     OpenAddPopup {
         /// The edit view.

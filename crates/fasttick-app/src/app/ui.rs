@@ -21,6 +21,7 @@ impl FastTickApp {
         }
 
         self.handle_dropped_files(&ctx);
+        self.check_remote_changes(&ctx);
 
         let commands = self.keymap.consume(&ctx, |c| self.is_enabled(c));
         for command in commands {
@@ -256,6 +257,7 @@ impl FastTickApp {
             ui.separator();
             self.menu_item(ui, Command::UploadRemote);
             self.menu_item(ui, Command::ReloadRemote);
+            self.menu_item(ui, Command::DebugRobot);
             ui.separator();
             self.menu_item(ui, Command::ExportSvg);
             ui.separator();
@@ -383,6 +385,7 @@ impl FastTickApp {
         ui.menu_button("Live", |ui| {
             self.menu_item(ui, Command::Connect);
             self.menu_item(ui, Command::Disconnect);
+            self.menu_item(ui, Command::DebugRobot);
             ui.separator();
             self.menu_item(ui, Command::ToggleBreakpoint);
             self.menu_item(ui, Command::Continue);

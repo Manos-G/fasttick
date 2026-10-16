@@ -291,6 +291,34 @@ pub fn close_master(config: &SshConfig, host: &RemoteHost) {
     }
 }
 
+/// The network name or address of a computer after the `ssh`
+/// configuration (`ssh -G`): an alias such as `robot` with a `HostName`
+/// gives that name. The function does not connect. `None` if `ssh` cannot
+/// tell.
+pub fn resolve_hostname(config: &SshConfig, host: &RemoteHost) -> Option<String> {
+    let mut command = Command::new(&config.program);
+    if let Some(file) = &config.config_file {
+        command.arg("-F").arg(file);
+    }
+    if let Some(port) = host.port {
+        command.arg("-p").arg(port.to_string());
+    }
+    command
+        .args(["-G", "--", &host.destination()])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    hide_console(&mut command);
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("hostname "))
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+}
+
 /// The command that runs `script` with `sh` on the computer.
 fn script_command(
     config: &SshConfig,
@@ -447,6 +475,8 @@ mod tests {
         assert_eq!(args[end + 2], r"sh -c 'echo '\''hi'\'''");
     }
 
+    // Windows has no shared connections (no Unix sockets for ssh).
+    #[cfg(unix)]
     #[test]
     fn socket_paths_are_short() {
         let config = SshConfig {

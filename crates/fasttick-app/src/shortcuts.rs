@@ -121,6 +121,8 @@ pub enum Command {
     UploadRemote,
     /// Copy the active file from the robot again.
     ReloadRemote,
+    /// Connect live mode to the robot of the active file.
+    DebugRobot,
     /// Find a command, a tree, a recent file or a theme by its name.
     SearchCommands,
     /// Find a tree of the active document by its name.
@@ -133,7 +135,7 @@ pub enum Command {
 
 impl Command {
     /// All commands, in help-dialog order.
-    pub const ALL: [Command; 59] = [
+    pub const ALL: [Command; 60] = [
         Command::NewProject,
         Command::OpenFile,
         Command::OpenLog,
@@ -177,6 +179,7 @@ impl Command {
         Command::ModeReplay,
         Command::Connect,
         Command::Disconnect,
+        Command::DebugRobot,
         Command::ToggleBreakpoint,
         Command::Continue,
         Command::ToggleRecording,
@@ -253,6 +256,7 @@ impl Command {
             Command::OpenRemote => "Open from robot\u{2026}",
             Command::UploadRemote => "Upload to robot",
             Command::ReloadRemote => "Reload from robot",
+            Command::DebugRobot => "Debug this robot",
             Command::SearchCommands => "Search commands\u{2026}",
             Command::GoToTree => "Go to tree\u{2026}",
             Command::ShowShortcuts => "Keyboard shortcuts",
@@ -304,6 +308,7 @@ impl Command {
             Command::ModeEdit | Command::ModeLive | Command::ModeReplay => "Mode",
             Command::Connect
             | Command::Disconnect
+            | Command::DebugRobot
             | Command::ToggleBreakpoint
             | Command::Continue
             | Command::ToggleRecording

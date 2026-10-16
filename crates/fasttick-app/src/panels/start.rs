@@ -34,7 +34,7 @@ pub const WHATS_NEW: &[(&str, &str)] = &[
         "Open from robot",
         "File > Open from robot opens tree files, projects and logs of another \
          computer over SSH. A save uploads the file, and FastTick warns if the file \
-         changed on the robot.",
+         changed on the robot. File > Debug this robot connects live mode to it.",
     ),
     (
         "Search commands",

@@ -496,6 +496,8 @@ mod tests {
         assert_eq!(tail_lines("a\nb\nc", 0), "");
     }
 
+    // LD_LIBRARY_PATH is a Unix variable (on Windows, the separator is ';').
+    #[cfg(unix)]
     #[test]
     fn ld_library_path_puts_the_lib_dir_first() {
         let lib = Path::new("/prefix/lib");

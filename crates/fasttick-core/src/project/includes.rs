@@ -177,6 +177,26 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn relative_and_absolute_paths_on_windows() {
+        let base = Path::new(r"C:\project\trees");
+        assert_eq!(
+            resolve_include_path(base, &include(Some("sub/a.xml"), None), None),
+            Ok(PathBuf::from(r"C:\project\trees\sub\a.xml"))
+        );
+        assert_eq!(
+            resolve_include_path(base, &include(Some(r"..\a.xml"), None), None),
+            Ok(PathBuf::from(r"C:\project\a.xml"))
+        );
+        assert_eq!(
+            resolve_include_path(base, &include(Some(r"D:\abs\a.xml"), None), None),
+            Ok(PathBuf::from(r"D:\abs\a.xml"))
+        );
+    }
+
+    // The paths are Unix paths (on Windows, they get a drive letter).
+    #[cfg(unix)]
     #[test]
     fn relative_and_absolute_paths() {
         let base = Path::new("/project/trees");

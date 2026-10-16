@@ -895,10 +895,11 @@ fn absolute_includes_resolve_below_a_mirror_root() {
     let mut local = Project::open_xml(&outside).unwrap();
     local.set_mirror_root(Some(MirrorRoot { root, encode }));
     let id = local.file_id_by_path(&outside).unwrap();
-    assert_eq!(
-        local.includes(id)[0].path.as_deref(),
-        Some(Path::new("/opt/lib/x.xml"))
-    );
+    let target = local.includes(id)[0].path.clone().unwrap();
+    assert!(!target.starts_with(dir.path()), "{}", target.display());
+    // On Windows, the path gets the drive letter of the current folder.
+    #[cfg(unix)]
+    assert_eq!(target, Path::new("/opt/lib/x.xml"));
 }
 
 #[test]

@@ -37,6 +37,69 @@ impl FastTickApp {
         self.remote.url_of(path).map(|_| doc.id)
     }
 
+    /// The remote file of the active edit document, if it is a local copy
+    /// of a remote file.
+    pub(super) fn active_remote_url(&self) -> Option<crate::remote::RemoteUrl> {
+        let doc = self.workspace.doc(self.active_remote_doc()?)?;
+        self.remote.url_of(doc.kind.path()?)
+    }
+
+    /// Checks the files of the active remote document for changes on the
+    /// robot when the window gets the focus again or the user goes to the
+    /// document. A change gives a notice.
+    pub(super) fn check_remote_changes(&mut self, ctx: &egui::Context) {
+        let focused = ctx.input(|i| i.focused);
+        let active = self.active_remote_doc();
+        let main = active
+            .and_then(|doc| self.workspace.doc(doc))
+            .and_then(|d| d.kind.path())
+            .map(Path::to_path_buf);
+        if !self.remote.check_trigger(focused, main.as_deref()) {
+            return;
+        }
+        if let (Some(doc), Some(main)) = (active, main) {
+            self.start_remote_check(ctx, doc, main);
+        }
+    }
+
+    /// Compares the copies of a document with the robot (one job for each
+    /// computer), at most once in [`crate::remote_ui::CHECK_INTERVAL`].
+    pub fn start_remote_check(&mut self, ctx: &egui::Context, doc: DocId, main: PathBuf) {
+        // An upload changes the files: its result tells about changes.
+        if self.remote.uploading > 0 || !self.remote.begin_check(&main) {
+            return;
+        }
+        let files = self
+            .workspace
+            .doc(doc)
+            .and_then(|d| d.editor.as_ref())
+            .map(|e| e.all_paths())
+            .unwrap_or_default();
+        let mut by_host: Vec<(crate::remote::RemoteHost, Vec<crate::remote_ui::CheckItem>)> =
+            Vec::new();
+        for local in files {
+            let (Some(url), Some(entry)) = (
+                self.remote.url_of(&local),
+                self.remote.index.files.get(&local),
+            ) else {
+                continue;
+            };
+            let item = (local.clone(), url.path.clone(), entry.base.clone());
+            match by_host.iter_mut().find(|(host, _)| *host == url.host) {
+                Some((_, list)) => list.push(item),
+                None => by_host.push((url.host.clone(), vec![item])),
+            }
+        }
+        for (host, items) in by_host {
+            let config = self.remote.quiet_ssh_config(ctx);
+            let main = main.clone();
+            self.remote.checking += 1;
+            self.jobs.run_remote(ctx, "remote-check", move || {
+                crate::remote_ui::check_job(config, host, main, items)
+            });
+        }
+    }
+
     /// Opens a remote file: copies it (and the files that it needs) to the
     /// cache on a worker thread, then opens the copy. A file that is open
     /// already gets the focus.
@@ -237,6 +300,48 @@ impl FastTickApp {
                     );
                 }
                 self.start_open(ctx, opened.local);
+            }
+            RemoteResult::Checked { host, main, result } => {
+                self.remote.checking = self.remote.checking.saturating_sub(1);
+                // A robot that is off or asks for a password: no notice.
+                let Ok(checked) = result else {
+                    return;
+                };
+                let changed = self.remote.new_changes(checked);
+                if changed.is_empty() {
+                    return;
+                }
+                let names: Vec<String> = changed.iter().map(|p| file_name(p)).collect();
+                let text = format!(
+                    "{} changed on {} after FastTick copied {}.",
+                    names.join(", "),
+                    host.label(),
+                    if names.len() == 1 { "it" } else { "them" }
+                );
+                let doc = self.doc_with_file(&main);
+                let unsaved = doc
+                    .and_then(|d| self.workspace.doc(d))
+                    .and_then(|d| d.editor.as_ref())
+                    .is_some_and(|e| {
+                        e.is_dirty() || e.all_paths().iter().any(|p| self.remote.is_pending(p))
+                    });
+                match doc {
+                    Some(doc) if !unsaved => self.notify_with_action(
+                        ctx,
+                        NoticeLevel::Warning,
+                        text,
+                        "Reload from robot",
+                        AppAction::ReloadRemote(doc),
+                    ),
+                    _ => self.notify(
+                        ctx,
+                        NoticeLevel::Warning,
+                        format!(
+                            "{text} You have changes that are not on the robot. When you \
+                             upload them, FastTick asks which version to keep."
+                        ),
+                    ),
+                }
             }
             RemoteResult::Uploaded {
                 host,

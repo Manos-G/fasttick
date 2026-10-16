@@ -33,6 +33,7 @@ impl FastTickApp {
                     })
                 })
             }),
+            Command::DebugRobot => self.active_remote_doc().is_some(),
             Command::GoToTree => active.is_some() && self.command_search.is_none(),
             Command::SaveAs => active.is_some_and(|v| {
                 self.workspace
@@ -157,6 +158,17 @@ impl FastTickApp {
             Command::ReloadRemote => {
                 if let Some(doc) = self.active_remote_doc() {
                     self.reload_remote_doc(ctx, doc);
+                }
+            }
+            Command::DebugRobot => {
+                if let Some(url) = self.active_remote_url() {
+                    // An alias of the ssh configuration is not a network
+                    // name: ask ssh for the real name.
+                    let config = self.remote.quiet_ssh_config(ctx);
+                    let host = crate::remote::ssh::resolve_hostname(&config, &url.host)
+                        .unwrap_or(url.host.host);
+                    let port = self.settings.live_port;
+                    self.connect(ctx, host, port);
                 }
             }
             Command::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),

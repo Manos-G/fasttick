@@ -5,8 +5,9 @@
 //! The jobs run on worker threads ([`crate::jobs::Jobs::run_remote`]) and
 //! return a [`RemoteResult`]; the app applies the result on the GUI thread.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use egui::{Key, RichText};
 use serde::{Deserialize, Serialize};
@@ -73,7 +74,20 @@ pub struct RemoteState {
     config_file: Option<PathBuf>,
     /// The question program instead of this program.
     askpass_program: Option<PathBuf>,
+    /// The number of check jobs that run.
+    pub checking: usize,
+    /// When FastTick last checked a document (its local main file) for
+    /// changes on the robot.
+    checked: HashMap<PathBuf, Instant>,
+    /// The robot checksums that a notice told the user about.
+    notified: HashMap<PathBuf, String>,
+    was_focused: bool,
+    last_active: Option<PathBuf>,
 }
+
+/// The shortest time between two checks of a document for changes on the
+/// robot.
+pub const CHECK_INTERVAL: Duration = Duration::from_secs(10);
 
 impl RemoteState {
     /// The state with the cache in `root` (its index is loaded).
@@ -91,7 +105,77 @@ impl RemoteState {
             uploading: 0,
             config_file: None,
             askpass_program: None,
+            checking: 0,
+            checked: HashMap::new(),
+            notified: HashMap::new(),
+            was_focused: true,
+            last_active: None,
         }
+    }
+
+    /// Like [`RemoteState::ssh_config`], but `ssh` never asks: a check in
+    /// the background fails instead of a password question. A shared
+    /// connection that is open still serves it.
+    pub fn quiet_ssh_config(&mut self, ctx: &egui::Context) -> SshConfig {
+        let mut config = self.ssh_config(ctx);
+        config.askpass = None;
+        config
+    }
+
+    /// True if FastTick must check the active remote document (its local
+    /// main file is `active`) now: the window got the focus again, or the
+    /// user went to the document from another tab.
+    pub fn check_trigger(&mut self, focused: bool, active: Option<&Path>) -> bool {
+        let gained = focused && !self.was_focused;
+        self.was_focused = focused;
+        let switched = active != self.last_active.as_deref();
+        self.last_active = active.map(Path::to_path_buf);
+        (gained || switched) && active.is_some()
+    }
+
+    /// Forgets the times of the checks, so the next check runs at once
+    /// (for tests).
+    pub fn forget_checks(&mut self) {
+        self.checked.clear();
+    }
+
+    /// Starts a check of a document if the last check of it is older than
+    /// [`CHECK_INTERVAL`]. Returns false if it is too soon.
+    pub fn begin_check(&mut self, main: &Path) -> bool {
+        let now = Instant::now();
+        if self
+            .checked
+            .get(main)
+            .is_some_and(|t| now.duration_since(*t) < CHECK_INTERVAL)
+        {
+            return false;
+        }
+        self.checked.insert(main.to_path_buf(), now);
+        true
+    }
+
+    /// The copies that changed on the robot and that no notice told the
+    /// user about yet. A file counts as changed if its robot checksum is
+    /// different from the checksum at the start of the check and from the
+    /// one that FastTick knows now (an upload during the check changes
+    /// it).
+    pub fn new_changes(&mut self, checked: Vec<CheckedFile>) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        for file in checked {
+            let Some(entry) = self.index.files.get(&file.local) else {
+                continue;
+            };
+            if file.current == file.base || file.current == entry.base {
+                self.notified.remove(&file.local);
+                continue;
+            }
+            if self.notified.get(&file.local) == Some(&file.current) {
+                continue;
+            }
+            self.notified.insert(file.local.clone(), file.current);
+            out.push(file.local);
+        }
+        out
     }
 
     /// Uses another cache folder, `ssh` configuration file and question
@@ -273,6 +357,15 @@ pub enum RemoteResult {
         /// True if the error is a failed connection or login.
         connect_error: bool,
     },
+    /// The files of a document were compared with the robot.
+    Checked {
+        /// The computer.
+        host: RemoteHost,
+        /// The local main file of the document.
+        main: PathBuf,
+        /// The files, or an error message (for example the robot is off).
+        result: Result<Vec<CheckedFile>, String>,
+    },
     /// Local copies were uploaded.
     Uploaded {
         /// The computer.
@@ -406,6 +499,45 @@ fn open_files(
         }
     }
     Ok(opened)
+}
+
+/// A local copy and the checksum of its file on the robot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedFile {
+    /// The local copy.
+    pub local: PathBuf,
+    /// The checksum that FastTick knew at the start of the check.
+    pub base: String,
+    /// The checksum on the robot ([`NO_FILE`] if the file is gone).
+    pub current: String,
+}
+
+/// A file to check: the local copy, the remote path and the checksum that
+/// FastTick knows.
+pub type CheckItem = (PathBuf, String, String);
+
+/// Compares local copies with their files on one computer (a job).
+pub fn check_job(
+    config: SshConfig,
+    host: RemoteHost,
+    main: PathBuf,
+    items: Vec<CheckItem>,
+) -> RemoteResult {
+    let paths: Vec<String> = items.iter().map(|(_, path, _)| path.clone()).collect();
+    let result = ops::checksums(&config, &host, &paths)
+        .map(|sums| {
+            items
+                .into_iter()
+                .zip(sums)
+                .map(|((local, _, base), current)| CheckedFile {
+                    local,
+                    base,
+                    current,
+                })
+                .collect()
+        })
+        .map_err(|err| err.to_string());
+    RemoteResult::Checked { host, main, result }
 }
 
 /// Uploads local copies to one computer, then runs the command after the
@@ -799,6 +931,76 @@ fn prompt_dialog(ctx: &egui::Context, dialog: &mut PromptDialog) -> Option<Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checks_start_on_focus_and_on_a_new_tab() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = RemoteState::new(dir.path().to_path_buf());
+        let a = Path::new("/cache/a.xml");
+        let b = Path::new("/cache/b.xml");
+        assert!(state.check_trigger(true, Some(a)), "a new tab");
+        assert!(!state.check_trigger(true, Some(a)), "nothing changed");
+        assert!(!state.check_trigger(false, Some(a)), "the focus went away");
+        assert!(state.check_trigger(true, Some(a)), "the focus came back");
+        assert!(state.check_trigger(true, Some(b)), "another tab");
+        assert!(!state.check_trigger(true, None), "no remote tab");
+        assert!(!state.check_trigger(false, None));
+        assert!(
+            !state.check_trigger(true, None),
+            "focus without a remote tab"
+        );
+
+        assert!(state.begin_check(a));
+        assert!(!state.begin_check(a), "too soon");
+        assert!(state.begin_check(b));
+        state.forget_checks();
+        assert!(state.begin_check(a));
+    }
+
+    #[test]
+    fn a_change_on_the_robot_gives_one_notice() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = RemoteState::new(dir.path().to_path_buf());
+        let local = PathBuf::from("/cache/main.xml");
+        state.index.files.insert(
+            local.clone(),
+            RemoteFile {
+                url: RemoteUrl::parse("ssh://robot/main.xml").unwrap(),
+                base: "1 10".to_owned(),
+                pending: false,
+            },
+        );
+        let checked = |current: &str, base: &str| {
+            vec![CheckedFile {
+                local: local.clone(),
+                base: base.to_owned(),
+                current: current.to_owned(),
+            }]
+        };
+        assert!(state.new_changes(checked("1 10", "1 10")).is_empty());
+        assert_eq!(
+            state.new_changes(checked("2 11", "1 10")),
+            std::slice::from_ref(&local)
+        );
+        assert!(
+            state.new_changes(checked("2 11", "1 10")).is_empty(),
+            "told"
+        );
+        assert_eq!(
+            state.new_changes(checked("3 12", "1 10")),
+            std::slice::from_ref(&local)
+        );
+        // An upload during the check: the robot has the new base.
+        state.index.files.get_mut(&local).unwrap().base = "4 13".to_owned();
+        assert!(state.new_changes(checked("4 13", "3 12")).is_empty());
+        // A file that FastTick does not know.
+        let other = CheckedFile {
+            local: PathBuf::from("/cache/other.xml"),
+            base: "1".to_owned(),
+            current: "2".to_owned(),
+        };
+        assert!(state.new_changes(vec![other]).is_empty());
+    }
 
     #[test]
     fn long_paths_keep_their_end() {

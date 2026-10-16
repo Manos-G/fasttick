@@ -102,8 +102,7 @@ fn list_fetch_upload_and_conflicts() {
         let link_path = link.to_str().unwrap().to_owned();
         let listing = ops::list_dir(&config, &host, &link_path).unwrap();
         assert_eq!(listing.dir, link_path);
-        let collected =
-            ops::collect(&config, &host, &posix_join(&link_path, "main.xml")).unwrap();
+        let collected = ops::collect(&config, &host, &posix_join(&link_path, "main.xml")).unwrap();
         let paths: Vec<&str> = collected.iter().map(|f| f.path.as_str()).collect();
         assert!(
             paths.contains(&posix_join(&link_path, "other.xml").as_str()),

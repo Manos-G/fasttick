@@ -316,6 +316,8 @@ mod tests {
         ));
     }
 
+    // The paths are Unix paths (on Windows, they get a drive letter).
+    #[cfg(unix)]
     #[test]
     fn recent_projects() {
         let mut recent = RecentProjects::new();

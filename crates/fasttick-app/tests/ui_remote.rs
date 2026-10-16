@@ -274,6 +274,59 @@ fn open_edit_save_and_conflict_on_a_robot() {
     assert!(harness.state().remote().index.pending().is_empty());
     assert_eq!(read(&main), robot_version);
 
+    // Somebody changes the file on the robot while FastTick is in the
+    // background. When the window gets the focus again, a notice tells it.
+    wait_for(&mut harness, "the checks after the reload", |app| {
+        app.remote().checking == 0
+    });
+    let changed_again = robot_version.replace("changed_on_robot", "changed_again");
+    std::fs::write(&main, &changed_again).unwrap();
+    let notice = "main.xml changed on fasttick-test after FastTick copied it.";
+    let refocus = |harness: &mut Harness<'static, FastTickApp>| {
+        harness.state_mut().remote_mut().forget_checks();
+        harness.input_mut().focused = false;
+        harness.run_steps(2);
+        harness.input_mut().focused = true;
+        harness.run_steps(2);
+    };
+    refocus(&mut harness);
+    wait_for(&mut harness, "the change notice", |app| {
+        app.notices().iter().any(|n| n.text == notice)
+    });
+    // The same change gives no second notice.
+    refocus(&mut harness);
+    wait_for(&mut harness, "the second check", |app| {
+        app.remote().checking == 0
+    });
+    let count = |app: &FastTickApp| app.notices().iter().filter(|n| n.text == notice).count();
+    assert_eq!(count(harness.state()), 1);
+    // The button of the notice copies the file again.
+    let _ = harness.try_run();
+    harness
+        .get_by_role_and_label(Role::Button, "Reload from robot")
+        .click();
+    harness.run_steps(3);
+    wait_for(&mut harness, "the document after the reload", |app| {
+        app.workspace().active().is_some_and(|view| {
+            view.canvas
+                .tree()
+                .nodes()
+                .iter()
+                .any(|n| n.label == "changed_again")
+        })
+    });
+
+    // Debug this robot: live mode connects to the robot (the address that
+    // the ssh configuration gives for the alias).
+    let ctx = harness.ctx.clone();
+    assert!(harness.state().is_enabled(Command::DebugRobot));
+    harness.state_mut().run_command(&ctx, Command::DebugRobot);
+    harness.run_steps(3);
+    assert_eq!(harness.state().mode(), Mode::Live);
+    assert_eq!(harness.state().settings().live_host, "127.0.0.1");
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_command(&ctx, Command::Disconnect);
+
     let control = SshConfig {
         program: PathBuf::from("ssh"),
         config_file: Some(server.client_config()),

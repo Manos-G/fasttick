@@ -1,0 +1,3 @@
+# Text files have LF line ends in every checkout, also on Windows: some
+# tests compare files byte for byte, and BT.CPP writes LF.
+* text=auto eol=lf

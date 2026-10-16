@@ -145,6 +145,7 @@ pub(crate) fn relative_path(base: &Path, target: &Path) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn normalize_paths() {
         assert_eq!(
@@ -153,6 +154,21 @@ mod tests {
         );
         assert_eq!(normalize(Path::new("/../a")), PathBuf::from("/a"));
         assert!(normalize(Path::new("x/y")).is_absolute());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalize_paths() {
+        assert_eq!(
+            normalize(Path::new(r"C:\a\b\..\c\.\d")),
+            PathBuf::from(r"C:\a\c\d")
+        );
+        assert_eq!(
+            normalize(Path::new("C:/a/b/../c")),
+            PathBuf::from(r"C:\a\c")
+        );
+        assert_eq!(normalize(Path::new(r"C:\..\a")), PathBuf::from(r"C:\a"));
+        assert!(normalize(Path::new(r"x\y")).is_absolute());
     }
 
     #[cfg(unix)]

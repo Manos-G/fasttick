@@ -36,6 +36,7 @@ impl FastTickApp {
                 AppAction::ClearRecent => self.settings.recent.clear(),
                 AppAction::Edit(view, op) => self.run_edit(ctx, view, op),
                 AppAction::AddMissingFiles(doc) => self.add_missing_files(ctx, doc),
+                AppAction::ReloadRemote(doc) => self.reload_remote_doc(ctx, doc),
                 AppAction::FindKey(key) => {
                     dock::show_panel(&mut self.docks[self.mode.index()], Tab::Search);
                     panels::search::find_key(ctx, &key);

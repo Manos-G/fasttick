@@ -415,6 +415,18 @@ shows its output in a notice.
 **File** > **Reload from robot** copies the files of the active tab again
 (for example after a change on the robot).
 
+FastTick also looks for changes on the robot. When the FastTick window
+comes back to the front, or when you go to the tab of a file of a robot,
+FastTick compares the files of the tab with the files on the robot (at
+most one time in 10 seconds). It copies nothing. If a file changed on the
+robot, a notice tells you, for example "main.xml changed on robot.local
+after FastTick copied it." Click **Reload from robot** in the notice to
+open the new version. If you have changes that are not on the robot, the
+notice has no button: when you upload your changes, FastTick asks which
+version to keep (see above). This check never asks for a password: if
+the robot is off, or if it needs a password that FastTick does not know,
+FastTick shows nothing.
+
 If the robot asks for a password, or for the passphrase of your key,
 FastTick shows a dialog. Select **Remember until FastTick closes** to type
 it one time. FastTick keeps it in memory only. The first time that you
@@ -425,8 +437,12 @@ in a terminal: `ssh-copy-id pi@robot.local`.
 You can also open a file of a robot from the command line or from the
 recent files: `fasttick ssh://pi@robot.local/home/pi/trees/main.xml`.
 
-To debug the running tree of the robot, use live mode (see 4). After you
-open a file from a robot, the live bar uses the name of the robot.
+To debug the running tree of the robot, select **File** > **Debug this
+robot** (also in the **Live** menu) while the tab of a file of the robot
+is active. FastTick goes to live mode and connects to the robot, on the
+port of the live bar (see 4.1). If the address is a name from your
+`~/.ssh/config` file (for example `Host robot` with `HostName
+192.168.1.20`), FastTick uses the `HostName`.
 
 ## 4. Live mode
 
