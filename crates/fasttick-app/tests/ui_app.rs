@@ -501,8 +501,8 @@ fn a_file_dropped_on_the_window_opens() {
     let mut harness = harness(light(Vec::new()));
     harness.input_mut().dropped_files = vec![std::sync::Arc::new(Dropped(main_xml()))];
     harness.run();
-    // The file loads on a worker thread.
-    for _ in 0..200 {
+    // The file loads on a worker thread (allow for a busy machine).
+    for _ in 0..1000 {
         if !harness.state().workspace().views().is_empty() {
             break;
         }

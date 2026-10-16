@@ -115,6 +115,12 @@ pub enum Command {
     ResetLayout,
     /// Write the shown tree as an SVG image.
     ExportSvg,
+    /// Open a file of another computer (a robot) over SSH.
+    OpenRemote,
+    /// Upload the changes that are not on the robot yet.
+    UploadRemote,
+    /// Copy the active file from the robot again.
+    ReloadRemote,
     /// Find a command, a tree, a recent file or a theme by its name.
     SearchCommands,
     /// Find a tree of the active document by its name.
@@ -127,12 +133,15 @@ pub enum Command {
 
 impl Command {
     /// All commands, in help-dialog order.
-    pub const ALL: [Command; 56] = [
+    pub const ALL: [Command; 59] = [
         Command::NewProject,
         Command::OpenFile,
         Command::OpenLog,
+        Command::OpenRemote,
         Command::Save,
         Command::SaveAs,
+        Command::UploadRemote,
+        Command::ReloadRemote,
         Command::ExportSvg,
         Command::Quit,
         Command::Undo,
@@ -241,6 +250,9 @@ impl Command {
             Command::CloseTab => "Close tab",
             Command::ResetLayout => "Reset panel layout",
             Command::ExportSvg => "Export tree as SVG\u{2026}",
+            Command::OpenRemote => "Open from robot\u{2026}",
+            Command::UploadRemote => "Upload to robot",
+            Command::ReloadRemote => "Reload from robot",
             Command::SearchCommands => "Search commands\u{2026}",
             Command::GoToTree => "Go to tree\u{2026}",
             Command::ShowShortcuts => "Keyboard shortcuts",
@@ -257,6 +269,9 @@ impl Command {
             | Command::Save
             | Command::SaveAs
             | Command::ExportSvg
+            | Command::OpenRemote
+            | Command::UploadRemote
+            | Command::ReloadRemote
             | Command::Quit => "File",
             Command::Undo
             | Command::Redo

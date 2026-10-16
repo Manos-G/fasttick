@@ -11,7 +11,8 @@ const USAGE: &str = "Usage: fasttick [--theme THEME] [--mode edit|live|replay]
                 [--connect HOST[:PORT]] [FILE...]
 
 Opens tree XML files (.xml), projects (.ftproj) and logs (.btlog, or SQLite
-.db3 and .btdb).
+.db3 and .btdb). A file of another computer opens over SSH:
+ssh://user@host/path/to/main.xml
 
 Options:
   --theme THEME          Use this theme for this session: light, dark, system,

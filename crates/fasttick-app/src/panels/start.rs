@@ -26,6 +26,12 @@ pub const WHATS_NEW: &[(&str, &str)] = &[
          the types that you used last come first.",
     ),
     (
+        "Open from robot",
+        "File > Open from robot opens tree files, projects and logs of another \
+         computer over SSH. A save uploads the file, and FastTick warns if the file \
+         changed on the robot.",
+    ),
+    (
         "Search commands",
         "Push Ctrl+Shift+P to find a command, a tree, a recent file or a theme by \
          its name. Ctrl+P goes to a tree of the document.",
@@ -211,6 +217,8 @@ fn edit_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     );
     ui.add_space(4.0);
     action_button(ui, cx, Command::NewProject, "New project");
+    ui.add_space(4.0);
+    action_button(ui, cx, Command::OpenRemote, "Open from robot (SSH)\u{2026}");
 }
 
 fn replay_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
@@ -220,6 +228,8 @@ fn replay_actions(ui: &mut Ui, cx: &mut PanelContext<'_>) {
     );
     ui.add_space(8.0);
     action_button(ui, cx, Command::OpenLog, "Open log\u{2026}");
+    ui.add_space(4.0);
+    action_button(ui, cx, Command::OpenRemote, "Open from robot (SSH)\u{2026}");
     for loading in cx.loading {
         ui.add_space(10.0);
         let name = loading
@@ -329,7 +339,8 @@ fn recent(ui: &mut Ui, cx: &mut PanelContext<'_>) {
             .parent()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
-        let exists = entry.path.exists();
+        // A remote file (ssh://) is not checked here.
+        let exists = crate::remote::is_remote_url(&entry.path) || entry.path.exists();
         ui.horizontal(|ui| {
             let kind = match entry.kind {
                 RecentKind::Tree => "tree",

@@ -444,6 +444,36 @@ impl EditorDoc {
             || (self.project.path().is_some() && self.project.is_project_dirty())
     }
 
+    /// The files that [`EditorDoc::save`] writes: the XML files with
+    /// changes, and the project file if it has changes.
+    pub fn unsaved_paths(&self) -> Vec<PathBuf> {
+        let mut paths: Vec<PathBuf> = self
+            .project
+            .dirty_files()
+            .into_iter()
+            .filter_map(|id| self.project.file(id)?.path().map(Path::to_path_buf))
+            .collect();
+        if self.project.is_project_dirty()
+            && let Some(path) = self.project.path()
+        {
+            paths.push(path.to_path_buf());
+        }
+        paths
+    }
+
+    /// The paths of all files of the project, and of the project file.
+    pub fn all_paths(&self) -> Vec<PathBuf> {
+        let mut paths: Vec<PathBuf> = self
+            .project
+            .files()
+            .filter_map(|(_, _, file)| file.path().map(Path::to_path_buf))
+            .collect();
+        if let Some(path) = self.project.path() {
+            paths.push(path.to_path_buf());
+        }
+        paths
+    }
+
     /// Saves all changed XML files, and the project file if the project
     /// has one. See [`SaveOutcome`].
     pub fn save(&mut self) -> Result<SaveOutcome, String> {

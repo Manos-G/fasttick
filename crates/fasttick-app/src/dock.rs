@@ -160,7 +160,20 @@ pub fn default_dock(mode: Mode) -> DockState<Tab> {
 
 /// The dock without the document tabs, for saving.
 pub fn without_documents(dock: &DockState<Tab>) -> DockState<Tab> {
-    dock.filter_map_tabs(|tab| (!matches!(tab, Tab::Document(_))).then_some(*tab))
+    let mut dock = dock.filter_map_tabs(|tab| (!matches!(tab, Tab::Document(_))).then_some(*tab));
+    repair_active_tabs(&mut dock);
+    dock
+}
+
+/// Makes the active tab of each leaf a tab that the leaf has. A filter of
+/// the tabs (see [`without_documents`]) keeps the old index; an index past
+/// the end shows an empty panel. Such a leaf shows its first tab.
+pub fn repair_active_tabs(dock: &mut DockState<Tab>) {
+    for (_, leaf) in dock.iter_leaves_mut() {
+        if leaf.active.0 >= leaf.tabs.len() {
+            leaf.active = egui_dock::TabIndex(0);
+        }
+    }
 }
 
 /// True if the dock contains a tab.
@@ -301,6 +314,24 @@ mod tests {
         assert!(contains(&default_dock(Mode::Replay), Tab::Statistics));
         assert!(contains(&default_dock(Mode::Replay), Tab::Timeline));
         assert!(!contains(&default_dock(Mode::Live), Tab::Timeline));
+    }
+
+    #[test]
+    fn the_saved_dock_shows_the_start_tab() {
+        // A document tab was active when FastTick saved its layout.
+        let mut dock = default_dock(Mode::Edit);
+        add_document(&mut dock, Tab::Document(ViewId(1)));
+        add_document(&mut dock, Tab::Document(ViewId(2)));
+        let saved = without_documents(&dock);
+        let leaf = saved
+            .iter_leaves()
+            .map(|(_, leaf)| leaf)
+            .find(|leaf| leaf.tabs.contains(&Tab::Start))
+            .unwrap();
+        assert_eq!(leaf.tabs, [Tab::Start]);
+        assert_eq!(leaf.active.0, 0);
+        // All leaves point to a tab that they have.
+        assert!(saved.iter_leaves().all(|(_, l)| l.active.0 < l.tabs.len()));
     }
 
     #[test]

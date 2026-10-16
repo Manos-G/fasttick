@@ -79,6 +79,8 @@ pub struct Settings {
     /// The node types that the user added last, newest first (the add
     /// popup shows them first).
     pub recent_types: Vec<String>,
+    /// The computers of "Open from robot", newest first.
+    pub remote_hosts: Vec<crate::remote_ui::RemoteHostSettings>,
 }
 
 impl Default for Settings {
@@ -94,6 +96,7 @@ impl Default for Settings {
             auto_focus_on_breakpoint: true,
             show_minimap: true,
             recent_types: Vec::new(),
+            remote_hosts: Vec::new(),
         }
     }
 }
@@ -133,6 +136,28 @@ impl Settings {
         }
         self.recent.truncate(MAX_RECENT);
         self.recent_types.truncate(MAX_RECENT_TYPES);
+        self.remote_hosts
+            .truncate(crate::remote_ui::MAX_RECENT_HOSTS);
+    }
+
+    /// Puts a computer at the top of the recent computers (one entry for
+    /// each address).
+    pub fn add_remote_host(&mut self, host: crate::remote_ui::RemoteHostSettings) {
+        self.remote_hosts.retain(|h| h.address != host.address);
+        self.remote_hosts.insert(0, host);
+        self.remote_hosts
+            .truncate(crate::remote_ui::MAX_RECENT_HOSTS);
+    }
+
+    /// The settings of a computer, if the user used it before.
+    pub fn remote_host(
+        &self,
+        host: &crate::remote::RemoteHost,
+    ) -> Option<&crate::remote_ui::RemoteHostSettings> {
+        self.remote_hosts.iter().find(|h| {
+            crate::remote::RemoteHost::parse(&h.address)
+                .is_ok_and(|parsed| parsed == *host || parsed.to_string() == host.to_string())
+        })
     }
 
     /// Puts a node type at the top of the recent types.

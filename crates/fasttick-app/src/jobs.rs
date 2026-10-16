@@ -262,6 +262,8 @@ pub enum JobResult {
         /// Ok, or an error message.
         result: Result<(), String>,
     },
+    /// A remote operation finished (see [`crate::remote_ui`]).
+    Remote(Box<crate::remote_ui::RemoteResult>),
 }
 
 /// Runs jobs on worker threads.
@@ -328,6 +330,16 @@ impl Jobs {
         if spawned.is_ok() {
             self.running += 1;
         }
+    }
+
+    /// Runs a remote operation on a worker thread.
+    pub fn run_remote(
+        &mut self,
+        ctx: &egui::Context,
+        name: &str,
+        job: impl FnOnce() -> crate::remote_ui::RemoteResult + Send + 'static,
+    ) {
+        self.spawn(ctx, name, move || JobResult::Remote(Box::new(job())));
     }
 
     /// Opens a file dialog on a worker thread. Does nothing while another
